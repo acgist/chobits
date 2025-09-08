@@ -1,0 +1,35 @@
+name: build
+on:
+  push:
+    branches: [ master ]
+jobs:
+  chobits:
+    name: Build chobits
+    # https://docs.github.com/zh/actions/using-github-hosted-runners/about-github-hosted-runners/about-github-hosted-runners
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+      - name: Checkout deps
+        run: |
+          git submodule update --init --recursive
+          cd ./deps
+          ################################ opencv
+          sudo  apt install libopencv-dev -y
+          apt-cache madison libopencv-dev
+          ################################ libtorch
+          # https://download.pytorch.org/libtorch/cpu/
+          # https://download.pytorch.org/libtorch/cu126/
+          wget  https://download.pytorch.org/libtorch/cpu/libtorch-cxx11-abi-shared-with-deps-2.7.0%2Bcpu.zip > /dev/null 2>&1
+          unzip libtorch-cxx11-abi-shared-with-deps-2.7.0+cpu.zip > /dev/null 2>&1
+      - name: Deploy chobits
+        run: |
+          gcc -v
+          g++ -v
+          cmake -version
+          mkdir chobits-cpp/build
+          cd chobits-cpp/build
+          cmake .. -DCMAKE_BUILD_TYPE=Release
+          make
+          sudo make install
+          make clean
