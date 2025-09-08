@@ -1,3 +1,6 @@
 .vscode
 
+cpp/deps
+cpp/build
+
 __pycache__
