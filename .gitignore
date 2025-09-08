@@ -1,6 +1,6 @@
 .vscode
 
-cpp/deps
-cpp/build
-
 __pycache__
+
+chobits-cpp/deps
+chobits-cpp/build

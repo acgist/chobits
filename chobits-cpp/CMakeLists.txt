@@ -6,9 +6,9 @@ if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE Debug)
 endif()
 
-option(BUILD_SHARED_LIBS "是否编译为共享库" OFF)
-
 set(HEADER_DIR include/)
+
+option(BUILD_SHARED_LIBS "是否编译为共享库" OFF)
 
 set_property(GLOBAL PROPERTY USE_FOLDERS ON)
 
@@ -16,6 +16,7 @@ if(CMAKE_HOST_WIN32)
     if(MSVC)
         set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /std:c++20")
         set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} /wd4804 /wd4819")
+        
         add_compile_options("/utf-8")
         add_compile_options("/Zc:__cplusplus")
     else()
@@ -27,6 +28,7 @@ elseif(CMAKE_HOST_UNIX)
     if(BUILD_SHARED_LIBS)
         set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fPIC")
     endif()
+
     set_property(GLOBAL PROPERTY RULE_LAUNCH_LINK    "${CMAKE_COMMAND} -E time")
     set_property(GLOBAL PROPERTY RULE_LAUNCH_COMPILE "${CMAKE_COMMAND} -E time")
 else()
@@ -47,14 +49,6 @@ if(CMAKE_HOST_WIN32)
         ${CMAKE_PREFIX_PATH}
         deps/opencv
     )
-
-    if(CMAKE_BUILD_TYPE STREQUAL "Debug")
-        file(GLOB OPENCV_DLLS "deps/opencv/debug/bin/*.dll")
-    else()
-        file(GLOB OPENCV_DLLS "deps/opencv/bin/*.dll")
-    endif()
-
-    file(GLOB TORCH_DLLS "deps/libtorch/lib/*.dll")
 endif()
 
 find_package(CUDA)
@@ -108,9 +102,15 @@ install(
 install(DIRECTORY ${HEADER_DIR} DESTINATION ${CMAKE_INSTALL_PREFIX}/include/)
 
 if(CMAKE_HOST_WIN32)
+    file(GLOB TORCH_DLLS "deps/libtorch/lib/*.dll")
+
     if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+        file(GLOB OPENCV_DLLS "deps/opencv/debug/bin/*.dll")
+        
         set(CMAKE_EXE_LINKER_FLAGS "/NODEFAULTLIB:MSVCRT")
     else()
+        file(GLOB OPENCV_DLLS "deps/opencv/bin/*.dll")
+
         set(CMAKE_EXE_LINKER_FLAGS "/NODEFAULTLIB:MSVCRTD /entry:mainCRTStartup")
     endif()
 
