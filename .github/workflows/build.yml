@@ -5,7 +5,6 @@ on:
 jobs:
   chobits:
     name: Build chobits
-    # https://docs.github.com/zh/actions/using-github-hosted-runners/about-github-hosted-runners/about-github-hosted-runners
     runs-on: ubuntu-22.04
     steps:
       - name: Checkout repository
@@ -14,9 +13,9 @@ jobs:
         run: |
           git submodule update --init --recursive
           cd ./deps
-          ################################ opencv
-          sudo  apt install libopencv-dev -y
-          apt-cache madison libopencv-dev
+          ################################ ffmpeg
+          sudo  apt install ffmpeg -y
+          apt-cache madison ffmpeg
           ################################ libtorch
           # https://download.pytorch.org/libtorch/cpu/
           # https://download.pytorch.org/libtorch/cu126/
@@ -27,8 +26,8 @@ jobs:
           gcc -v
           g++ -v
           cmake -version
-          mkdir chobits-cpp/build
-          cd chobits-cpp/build
+          mkdir build
+          cd build
           cmake .. -DCMAKE_BUILD_TYPE=Release
           make
           sudo make install

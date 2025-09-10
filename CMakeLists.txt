@@ -6,8 +6,7 @@ if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE Debug)
 endif()
 
-set(HEADER_DIR include/)
-
+option(BUILD_TEST        "是否编译测试代码" ON)
 option(BUILD_SHARED_LIBS "是否编译为共享库" OFF)
 
 set_property(GLOBAL PROPERTY USE_FOLDERS ON)
@@ -24,7 +23,7 @@ if(CMAKE_HOST_WIN32)
     endif()
 elseif(CMAKE_HOST_UNIX)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++20 -Wall -Wextra")
-    set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -Wno-unused-variable -Wno-unused-parameter -O0 -g")
+    set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -Wno-unused-variable -Wno-unused-parameter -Wno-missing-field-initializers -O0 -g")
     if(BUILD_SHARED_LIBS)
         set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fPIC")
     endif()
@@ -47,8 +46,11 @@ if(CMAKE_HOST_WIN32)
     set(
         CMAKE_PREFIX_PATH
         ${CMAKE_PREFIX_PATH}
-        deps/opencv
+        deps/ffmpeg
     )
+    
+    find_package(SDL2   CONFIG REQUIRED)
+    find_package(FFMPEG CONFIG REQUIRED)
 endif()
 
 find_package(CUDA)
@@ -59,38 +61,56 @@ else()
     message(STATUS "使用CPU推理")
 endif()
 
-find_package(OpenCV CONFIG REQUIRED)
-find_package(Torch  CONFIG REQUIRED)
+find_package(Torch CONFIG REQUIRED)
 
 aux_source_directory(src/chobits/ CHOBITS_FILES)
+
+add_library(
+    chobits-core
+    ${CHOBITS_FILES}
+)
+
+target_include_directories(
+    chobits-core PUBLIC
+    include/
+    ${FFMPEG_INCLUDE_DIRS}
+)
+
+target_link_libraries(
+    chobits-core
+    ${TORCH_LIBRARIES}
+    ${FFMPEG_LIBRARIES}
+    $<TARGET_NAME_IF_EXISTS:SDL2::SDL2main>
+    $<IF:$<TARGET_EXISTS:SDL2::SDL2>,SDL2::SDL2,SDL2::SDL2-static>
+)
 
 if(CMAKE_HOST_WIN32)
     add_executable(
         ${PROJECT_NAME}
-        ${CHOBITS_FILES}
         src/main.cpp
         resources/win.rc
     )
+
     if(CMAKE_BUILD_TYPE STREQUAL "Debug")
-        target_link_options(${PROJECT_NAME} PRIVATE "/SUBSYSTEM:CONSOLE")
+        set(CMAKE_EXE_LINKER_FLAGS "/NODEFAULTLIB:MSVCRT")
+        
+        # target_link_options(${PROJECT_NAME} PRIVATE "/SUBSYSTEM:CONSOLE")
     else()
-        target_link_options(${PROJECT_NAME} PRIVATE "/SUBSYSTEM:CONSOLE")
+        set(CMAKE_EXE_LINKER_FLAGS "/NODEFAULTLIB:MSVCRTD /entry:mainCRTStartup")
+
+        # target_link_options(${PROJECT_NAME} PRIVATE "/SUBSYSTEM:WINDOWS")
     endif()
 else()
     add_executable(
         ${PROJECT_NAME}
-        ${CHOBITS_FILES}
         src/main.cpp
     )
 endif()
 
 target_link_libraries(
     ${PROJECT_NAME}
-    ${OpenCV_LIBS}
-    ${TORCH_LIBRARIES}
+    chobits-core
 )
-
-target_include_directories(${PROJECT_NAME} PUBLIC ${HEADER_DIR})
 
 install(
     TARGETS ${PROJECT_NAME} EXPORT ${PROJECT_NAME}-targets
@@ -99,27 +119,36 @@ install(
     RUNTIME DESTINATION ${CMAKE_INSTALL_PREFIX}/bin/
     PUBLIC_HEADER DESTINATION ${CMAKE_INSTALL_PREFIX}/include/
 )
-install(DIRECTORY ${HEADER_DIR} DESTINATION ${CMAKE_INSTALL_PREFIX}/include/)
+install(DIRECTORY include/ DESTINATION ${CMAKE_INSTALL_PREFIX}/include/)
 
 if(CMAKE_HOST_WIN32)
     file(GLOB TORCH_DLLS "deps/libtorch/lib/*.dll")
 
     if(CMAKE_BUILD_TYPE STREQUAL "Debug")
-        file(GLOB OPENCV_DLLS "deps/opencv/debug/bin/*.dll")
-        
-        set(CMAKE_EXE_LINKER_FLAGS "/NODEFAULTLIB:MSVCRT")
+        file(GLOB FFMPEG_DLLS "deps/ffmpeg/debug/bin/*.dll")
     else()
-        file(GLOB OPENCV_DLLS "deps/opencv/bin/*.dll")
-
-        set(CMAKE_EXE_LINKER_FLAGS "/NODEFAULTLIB:MSVCRTD /entry:mainCRTStartup")
+        file(GLOB FFMPEG_DLLS "deps/ffmpeg/bin/*.dll")
     endif()
-
+    
     install(FILES ${TORCH_DLLS}  DESTINATION ${CMAKE_INSTALL_PREFIX}/bin/)
-    install(FILES ${OPENCV_DLLS} DESTINATION ${CMAKE_INSTALL_PREFIX}/bin/)
+    install(FILES ${FFMPEG_DLLS} DESTINATION ${CMAKE_INSTALL_PREFIX}/bin/)
     
     add_custom_command(
         TARGET ${PROJECT_NAME} POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different ${TORCH_DLLS}  $<TARGET_FILE_DIR:${PROJECT_NAME}>
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different ${OPENCV_DLLS} $<TARGET_FILE_DIR:${PROJECT_NAME}>
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different ${FFMPEG_DLLS} $<TARGET_FILE_DIR:${PROJECT_NAME}>
     )
+endif()
+
+if(BUILD_TEST)
+    add_executable(
+        test_media
+        test/test_media.cpp
+    )
+    target_link_libraries(
+        test_media
+        chobits-core
+    )
+    add_test(NAME test_media COMMAND test_media)
+    set_target_properties(test_media PROPERTIES FOLDER "test")
 endif()
