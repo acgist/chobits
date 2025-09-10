@@ -49,8 +49,17 @@ if(CMAKE_HOST_WIN32)
         deps/ffmpeg
     )
     
-    find_package(SDL2   CONFIG REQUIRED)
     find_package(FFMPEG CONFIG REQUIRED)
+else()
+    set(
+        FFMPEG_LIBRARIES
+        avutil
+        avcodec
+        swscale
+        avdevice
+        avformat
+        swresample
+    )
 endif()
 
 find_package(CUDA)
@@ -61,6 +70,7 @@ else()
     message(STATUS "使用CPU推理")
 endif()
 
+find_package(SDL2  CONFIG REQUIRED)
 find_package(Torch CONFIG REQUIRED)
 
 aux_source_directory(src/chobits/ CHOBITS_FILES)
