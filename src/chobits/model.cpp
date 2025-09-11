@@ -58,10 +58,7 @@ bool chobits::model::Trainer::load(const std::string& path) {
     return true;
 }
 
-void chobits::model::Trainer::train(const std::string& path) {
-    if(!this->load(path)) {
-        return;
-    }
+void chobits::model::Trainer::train() {
     try {
         trainer.optimizer = std::make_shared<torch::optim::AdamW>(trainer.model->parameters(), 0.0001);
         auto scheduler = torch::optim::StepLR(*trainer.optimizer, 10, 0.9999);
@@ -81,8 +78,8 @@ void chobits::model::Trainer::train(const std::string& path) {
 
 void chobits::model::Trainer::train(const size_t epoch) {
     trainer.model->train();
-    double loss_val    = 0.0;
-    size_t batch_count = 0;
+    double loss_val   = 0.0;
+    size_t loss_count = 0;
     const auto a = std::chrono::system_clock::now();
     trainer.optimizer->zero_grad();
     for (int i = 0; i < 10; ++i) {
@@ -90,22 +87,19 @@ void chobits::model::Trainer::train(const size_t epoch) {
         torch::Tensor pred = trainer.model->forward(feature);
         torch::Tensor loss = torch::mse_loss(pred, label);
         loss.backward();
-        ++batch_count;
+        ++loss_count;
         loss_val += loss.template item<float>();
     }
     trainer.optimizer->step();
-    // torch::nn::utils::clip_grad_norm_(trainer.model->parameters(), 1.0);
+    torch::nn::utils::clip_grad_norm_(trainer.model->parameters(), 1.0);
     const auto z = std::chrono::system_clock::now();
     const auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(z - a).count();
-    std::printf("训练轮次：%ld 损失：%f 耗时：%ld\n", epoch, loss_val / batch_count, duration);
+    std::printf("训练轮次：%ld 损失：%f 耗时：%ld\n", epoch, loss_val / loss_count, duration);
 }
 
-void chobits::model::Trainer::eval(const std::string& path) {
-    if(!this->load(path)) {
-        return;
-    }
-    torch::NoGradGuard no_grad_guard;
+void chobits::model::Trainer::eval() {
     trainer.model->eval();
+    torch::NoGradGuard no_grad_guard;
     while(true) {
         auto [feature, label] = chobits::media::dataset();
         torch::Tensor pred = trainer.model->forward(feature);

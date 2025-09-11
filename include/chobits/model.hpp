@@ -27,10 +27,10 @@ public:
     // 加载模型
     bool load(const std::string& path = "./chobits.pt");
     // 训练模型
-    void train(const std::string& path = "./chobits.pt");
+    void train();
     void train(const size_t epoch);
     // 评估模型
-    void eval(const std::string& path = "./chobits.pt");
+    void eval();
     
 };
 
