@@ -208,7 +208,7 @@ bool chobits::media::open_file(const std::string& file) {
     avformat_close_input(&format_ctx);
     stop_all();
     player_thread.join();
-    std::printf("文件处理完成：%lld - %lld - %f - %f - %s\n", audio_frame_count, video_frame_count, audio_time, video_time, file.c_str());
+    std::printf("文件处理完成：%ld - %ld - %f - %f - %s\n", audio_frame_count, video_frame_count, audio_time, video_time, file.c_str());
     return true;
 }
 
@@ -353,7 +353,7 @@ bool chobits::media::open_hardware() {
     player_thread.join();
     avformat_close_input(&audio_format_ctx);
     avformat_close_input(&video_format_ctx);
-    std::printf("文件处理完成：%lld - %lld\n", audio_frame_count, video_frame_count);
+    std::printf("文件处理完成：%ld - %ld\n", audio_frame_count, video_frame_count);
     return true;
 }
 
@@ -406,6 +406,10 @@ bool chobits::media::play_video(const void* data, int len) {
         return true;
     }
     return false;
+}
+
+std::tuple<at::Tensor, at::Tensor> chobits::media::dataset() {
+    return {};
 }
 
 void chobits::media::stop_all() {

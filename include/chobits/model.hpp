@@ -15,8 +15,25 @@
 #ifndef CHOBITS_MODEL_HPP
 #define CHOBITS_MODEL_HPP
 
-namespace chobits {
+#include <string>
 
-} // END OF chobits
+namespace chobits::model {
+
+class Trainer {
+
+public:
+    // 保存模型
+    bool save(const std::string& path = "./chobits.pt");
+    // 加载模型
+    bool load(const std::string& path = "./chobits.pt");
+    // 训练模型
+    void train(const std::string& path = "./chobits.pt");
+    void train(const size_t epoch);
+    // 评估模型
+    void eval(const std::string& path = "./chobits.pt");
+    
+};
+
+} // END OF chobits::model
 
 #endif // CHOBITS_MODEL_HPP

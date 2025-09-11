@@ -15,7 +15,14 @@
 #ifndef CHOBITS_MEDIA_HPP
 #define CHOBITS_MEDIA_HPP
 
+#include <tuple>
 #include <string>
+
+namespace at {
+
+    class Tensor;
+
+};
 
 namespace chobits::media {
 
@@ -71,7 +78,7 @@ extern bool play_video(const void* data, int len);
  * 
  * @return 是否成功
  */
-extern bool dataset();
+extern std::tuple<at::Tensor, at::Tensor> dataset();
 
 /**
  * 关闭
