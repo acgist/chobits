@@ -46,6 +46,7 @@ if(CMAKE_HOST_WIN32)
     set(
         CMAKE_PREFIX_PATH
         ${CMAKE_PREFIX_PATH}
+        deps/sdl2
         deps/ffmpeg
     )
     
@@ -135,16 +136,20 @@ if(CMAKE_HOST_WIN32)
     file(GLOB TORCH_DLLS "deps/libtorch/lib/*.dll")
 
     if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+        file(GLOB SDL2_DLLS   "deps/sdl2/debug/bin/*.dll")
         file(GLOB FFMPEG_DLLS "deps/ffmpeg/debug/bin/*.dll")
     else()
+        file(GLOB SDL2_DLLS   "deps/sdl2/bin/*.dll")
         file(GLOB FFMPEG_DLLS "deps/ffmpeg/bin/*.dll")
     endif()
     
+    install(FILES ${SDL2_DLLS}   DESTINATION ${CMAKE_INSTALL_PREFIX}/bin/)
     install(FILES ${TORCH_DLLS}  DESTINATION ${CMAKE_INSTALL_PREFIX}/bin/)
     install(FILES ${FFMPEG_DLLS} DESTINATION ${CMAKE_INSTALL_PREFIX}/bin/)
     
     add_custom_command(
         TARGET ${PROJECT_NAME} POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different ${SDL2_DLLS}   $<TARGET_FILE_DIR:${PROJECT_NAME}>
         COMMAND ${CMAKE_COMMAND} -E copy_if_different ${TORCH_DLLS}  $<TARGET_FILE_DIR:${PROJECT_NAME}>
         COMMAND ${CMAKE_COMMAND} -E copy_if_different ${FFMPEG_DLLS} $<TARGET_FILE_DIR:${PROJECT_NAME}>
     )

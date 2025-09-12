@@ -23,9 +23,9 @@
 - 耳朵
 - 嘴巴
 
-## 动作（肌肉控制）
+## 动作
 
-学习人类肌肉动作（暂不实现）
+- 控制
 
 ## 训练
 
@@ -35,22 +35,58 @@
 
 ### 生活训练
 
-通过摄像头、麦克风、显示器和扬声器像人一样生活，通过现实沟通交流持续学习。
+通过摄像头、麦克风、扬声器像人一样生活，通过现实沟通交流持续学习。
 
 ## 依赖
 
 |名称|版本|官网|
 |:--|:--|:--|
+|SDL2|2.30.0|https://github.com/libsdl-org/SDL|
 |ffmpeg|6.1.1|https://github.com/FFmpeg/FFmpeg|
-|libtorch|2.7.0|https://github.com/pytorch/pytorch|
+|libtorch|2.8.0|https://github.com/pytorch/pytorch|
 
-* `vcpkg install ffmpeg ffmpeg[sdl2]`
+```
+# linux
+
+sudo  apt install ffmpeg -y
+sudo  apt install libsdl2-dev -y
+https://download.pytorch.org/libtorch/cpu/libtorch-shared-with-deps-2.8.0%2Bcpu.zip
+https://download.pytorch.org/libtorch/cu128/libtorch-shared-with-deps-2.8.0%2Bcu128.zip
+
+# windows
+
+vcpkg install sdl2
+vcpkg install ffmpeg
+https://download.pytorch.org/libtorch/cpu/libtorch-win-shared-with-deps-2.8.0%2Bcpu.zip
+https://download.pytorch.org/libtorch/cpu/libtorch-win-shared-with-deps-debug-2.8.0%2Bcpu.zip
+https://download.pytorch.org/libtorch/cu128/libtorch-win-shared-with-deps-2.8.0%2Bcu128.zip
+https://download.pytorch.org/libtorch/cu128/libtorch-win-shared-with-deps-debug-2.8.0%2Bcu128.zip
+```
 
 ## 编译
 
 ```
+# linux
+
 mkdir build
 cd build
-cmake ..
+cmake -DCMAKE_BUILD_TYPE=Debug|Release ..
 make -j
+# make install
+
+mkdir build
+cd build
+cmake -DCMAKE_BUILD_TYPE=Debug|Release ..
+cmake --build . -j
+cmake --build . --parallel 8
+# cmake --install .
+
+# windows
+
+mkdir build
+cd build
+cmake -DCMAKE_BUILD_TYPE=Debug|Release -T host=x64 -A x64 -G "Visual Studio 17 2022" ..
+cmake --config Debug|Release --build . -j
+cmake --config Debug|Release --build . --parallel 8
+# cmake --install .
 ```

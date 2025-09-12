@@ -62,7 +62,7 @@ void chobits::model::Trainer::train() {
     try {
         trainer.optimizer = std::make_shared<torch::optim::AdamW>(trainer.model->parameters(), 0.0001);
         auto scheduler = torch::optim::StepLR(*trainer.optimizer, 10, 0.9999);
-        for (size_t epoch = 1; epoch <= 1073741824LL; ++epoch) {
+        for (size_t epoch = 1; epoch <= 100'000'000LL; ++epoch) {
             this->train(epoch);
             scheduler.step();
             if(epoch % 100 == 0) {
