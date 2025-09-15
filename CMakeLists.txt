@@ -23,7 +23,7 @@ if(CMAKE_HOST_WIN32)
     endif()
 elseif(CMAKE_HOST_UNIX)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++20 -Wall -Wextra")
-    set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -Wno-unused-variable -Wno-unused-parameter -Wno-missing-field-initializers -O0 -g")
+    set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -O0 -g")
     if(BUILD_SHARED_LIBS)
         set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fPIC")
     endif()
@@ -34,13 +34,15 @@ else()
     message(FATAL_ERROR "不支持的系统：${CMAKE_HOST_SYSTEM_NAME}")
 endif()
 
-if(CMAKE_BUILD_TYPE STREQUAL "Debug")
-    message(STATUS "CXX_FLAGS: ${CMAKE_CXX_FLAGS} ${CMAKE_CXX_FLAGS_DEBUG}")
-else()
-    message(STATUS "CXX_FLAGS: ${CMAKE_CXX_FLAGS} ${CMAKE_CXX_FLAGS_RELEASE}")
-endif()
+message(STATUS "CXX_FLAGS: ${CMAKE_CXX_FLAGS}")
+message(STATUS "CXX_FLAGS_DEBUG: ${CMAKE_CXX_FLAGS_DEBUG}")
+message(STATUS "CXX_FLAGS_RELEASE: ${CMAKE_CXX_FLAGS_RELEASE}")
 
-set(CMAKE_PREFIX_PATH ${CMAKE_PREFIX_PATH} deps/libtorch)
+set(
+    CMAKE_PREFIX_PATH
+    ${CMAKE_PREFIX_PATH}
+    deps/libtorch
+)
 
 if(CMAKE_HOST_WIN32)
     set(
@@ -128,7 +130,6 @@ install(
     ARCHIVE DESTINATION ${CMAKE_INSTALL_PREFIX}/lib/
     LIBRARY DESTINATION ${CMAKE_INSTALL_PREFIX}/bin/
     RUNTIME DESTINATION ${CMAKE_INSTALL_PREFIX}/bin/
-    PUBLIC_HEADER DESTINATION ${CMAKE_INSTALL_PREFIX}/include/
 )
 install(DIRECTORY include/ DESTINATION ${CMAKE_INSTALL_PREFIX}/include/)
 

@@ -21,11 +21,11 @@
 
 ### 视频训练
 
-通过观看视频进行学习
+观看视频进行学习
 
 ### 生活训练
 
-通过现实互动持续学习
+现实互动持续学习
 
 ## 依赖
 
@@ -61,13 +61,13 @@ https://download.pytorch.org/libtorch/cu128/libtorch-win-shared-with-deps-debug-
 mkdir build
 cd build
 cmake -DCMAKE_BUILD_TYPE=Debug|Release ..
-make -j
+make -j 8
 # make install
 
 mkdir build
 cd build
 cmake -DCMAKE_BUILD_TYPE=Debug|Release ..
-cmake --build . -j
+cmake --build . -j 8
 cmake --build . --parallel 8
 # cmake --install .
 
@@ -76,7 +76,7 @@ cmake --build . --parallel 8
 mkdir build
 cd build
 cmake -DCMAKE_BUILD_TYPE=Debug|Release -T host=x64 -A x64 -G "Visual Studio 17 2022" ..
-cmake --config Debug|Release --build . -j
+cmake --config Debug|Release --build . -j 8
 cmake --config Debug|Release --build . --parallel 8
 # cmake --install .
 ```
