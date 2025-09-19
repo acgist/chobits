@@ -4,6 +4,7 @@
 #include <thread>
 #include <vector>
 #include <iostream>
+#include <condition_variable>
 
 #include "SDL2/SDL.h"
 #include "torch/torch.h"
@@ -20,10 +21,6 @@ extern "C" {
 
 }
 
-#ifndef MEDIA_PREVIEW
-#define MEDIA_PREVIEW
-#endif
-
 const static int           video_width      = 640;
 const static int           video_height     = 360;
 const static AVPixelFormat video_pix_format = AV_PIX_FMT_RGB24;
@@ -36,61 +33,56 @@ const static int             audio_bytes_per_sample = av_get_bytes_per_sample(au
 
 const static float NORMALIZATION = 32768.0F;
 
-struct PlayerState {
-    bool running = false;
-    SDL_AudioDeviceID audio_id;
-    SDL_Renderer* renderer = nullptr;
-    SDL_Texture * texture  = nullptr;
-    std::vector<uint8_t> audio_buffer;
-    std::vector<uint8_t> video_buffer;
+struct Dataset {
+    bool discard   = true;
+    int batch_size = 10;
+    int cache_size = 600;
+    int audio_size = 48000;
+    std::mutex lock;
+    std::condition_variable condition;
+    std::vector<torch::Tensor> audio;
+    std::vector<torch::Tensor> video;
 };
 
-static PlayerState player = {};
+struct PlayerState {
+    bool running    = false;
+    bool show_play  = false;
+    bool play_audio = false;
+    bool play_video = false;
+    SDL_AudioDeviceID audio_id = 0;
+    SDL_Window  * window   = nullptr;
+    SDL_Renderer* renderer = nullptr;
+    SDL_Texture * texture  = nullptr;
+    SDL_AudioSpec audio_spec = {
+        .freq     = audio_sample_rate,
+        .format   = AUDIO_S16,
+        .channels = 1,
+        .silence  = 0,
+        .samples  = 4800,
+        .callback = nullptr
+    };
+};
+
+static Dataset     dataset = {};
+static PlayerState player  = {};
+
+static void open_player();
+static void stop_player();
+static bool init_audio_player();
+static bool init_video_player();
 
 static SwrContext* init_audio_swr(AVCodecContext* ctx);
 static SwsContext* init_video_sws(int width, int height, AVPixelFormat format);
 static bool audio_to_tensor(SwrContext* swr, AVFrame* frame);
 static bool video_to_tensor(SwsContext* sws, AVFrame* frame);
 
-/**
- * 短时傅里叶变换
- * 
- * 201 = win_size / 2 + 1
- * 480 = 7 | 4800 = 61 | 48000 = 601
- * [1, 201, 61, 2[实部, 虚部]]
- * 
- * @param pcm_data PCM数据
- * @param pcm_size PCM长度
- * @param n_fft    傅里叶变换的大小
- * @param hop_size 相邻滑动窗口帧之间的距离
- * @param win_size 窗口帧和STFT滤波器的大小
- * 
- * @return 张量
- */
-static torch::Tensor pcm_stft(
-    short* pcm_data,
-    int pcm_size,
-    int n_fft    = 400,
-    int hop_size = 80,
-    int win_size = 400
-);
-
-/**
- * 短时傅里叶逆变换
- * 
- * @param tensor   张量
- * @param n_fft    傅里叶变换的大小
- * @param hop_size 相邻滑动窗口帧之间的距离
- * @param win_size 窗口帧和STFT滤波器的大小
- * 
- * @return PCM数据
- */
-static std::vector<short> pcm_istft(
-    const torch::Tensor& tensor,
-    int n_fft    = 400,
-    int hop_size = 80,
-    int win_size = 400
-);
+bool chobits::media::open_media(int argc, char const *argv[]) {
+    if(argc == 1) {
+        return chobits::media::open_hardware();
+    } else {
+        return chobits::media::open_file(argv[1]);
+    }
+}
 
 bool chobits::media::open_file(const std::string& file) {
     int ret = 0;
@@ -144,19 +136,20 @@ bool chobits::media::open_file(const std::string& file) {
         std::printf("打开音视频重采样失败");
         return false;
     }
-    player.running = true;
-    player.audio_buffer.resize(audio_nb_channels * audio_bytes_per_sample * audio_sample_rate * 2);
-    player.video_buffer.resize(av_image_get_buffer_size(video_pix_format, video_width, video_height, 1));
-    std::thread player_thread([]() {
-        open_player();
-    });
+    // 文件训练不要显示
+    player.running    = true;
+//  player.play_audio = true;
+//  player.play_video = true;
+    dataset.discard   = false;
+    // std::thread player_thread([]() {
+    //     open_player();
+    // });
     double audio_time  = 0;
     double video_time  = 0;
     double audio_base  = av_q2d(audio_stream->time_base);
     double video_base  = av_q2d(video_stream->time_base);
     uint64_t audio_pos = 0;
     uint64_t video_pos = 0;
-    uint64_t base_time = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
     uint64_t audio_frame_count = 0;
     uint64_t video_frame_count = 0;
     AVFrame * frame  = av_frame_alloc();
@@ -184,14 +177,6 @@ bool chobits::media::open_file(const std::string& file) {
                     video_time = (frame->pts - video_pos) * video_base;
                     video_to_tensor(video_sws, frame);
                     av_frame_unref(frame);
-                    #ifdef MEDIA_PREVIEW
-                    // 正常速度
-                    uint64_t pts_time = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
-                    int delay = (int) (video_time * 1000 - (pts_time - base_time));
-                    if(delay > 0) {
-                        SDL_Delay(delay);
-                    }
-                    #endif
                 }
             }
         } else {
@@ -207,7 +192,7 @@ bool chobits::media::open_file(const std::string& file) {
     avcodec_free_context(&video_codec_ctx);
     avformat_close_input(&format_ctx);
     stop_all();
-    player_thread.join();
+    // player_thread.join();
     std::printf("文件处理完成：%ld - %ld - %f - %f - %s\n", audio_frame_count, video_frame_count, audio_time, video_time, file.c_str());
     return true;
 }
@@ -265,9 +250,10 @@ bool chobits::media::open_hardware() {
     }
     av_dump_format(audio_format_ctx, 0, audio_format_ctx->url, 0);
     av_dump_format(video_format_ctx, 0, video_format_ctx->url, 0);
-    player.running = true;
-    player.audio_buffer.resize(audio_nb_channels * audio_bytes_per_sample * audio_sample_rate * 2);
-    player.video_buffer.resize(av_image_get_buffer_size(video_pix_format, video_width, video_height, 1));
+    player.running    = true;
+    player.play_audio = true;
+    player.play_video = true;
+    dataset.discard   = true;
     std::thread player_thread([]() {
         open_player();
     });
@@ -357,48 +343,16 @@ bool chobits::media::open_hardware() {
     return true;
 }
 
-bool chobits::media::open_player() {
-    SDL_Init(SDL_INIT_AUDIO | SDL_INIT_VIDEO);
-    SDL_Window* window = SDL_CreateWindow("Chobits", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, video_width, video_height, SDL_WINDOW_OPENGL);
-    SDL_AudioSpec audio_spec = {
-        .freq     = audio_sample_rate,
-        .format   = AUDIO_S16,
-        .channels = 1,
-        .silence  = 0,
-        .samples  = 4800,
-        .callback = nullptr
-    };
-    player.audio_id = SDL_OpenAudioDevice(nullptr, 0, &audio_spec, nullptr, SDL_AUDIO_ALLOW_FREQUENCY_CHANGE);
-    SDL_PauseAudioDevice(player.audio_id, 0);
-    player.renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
-    player.texture  = SDL_CreateTexture(player.renderer, SDL_PIXELFORMAT_RGB24, SDL_TEXTUREACCESS_STREAMING, video_width, video_height);
-    SDL_Event event;
-    while(player.running) {
-        SDL_WaitEventTimeout(&event, 1000);
-        if(event.type == SDL_QUIT) {
-            stop_all();
-            break;
-        }
-    }
-    SDL_CloseAudioDevice(player.audio_id);
-    SDL_DestroyTexture(player.texture);
-    SDL_DestroyRenderer(player.renderer);
-    SDL_DestroyWindow(window);
-    SDL_Quit();
-    return true;
-}
-
 bool chobits::media::play_audio(const void* data, int len) {
-    if(player.running) {
+    if(player.running && player.play_audio) {
         SDL_QueueAudio(player.audio_id, data, len);
-        SDL_Delay(10);
         return true;
     }
     return false;
 }
 
 bool chobits::media::play_video(const void* data, int len) {
-    if(player.running) {
+    if(player.running && player.play_video) {
         SDL_RenderClear(player.renderer);
         SDL_UpdateTexture(player.texture, nullptr, data, len);
         SDL_RenderCopy(player.renderer, player.texture, nullptr, nullptr);
@@ -408,19 +362,126 @@ bool chobits::media::play_video(const void* data, int len) {
     return false;
 }
 
-std::tuple<at::Tensor, at::Tensor> chobits::media::dataset() {
-    return {};
+std::tuple<at::Tensor, at::Tensor, at::Tensor> chobits::media::get_data() {
+    std::vector<torch::Tensor> label;
+    std::vector<torch::Tensor> audio;
+    std::vector<torch::Tensor> video;
+    {
+        std::unique_lock<std::mutex> lock(dataset.lock);
+        dataset.condition.wait(lock, []() {
+            return
+                !(
+                    player.running &&
+                    (
+                        dataset.audio.size() < dataset.batch_size + 1 ||
+                        dataset.video.size() < dataset.batch_size + 1
+                    )
+                );
+        });
+        if(!player.running) {
+            return {};
+        }
+        audio.assign(dataset.audio.begin() + 0, dataset.audio.begin() + dataset.batch_size + 0);
+        video.assign(dataset.video.begin() + 0, dataset.video.begin() + dataset.batch_size + 0);
+        label.assign(dataset.audio.begin() + 1, dataset.audio.begin() + dataset.batch_size + 1);
+        dataset.audio.erase(dataset.audio.begin(), dataset.audio.begin() + dataset.batch_size);
+        dataset.video.erase(dataset.video.begin(), dataset.video.begin() + dataset.batch_size);
+        std::printf("剩余数据：%d - %d\n", dataset.audio.size(), dataset.video.size());
+        dataset.condition.notify_all();
+    }
+    return {
+        torch::concat(audio),
+        torch::concat(video),
+        torch::concat(label)
+    };
 }
 
 void chobits::media::stop_all() {
     if(!player.running) {
         return;
     }
+    std::printf("关闭媒体\n");
     player.running = false;
-    SDL_Event event;
-    event.type = SDL_QUIT;
-    SDL_PushEvent(&event);
-    SDL_Delay(10);
+    if(player.show_play) {
+        SDL_Event event;
+        event.type = SDL_QUIT;
+        SDL_PushEvent(&event);
+        SDL_Delay(10);
+    }
+    std::unique_lock<std::mutex> lock(dataset.lock);
+    dataset.condition.notify_all();
+}
+
+static void open_player() {
+    int ret = 0;
+    ret = SDL_Init(SDL_INIT_AUDIO | SDL_INIT_VIDEO);
+    if(ret != 0) {
+        std::printf("加载SDL2失败：%d\n", ret);
+        return;
+    }
+    if(init_audio_player() && init_video_player()) {
+        player.show_play = true;
+        SDL_Event event;
+        while(player.running) {
+            SDL_WaitEventTimeout(&event, 1000);
+            if(event.type == SDL_QUIT) {
+                break;
+            }
+        }
+    } else {
+        // -
+    }
+    chobits::media::stop_all();
+    stop_player();
+}
+
+static void stop_player() {
+    if(player.texture) {
+        SDL_DestroyTexture(player.texture);
+        player.texture = nullptr;
+    }
+    if(player.renderer) {
+        SDL_DestroyRenderer(player.renderer);
+        player.renderer = nullptr;
+    }
+    if(player.window) {
+        SDL_DestroyWindow(player.window);
+        player.window = nullptr;
+    }
+    if(player.audio_id != 0) {
+        SDL_CloseAudioDevice(player.audio_id);
+        player.audio_id = 0;
+    }
+    SDL_Quit();
+}
+
+static bool init_audio_player() {
+    player.audio_id = SDL_OpenAudioDevice(nullptr, 0, &player.audio_spec, nullptr, SDL_AUDIO_ALLOW_FREQUENCY_CHANGE);
+    if(player.audio_id == 0) {
+        std::printf("打开音频失败\n");
+        return false;
+    }
+    SDL_PauseAudioDevice(player.audio_id, 0);
+    return true;
+}
+
+static bool init_video_player() {
+    player.window = SDL_CreateWindow("Chobits", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, video_width, video_height, SDL_WINDOW_OPENGL);
+    if(!player.window) {
+        std::printf("打开窗口失败\n");
+        return false;
+    }
+    player.renderer = SDL_CreateRenderer(player.window, -1, SDL_RENDERER_ACCELERATED);
+    if(!player.renderer) {
+        std::printf("打开渲染失败\n");
+        return false;
+    }
+    player.texture = SDL_CreateTexture(player.renderer, SDL_PIXELFORMAT_RGB24, SDL_TEXTUREACCESS_STREAMING, video_width, video_height);
+    if(!player.texture) {
+        std::printf("打开纹理失败\n");
+        return false;
+    }
+    return true;
 }
 
 static SwrContext* init_audio_swr(AVCodecContext* ctx) {
@@ -456,33 +517,72 @@ static SwsContext* init_video_sws(int width, int height, AVPixelFormat format) {
 }
 
 static bool audio_to_tensor(SwrContext* swr, AVFrame* frame) {
-    static int index = 0;
-    index = index == 0 ? 1 : 0;
-    int size = audio_nb_channels * audio_bytes_per_sample * frame->nb_samples;
-    uint8_t* buffer = player.audio_buffer.data() + (index % 2) * size;
+    static int pos = 0;
+    static std::vector<uint8_t> audio_buffer(audio_nb_channels * audio_bytes_per_sample * audio_sample_rate);
+    const int size = audio_nb_channels * audio_bytes_per_sample * frame->nb_samples;
+    if(pos + size > audio_buffer.size()) {
+        std::printf("音频数据大小错误：%d - %d\n", pos, size);
+        return false;
+    }
+    uint8_t* buffer = audio_buffer.data() + pos;
     swr_convert(swr, &buffer, frame->nb_samples, (const uint8_t**) frame->data, frame->nb_samples);
-    chobits::media::play_audio(buffer, size);
-    // auto tensor = pcm_stft(reinterpret_cast<short*>(ptr), size);
-    // auto pcm    = pcm_istft(tensor);
-    // std::memcpy(ptr, pcm.data(), size);
-    // std::cout << tensor.sizes() << std::endl;
+    // chobits::media::play_audio(buffer, size);
+    pos += size;
+    while(pos >= dataset.audio_size) {
+        auto tensor = chobits::media::pcm_stft(reinterpret_cast<short*>(audio_buffer.data()), dataset.audio_size);
+        {
+            std::unique_lock<std::mutex> lock(dataset.lock);
+            if(dataset.audio.size() >= dataset.cache_size && dataset.discard) {
+                std::printf("丢弃音频数据\n");
+            } else {
+                dataset.audio.push_back(tensor);
+            }
+            dataset.condition.notify_all();
+        }
+        pos -= dataset.audio_size;
+        if(pos != 0) {
+            std::memcpy(audio_buffer.data(), audio_buffer.data() + dataset.audio_size, pos);
+        }
+    }
+    if(!dataset.discard) {
+        std::unique_lock<std::mutex> lock(dataset.lock);
+        dataset.condition.wait(lock, []() {
+            return !(player.running && dataset.audio.size() > dataset.cache_size);
+        });
+    }
     return true;
 }
 
 static bool video_to_tensor(SwsContext* sws, AVFrame* frame) {
-    int width = video_width * 3;
-    uint8_t* const buffer = player.video_buffer.data();
+    static int width = video_width * 3;
+    static std::vector<uint8_t> video_buffer(av_image_get_buffer_size(video_pix_format, video_width, video_height, 1));
+    uint8_t* const buffer = video_buffer.data();
     sws_scale(sws, (const uint8_t* const *) frame->data, frame->linesize, 0, frame->height, &buffer, &width);
     chobits::media::play_video(buffer, width);
-    // torch::Tensor tensor = torch::from_blob(buffer, { video_height, video_width, 3 }, torch::kByte)
-    //     .permute({ 2, 0, 1 }).to(torch::kFloat32).div(255.0).mul(2.0).sub(1.0).contiguous();
-    // auto image_tensor = tensor.add(1.0).div(2.0).mul(255.0).permute({ 1, 2, 0 }).to(torch::kByte).contiguous();
-    // auto x = image_tensor.element_size() * image_tensor.numel();
-    // std::memcpy(buffer, reinterpret_cast<char*>(image_tensor.data_ptr()), image_tensor.element_size() * image_tensor.numel());
+    {
+        std::unique_lock<std::mutex> lock(dataset.lock);
+        if(dataset.audio.size() >= dataset.video.size()) {
+            auto tensor = torch::from_blob(buffer, { video_height, video_width, 3 }, torch::kByte).permute({ 2, 0, 1 }).to(torch::kFloat32).div(255.0).mul(2.0).sub(1.0).contiguous();
+            {
+                if(dataset.video.size() >= dataset.cache_size && dataset.discard) {
+                    std::printf("丢弃视频数据\n");
+                } else {
+                    dataset.video.push_back(tensor);
+                }
+                dataset.condition.notify_all();
+            }
+        }
+    }
+    if(!dataset.discard) {
+        std::unique_lock<std::mutex> lock(dataset.lock);
+        dataset.condition.wait(lock, []() {
+            return !(player.running && dataset.video.size() > dataset.cache_size);
+        });
+    }
     return true;
 }
 
-static torch::Tensor pcm_stft(
+at::Tensor chobits::media::pcm_stft(
     short* pcm_data,
     int pcm_size,
     int n_fft,
@@ -492,20 +592,18 @@ static torch::Tensor pcm_stft(
     auto data = torch::from_blob(pcm_data, { 1, pcm_size }, torch::kShort).to(torch::kFloat32) / NORMALIZATION;
     auto wind = torch::hann_window(win_size);
     auto real = torch::view_as_real(torch::stft(data, n_fft, hop_size, win_size, wind, true, "reflect", false, std::nullopt, true));
-    // 幅度: sqrt(x^2 + y^2)
-    auto mag = torch::sqrt(real.pow(2).sum(-1));
-    // 相位: atan2(y, x)
-    auto pha = torch::atan2(real.index({ "...", 1 }), real.index({ "...", 0 }));
-    return torch::stack({ mag, pha }, -1).squeeze();
+    auto mag  = torch::sqrt(real.pow(2).sum(-1));
+    auto pha  = torch::atan2(real.index({ "...", 1 }), real.index({ "...", 0 }));
+    return torch::stack({ mag, pha }, -1).squeeze().permute({ 2, 0, 1 });
 }
 
-static std::vector<short> pcm_istft(
-    const torch::Tensor& tensor,
+std::vector<short> chobits::media::pcm_istft(
+    const at::Tensor& tensor,
     int n_fft,
     int hop_size,
     int win_size
 ) {
-    auto copy = tensor.unsqueeze(0);
+    auto copy = tensor.permute({1, 2, 0}).unsqueeze(0);
     auto wind = torch::hann_window(win_size);
     auto mag  = copy.index({ "...", 0 });
     auto pha  = copy.index({ "...", 1 });

@@ -14,19 +14,6 @@
     <img alt="GitHub license"   src="https://img.shields.io/github/license/acgist/chobits?style=flat-square&color=blue" />
 </p>
 
-## 训练
-
-- 输入：音频视频（耳朵眼睛）
-- 输出：音频动作（嘴巴肌肉）
-
-### 视频训练
-
-观看视频进行学习
-
-### 生活训练
-
-现实互动持续学习
-
 ## 依赖
 
 |名称|版本|官网|

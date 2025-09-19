@@ -37,6 +37,7 @@ endif()
 message(STATUS "CXX_FLAGS: ${CMAKE_CXX_FLAGS}")
 message(STATUS "CXX_FLAGS_DEBUG: ${CMAKE_CXX_FLAGS_DEBUG}")
 message(STATUS "CXX_FLAGS_RELEASE: ${CMAKE_CXX_FLAGS_RELEASE}")
+message(STATUS "CMAKE_INSTALL_PREFIX: ${CMAKE_INSTALL_PREFIX}")
 
 set(
     CMAKE_PREFIX_PATH
@@ -76,17 +77,15 @@ endif()
 find_package(SDL2  CONFIG REQUIRED)
 find_package(Torch CONFIG REQUIRED)
 
-aux_source_directory(src/chobits/ CHOBITS_FILES)
-
 add_library(
     chobits-core
-    ${CHOBITS_FILES}
+    src/chobits/media.cpp
+    src/chobits/model.cpp
 )
 
 target_include_directories(
     chobits-core PUBLIC
     include/
-    ${FFMPEG_INCLUDE_DIRS}
 )
 
 target_link_libraries(
@@ -125,13 +124,20 @@ target_link_libraries(
     chobits-core
 )
 
+set_target_properties(
+    ${PROJECT_NAME}
+    PROPERTIES PUBLIC_HEADER
+    "include/chobits/nn.hpp;include/chobits/media.hpp;include/chobits/model.hpp"
+)
+
 install(
     TARGETS ${PROJECT_NAME} EXPORT ${PROJECT_NAME}-targets
     ARCHIVE DESTINATION ${CMAKE_INSTALL_PREFIX}/lib/
     LIBRARY DESTINATION ${CMAKE_INSTALL_PREFIX}/bin/
     RUNTIME DESTINATION ${CMAKE_INSTALL_PREFIX}/bin/
+    PUBLIC_HEADER  DESTINATION ${CMAKE_INSTALL_PREFIX}/include/${PROJECT_NAME}
+    PRIVATE_HEADER DESTINATION ${CMAKE_INSTALL_PREFIX}/include/${PROJECT_NAME}
 )
-install(DIRECTORY include/ DESTINATION ${CMAKE_INSTALL_PREFIX}/include/)
 
 if(CMAKE_HOST_WIN32)
     file(GLOB TORCH_DLLS "deps/libtorch/lib/*.dll")
@@ -143,7 +149,7 @@ if(CMAKE_HOST_WIN32)
         file(GLOB SDL2_DLLS   "deps/sdl2/bin/*.dll")
         file(GLOB FFMPEG_DLLS "deps/ffmpeg/bin/*.dll")
     endif()
-    
+
     install(FILES ${SDL2_DLLS}   DESTINATION ${CMAKE_INSTALL_PREFIX}/bin/)
     install(FILES ${TORCH_DLLS}  DESTINATION ${CMAKE_INSTALL_PREFIX}/bin/)
     install(FILES ${FFMPEG_DLLS} DESTINATION ${CMAKE_INSTALL_PREFIX}/bin/)
@@ -167,4 +173,17 @@ if(BUILD_TEST)
     )
     add_test(NAME test_media COMMAND test_media)
     set_target_properties(test_media PROPERTIES FOLDER "test")
+endif()
+
+if(BUILD_TEST)
+    add_executable(
+        test_model
+        test/test_model.cpp
+    )
+    target_link_libraries(
+        test_model
+        chobits-core
+    )
+    add_test(NAME test_model COMMAND test_model)
+    set_target_properties(test_model PROPERTIES FOLDER "test")
 endif()
