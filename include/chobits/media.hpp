@@ -18,8 +18,6 @@
 #include <tuple>
 #include <vector>
 #include <string>
-#include <cstdlib>
-#include <cstdint>
 
 namespace at {
 
@@ -29,52 +27,10 @@ namespace at {
 
 namespace chobits::media {
 
-/**
- * 打开媒体
- * 
- * @param argc 参数数量
- * @param argv 参数内容
- * 
- * @return 是否成功
- */
 extern bool open_media(int argc, char const *argv[]);
-
-/**
- * 音视频文件输入
- * 
- * @param file 文件路径
- * 
- * @return 是否成功
- */
 extern bool open_file(const std::string& file);
-
-/**
- * 摄像头输入
- * 麦克风输入
- * 
- * @return 是否成功
- */
 extern bool open_hardware();
-
-/**
- * 播放音频
- * 
- * @param data 音频数据
- * @param len  数据长度
- * 
- * @return 是否成功
- */
-extern bool play_audio(const void* data, int len);
-
-/**
- * 播放视频
- * 
- * @param data 视频数据
- * @param len  数据长度
- * 
- * @return 是否成功
- */
-extern bool play_video(const void* data, int len);
+extern void stop_all();
 
 /**
  * 数据集
@@ -82,11 +38,6 @@ extern bool play_video(const void* data, int len);
  * @return [ audio, video, label ]
  */
 extern std::tuple<at::Tensor, at::Tensor, at::Tensor> get_data();
-
-/**
- * 关闭
- */
-extern void stop_all();
 
 /**
  * 短时傅里叶变换

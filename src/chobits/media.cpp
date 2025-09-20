@@ -1,12 +1,11 @@
 #include "chobits/media.hpp"
+#include "chobits/player.hpp"
+#include "chobits/chobits.hpp"
 
 #include <mutex>
 #include <thread>
-#include <vector>
-#include <iostream>
 #include <condition_variable>
 
-#include "SDL2/SDL.h"
 #include "torch/torch.h"
 
 extern "C" {
@@ -21,14 +20,10 @@ extern "C" {
 
 }
 
-const static int           video_width      = 640;
-const static int           video_height     = 360;
 const static AVPixelFormat video_pix_format = AV_PIX_FMT_RGB24;
 
 const static AVSampleFormat  audio_format           = AV_SAMPLE_FMT_S16;
 const static AVChannelLayout audio_layout           = AV_CHANNEL_LAYOUT_MONO;
-const static int             audio_sample_rate      = 48000;
-const static int             audio_nb_channels      = audio_layout.nb_channels;
 const static int             audio_bytes_per_sample = av_get_bytes_per_sample(audio_format);
 
 const static float NORMALIZATION = 32768.0F;
@@ -44,32 +39,7 @@ struct Dataset {
     std::vector<torch::Tensor> video;
 };
 
-struct PlayerState {
-    bool running    = false;
-    bool show_play  = false;
-    bool play_audio = false;
-    bool play_video = false;
-    SDL_AudioDeviceID audio_id = 0;
-    SDL_Window  * window   = nullptr;
-    SDL_Renderer* renderer = nullptr;
-    SDL_Texture * texture  = nullptr;
-    SDL_AudioSpec audio_spec = {
-        .freq     = audio_sample_rate,
-        .format   = AUDIO_S16,
-        .channels = 1,
-        .silence  = 0,
-        .samples  = 4800,
-        .callback = nullptr
-    };
-};
-
-static Dataset     dataset = {};
-static PlayerState player  = {};
-
-static void open_player();
-static void stop_player();
-static bool init_audio_player();
-static bool init_video_player();
+static Dataset dataset = {};
 
 static SwrContext* init_audio_swr(AVCodecContext* ctx);
 static SwsContext* init_video_sws(int width, int height, AVPixelFormat format);
@@ -77,10 +47,19 @@ static bool audio_to_tensor(SwrContext* swr, AVFrame* frame);
 static bool video_to_tensor(SwsContext* sws, AVFrame* frame);
 
 bool chobits::media::open_media(int argc, char const *argv[]) {
-    if(argc == 1) {
-        return chobits::media::open_hardware();
-    } else {
+    if(argc == 1 || (argc >= 2 && std::strcmp("eval", argv[1]) == 0)) {
+        std::thread player_thread([]() {
+            chobits::player::open_player();
+        });
+        bool ret = chobits::media::open_hardware();
+        chobits::player::stop_player();
+        player_thread.join();
+        return ret;
+    } else if(argc >= 2) {
         return chobits::media::open_file(argv[1]);
+    } else {
+        std::printf("不支持的媒体\n");
+        return false;
     }
 }
 
@@ -136,14 +115,7 @@ bool chobits::media::open_file(const std::string& file) {
         std::printf("打开音视频重采样失败");
         return false;
     }
-    // 文件训练不要显示
-    player.running    = true;
-//  player.play_audio = true;
-//  player.play_video = true;
-    dataset.discard   = false;
-    // std::thread player_thread([]() {
-    //     open_player();
-    // });
+    dataset.discard = false;
     double audio_time  = 0;
     double video_time  = 0;
     double audio_base  = av_q2d(audio_stream->time_base);
@@ -154,10 +126,10 @@ bool chobits::media::open_file(const std::string& file) {
     uint64_t video_frame_count = 0;
     AVFrame * frame  = av_frame_alloc();
     AVPacket* packet = av_packet_alloc();
-    while(player.running && av_read_frame(format_ctx, packet) == 0) {
+    while(chobits::running && av_read_frame(format_ctx, packet) == 0) {
         if(packet->stream_index == audio_index) {
             if(avcodec_send_packet(audio_codec_ctx, packet) == 0) {
-                while(player.running && avcodec_receive_frame(audio_codec_ctx, frame) == 0) {
+                while(chobits::running && avcodec_receive_frame(audio_codec_ctx, frame) == 0) {
                     ++audio_frame_count;
                     if(audio_pos == 0) {
                         audio_pos = frame->pts;
@@ -169,7 +141,7 @@ bool chobits::media::open_file(const std::string& file) {
             }
         } else if(packet->stream_index == video_index) {
             if(avcodec_send_packet(video_codec_ctx, packet) == 0) {
-                while(player.running && avcodec_receive_frame(video_codec_ctx, frame) == 0) {
+                while(chobits::running && avcodec_receive_frame(video_codec_ctx, frame) == 0) {
                     ++video_frame_count;
                     if(video_pos == 0) {
                         video_pos = frame->pts;
@@ -191,8 +163,6 @@ bool chobits::media::open_file(const std::string& file) {
     avcodec_free_context(&audio_codec_ctx);
     avcodec_free_context(&video_codec_ctx);
     avformat_close_input(&format_ctx);
-    stop_all();
-    // player_thread.join();
     std::printf("文件处理完成：%ld - %ld - %f - %f - %s\n", audio_frame_count, video_frame_count, audio_time, video_time, file.c_str());
     return true;
 }
@@ -250,13 +220,7 @@ bool chobits::media::open_hardware() {
     }
     av_dump_format(audio_format_ctx, 0, audio_format_ctx->url, 0);
     av_dump_format(video_format_ctx, 0, video_format_ctx->url, 0);
-    player.running    = true;
-    player.play_audio = true;
-    player.play_video = true;
-    dataset.discard   = true;
-    std::thread player_thread([]() {
-        open_player();
-    });
+    dataset.discard = true;
     uint64_t audio_frame_count = 0;
     uint64_t video_frame_count = 0;
     std::thread audio_thread([audio_format_ctx, &audio_frame_count]() {
@@ -279,10 +243,10 @@ bool chobits::media::open_hardware() {
         }
         AVFrame * frame  = av_frame_alloc();
         AVPacket* packet = av_packet_alloc();
-        while(player.running) {
+        while(chobits::running) {
             if(av_read_frame(audio_format_ctx, packet) == 0) {
                 if(avcodec_send_packet(audio_codec_ctx, packet) == 0) {
-                    while(player.running && avcodec_receive_frame(audio_codec_ctx, frame) == 0) {
+                    while(chobits::running && avcodec_receive_frame(audio_codec_ctx, frame) == 0) {
                         ++audio_frame_count;
                         audio_to_tensor(audio_swr, frame);
                         av_frame_unref(frame);
@@ -316,10 +280,10 @@ bool chobits::media::open_hardware() {
         }
         AVFrame * frame  = av_frame_alloc();
         AVPacket* packet = av_packet_alloc();
-        while(player.running) {
+        while(chobits::running) {
             if(av_read_frame(video_format_ctx, packet) == 0) {
                 if(avcodec_send_packet(video_codec_ctx, packet) == 0) {
-                    while(player.running && avcodec_receive_frame(video_codec_ctx, frame) == 0) {
+                    while(chobits::running && avcodec_receive_frame(video_codec_ctx, frame) == 0) {
                         ++video_frame_count;
                         video_to_tensor(video_sws, frame);
                         av_frame_unref(frame);
@@ -335,31 +299,10 @@ bool chobits::media::open_hardware() {
     });
     audio_thread.join();
     video_thread.join();
-    stop_all();
-    player_thread.join();
     avformat_close_input(&audio_format_ctx);
     avformat_close_input(&video_format_ctx);
     std::printf("文件处理完成：%ld - %ld\n", audio_frame_count, video_frame_count);
     return true;
-}
-
-bool chobits::media::play_audio(const void* data, int len) {
-    if(player.running && player.play_audio) {
-        SDL_QueueAudio(player.audio_id, data, len);
-        return true;
-    }
-    return false;
-}
-
-bool chobits::media::play_video(const void* data, int len) {
-    if(player.running && player.play_video) {
-        SDL_RenderClear(player.renderer);
-        SDL_UpdateTexture(player.texture, nullptr, data, len);
-        SDL_RenderCopy(player.renderer, player.texture, nullptr, nullptr);
-        SDL_RenderPresent(player.renderer);
-        return true;
-    }
-    return false;
 }
 
 std::tuple<at::Tensor, at::Tensor, at::Tensor> chobits::media::get_data() {
@@ -371,14 +314,14 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> chobits::media::get_data() {
         dataset.condition.wait(lock, []() {
             return
                 !(
-                    player.running &&
+                    chobits::running &&
                     (
                         dataset.audio.size() < dataset.batch_size + 1 ||
                         dataset.video.size() < dataset.batch_size + 1
                     )
                 );
         });
-        if(!player.running) {
+        if(!chobits::running) {
             return {};
         }
         audio.assign(dataset.audio.begin() + 0, dataset.audio.begin() + dataset.batch_size + 0);
@@ -390,98 +333,16 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> chobits::media::get_data() {
         dataset.condition.notify_all();
     }
     return {
-        torch::concat(audio),
-        torch::concat(video),
-        torch::concat(label)
+        torch::stack(audio),
+        torch::stack(video),
+        torch::stack(label)
     };
 }
 
 void chobits::media::stop_all() {
-    if(!player.running) {
-        return;
-    }
     std::printf("关闭媒体\n");
-    player.running = false;
-    if(player.show_play) {
-        SDL_Event event;
-        event.type = SDL_QUIT;
-        SDL_PushEvent(&event);
-        SDL_Delay(10);
-    }
     std::unique_lock<std::mutex> lock(dataset.lock);
     dataset.condition.notify_all();
-}
-
-static void open_player() {
-    int ret = 0;
-    ret = SDL_Init(SDL_INIT_AUDIO | SDL_INIT_VIDEO);
-    if(ret != 0) {
-        std::printf("加载SDL2失败：%d\n", ret);
-        return;
-    }
-    if(init_audio_player() && init_video_player()) {
-        player.show_play = true;
-        SDL_Event event;
-        while(player.running) {
-            SDL_WaitEventTimeout(&event, 1000);
-            if(event.type == SDL_QUIT) {
-                break;
-            }
-        }
-    } else {
-        // -
-    }
-    chobits::media::stop_all();
-    stop_player();
-}
-
-static void stop_player() {
-    if(player.texture) {
-        SDL_DestroyTexture(player.texture);
-        player.texture = nullptr;
-    }
-    if(player.renderer) {
-        SDL_DestroyRenderer(player.renderer);
-        player.renderer = nullptr;
-    }
-    if(player.window) {
-        SDL_DestroyWindow(player.window);
-        player.window = nullptr;
-    }
-    if(player.audio_id != 0) {
-        SDL_CloseAudioDevice(player.audio_id);
-        player.audio_id = 0;
-    }
-    SDL_Quit();
-}
-
-static bool init_audio_player() {
-    player.audio_id = SDL_OpenAudioDevice(nullptr, 0, &player.audio_spec, nullptr, SDL_AUDIO_ALLOW_FREQUENCY_CHANGE);
-    if(player.audio_id == 0) {
-        std::printf("打开音频失败\n");
-        return false;
-    }
-    SDL_PauseAudioDevice(player.audio_id, 0);
-    return true;
-}
-
-static bool init_video_player() {
-    player.window = SDL_CreateWindow("Chobits", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, video_width, video_height, SDL_WINDOW_OPENGL);
-    if(!player.window) {
-        std::printf("打开窗口失败\n");
-        return false;
-    }
-    player.renderer = SDL_CreateRenderer(player.window, -1, SDL_RENDERER_ACCELERATED);
-    if(!player.renderer) {
-        std::printf("打开渲染失败\n");
-        return false;
-    }
-    player.texture = SDL_CreateTexture(player.renderer, SDL_PIXELFORMAT_RGB24, SDL_TEXTUREACCESS_STREAMING, video_width, video_height);
-    if(!player.texture) {
-        std::printf("打开纹理失败\n");
-        return false;
-    }
-    return true;
 }
 
 static SwrContext* init_audio_swr(AVCodecContext* ctx) {
@@ -489,7 +350,7 @@ static SwrContext* init_audio_swr(AVCodecContext* ctx) {
     SwrContext* swr = swr_alloc();
     ret = swr_alloc_set_opts2(
         &swr,
-        &audio_layout,   audio_format,    audio_sample_rate,
+        &audio_layout,   audio_format,    chobits::audio_sample_rate,
         &ctx->ch_layout, ctx->sample_fmt, ctx->sample_rate,
         0, nullptr
     );
@@ -509,8 +370,8 @@ static SwrContext* init_audio_swr(AVCodecContext* ctx) {
 
 static SwsContext* init_video_sws(int width, int height, AVPixelFormat format) {
     SwsContext* sws = sws_getContext(
-        width,       height,       format,
-        video_width, video_height, video_pix_format,
+        width,                height,                format,
+        chobits::video_width, chobits::video_height, video_pix_format,
         SWS_BILINEAR, nullptr, nullptr, nullptr
     );
     return sws;
@@ -518,15 +379,15 @@ static SwsContext* init_video_sws(int width, int height, AVPixelFormat format) {
 
 static bool audio_to_tensor(SwrContext* swr, AVFrame* frame) {
     static int pos = 0;
-    static std::vector<uint8_t> audio_buffer(audio_nb_channels * audio_bytes_per_sample * audio_sample_rate);
-    const int size = audio_nb_channels * audio_bytes_per_sample * frame->nb_samples;
+    static std::vector<uint8_t> audio_buffer(chobits::audio_nb_channels * audio_bytes_per_sample * chobits::audio_sample_rate);
+    const int size = chobits::audio_nb_channels * audio_bytes_per_sample * frame->nb_samples;
     if(pos + size > audio_buffer.size()) {
         std::printf("音频数据大小错误：%d - %d\n", pos, size);
         return false;
     }
     uint8_t* buffer = audio_buffer.data() + pos;
     swr_convert(swr, &buffer, frame->nb_samples, (const uint8_t**) frame->data, frame->nb_samples);
-    // chobits::media::play_audio(buffer, size);
+    // chobits::player::play_audio(buffer, size);
     pos += size;
     while(pos >= dataset.audio_size) {
         auto tensor = chobits::media::pcm_stft(reinterpret_cast<short*>(audio_buffer.data()), dataset.audio_size);
@@ -547,22 +408,26 @@ static bool audio_to_tensor(SwrContext* swr, AVFrame* frame) {
     if(!dataset.discard) {
         std::unique_lock<std::mutex> lock(dataset.lock);
         dataset.condition.wait(lock, []() {
-            return !(player.running && dataset.audio.size() > dataset.cache_size);
+            return !(chobits::running && dataset.audio.size() > dataset.cache_size);
         });
     }
     return true;
 }
 
 static bool video_to_tensor(SwsContext* sws, AVFrame* frame) {
-    static int width = video_width * 3;
-    static std::vector<uint8_t> video_buffer(av_image_get_buffer_size(video_pix_format, video_width, video_height, 1));
+    static int width = chobits::video_width * 3;
+    static std::vector<uint8_t> video_buffer(av_image_get_buffer_size(video_pix_format, chobits::video_width, chobits::video_height, 1));
     uint8_t* const buffer = video_buffer.data();
     sws_scale(sws, (const uint8_t* const *) frame->data, frame->linesize, 0, frame->height, &buffer, &width);
-    chobits::media::play_video(buffer, width);
+    chobits::player::play_video(buffer, width);
     {
         std::unique_lock<std::mutex> lock(dataset.lock);
         if(dataset.audio.size() >= dataset.video.size()) {
-            auto tensor = torch::from_blob(buffer, { video_height, video_width, 3 }, torch::kByte).permute({ 2, 0, 1 }).to(torch::kFloat32).div(255.0).mul(2.0).sub(1.0).contiguous();
+            auto tensor = torch::from_blob(
+                buffer,
+                { chobits::video_height, chobits::video_width, 3 },
+                torch::kUInt8
+            ).to(torch::kFloat32).div(255.0).mul(2.0).sub(1.0).permute({ 2, 0, 1 }).contiguous();
             {
                 if(dataset.video.size() >= dataset.cache_size && dataset.discard) {
                     std::printf("丢弃视频数据\n");
@@ -576,7 +441,7 @@ static bool video_to_tensor(SwsContext* sws, AVFrame* frame) {
     if(!dataset.discard) {
         std::unique_lock<std::mutex> lock(dataset.lock);
         dataset.condition.wait(lock, []() {
-            return !(player.running && dataset.video.size() > dataset.cache_size);
+            return !(chobits::running && dataset.video.size() > dataset.cache_size);
         });
     }
     return true;

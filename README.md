@@ -25,8 +25,8 @@
 ```
 # linux
 
-sudo  apt install ffmpeg -y
-sudo  apt install libsdl2-dev -y
+sudo apt install ffmpeg
+sudo apt install libsdl2-dev
 https://download.pytorch.org/libtorch/cpu/libtorch-shared-with-deps-2.8.0%2Bcpu.zip
 https://download.pytorch.org/libtorch/cu128/libtorch-shared-with-deps-2.8.0%2Bcu128.zip
 

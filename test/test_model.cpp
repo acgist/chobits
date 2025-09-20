@@ -1,58 +1,50 @@
 #include "chobits/nn.hpp"
 #include "chobits/media.hpp"
 #include "chobits/model.hpp"
+#include "chobits/player.hpp"
 
-[[maybe_unused]] static void test_trainer() {
-    // chobits::media::open_file("D:/tmp/video.mp4");
-    chobits::media::open_hardware();
-    chobits::model::Trainer trainer;
-    trainer.load();
-    trainer.save();
-    chobits::media::stop_all();
+static void info(std::shared_ptr<torch::nn::Module> layer) {
+    size_t total_numel = 0;
+    for(const auto& parameter : layer->named_parameters()) {
+        total_numel += parameter.value().numel();
+    }
+    std::printf("参数总量：%ld\n", total_numel);
 }
 
 [[maybe_unused]] static void test_audio_head() {
     chobits::nn::AudioHeadBlock layer(2);
     auto output = layer->forward(torch::randn({ 1, 2, 201, 601 }));
     std::cout << output.sizes() << std::endl;
+    info(layer.ptr());
 }
 
 [[maybe_unused]] static void test_video_head() {
     chobits::nn::VideoHeadBlock layer(3);
-    auto output = layer->forward(torch::randn({ 1, 3, 640, 360 }));
+    auto output = layer->forward(torch::randn({ 1, 3, 360, 640 }));
     std::cout << output.sizes() << std::endl;
+    info(layer.ptr());
 }
 
 [[maybe_unused]] static void test_media_mix() {
-    // 64, 24, 74
-    // 64, 52, 30
     chobits::nn::MediaMixBlock layer(
-        64, 128,
+        64, 128,    
         24, 74,
-        52, 30,
+        30, 52,
         24, 74
     );
     auto output = layer->forward(
         torch::randn({ 1, 64, 24, 74 }),
-        torch::randn({ 1, 64, 52, 30 })
+        torch::randn({ 1, 64, 30, 52 })
     );
     std::cout << output.sizes() << std::endl;
-    size_t total_numel = 0;
-    for(const auto& parameter : layer->named_parameters()) {
-        total_numel += parameter.value().numel();
-    }
-    std::cout << total_numel << std::endl;
+    info(layer.ptr());
 }
 
 [[maybe_unused]] static void test_residual() {
     chobits::nn::ResidualBlock layer(64, 128);
     auto output = layer->forward(torch::randn({ 1, 64, 20, 20 }));
     std::cout << output.sizes() << std::endl;
-    size_t total_numel = 0;
-    for(const auto& parameter : layer->named_parameters()) {
-        total_numel += parameter.value().numel();
-    }
-    std::cout << total_numel << std::endl;
+    info(layer.ptr());
 }
 
 [[maybe_unused]] static void test_attention() {
@@ -60,44 +52,56 @@
     // 64, 52, 30
     chobits::nn::AttentionBlock layer(64, 24 * 74);
     auto output = layer->forward(torch::randn({ 1, 64, 24, 74 }));
-    // chobits::nn::AttentionBlock layer(64, 52 * 30);
-    // auto output = layer->forward(torch::randn({ 1, 64, 52, 30 }));
+    // chobits::nn::AttentionBlock layer(64, 30 * 52);
+    // auto output = layer->forward(torch::randn({ 1, 64, 30, 52 }));
     std::cout << output.sizes() << std::endl;
-    size_t total_numel = 0;
-    for(const auto& parameter : layer->named_parameters()) {
-        total_numel += parameter.value().numel();
-    }
-    std::cout << total_numel << std::endl;
+    info(layer.ptr());
 }
 
 [[maybe_unused]] static void test_residual_attention() {
     chobits::nn::ResidualAttentionBlock layer(64, 128, 24 * 74);
     auto output = layer->forward(torch::randn({ 1, 64, 24, 74 }));
     std::cout << output.sizes() << std::endl;
-    size_t total_numel = 0;
-    for(const auto& parameter : layer->named_parameters()) {
-        total_numel += parameter.value().numel();
-    }
-    std::cout << total_numel << std::endl;
+    info(layer.ptr());
 }
 
 [[maybe_unused]] static void test_audio_tail() {
     chobits::nn::AudioTailBlock layer(256, 256, 24 * 74);
     auto output = layer->forward(torch::randn({ 1, 256, 24, 74 }));
     std::cout << output.sizes() << std::endl;
+    info(layer.ptr());
 }
 
 [[maybe_unused]] static void test_model() {
     auto audio = torch::randn({ 1, 2, 201, 601 });
-    auto video = torch::randn({ 1, 3, 640, 360 });
+    auto video = torch::randn({ 1, 3, 360, 640 });
     chobits::model::Trainer trainer;
     trainer.load("chobits.pt", false);
     trainer.test();
     // trainer.save("chobits.pt");
 }
 
+[[maybe_unused]] static void test_trainer() {
+    std::thread player_thread([]() {
+        chobits::player::open_player();
+    });
+    std::thread media_thread([]() {
+        // chobits::media::open_file("D:/tmp/video.mp4");
+        chobits::media::open_hardware();
+    });
+    std::thread model_thread([]() {
+        chobits::model::Trainer trainer;
+        trainer.load();
+        trainer.eval();
+        // trainer.train();
+        // trainer.save();
+    });
+    player_thread.join();
+    media_thread.join();
+    model_thread.join();
+}
+
 int main() {
-    // test_trainer();
     // test_audio_head();
     // test_video_head();
     // test_media_mix();
@@ -105,6 +109,7 @@ int main() {
     // test_attention();
     // test_residual_attention();
     // test_audio_tail();
-    test_model();
+    // test_model();
+    test_trainer();
     return 0;
 }

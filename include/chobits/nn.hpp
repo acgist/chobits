@@ -15,8 +15,6 @@
 #ifndef CHOBITS_NN_HPP
 #define CHOBITS_NN_HPP
 
-#include <string>
-
 #include "torch/nn.h"
 
 namespace chobits::nn {
@@ -63,7 +61,8 @@ public:
              output = output + torch::tanh(output);
              output = this->conv_2->forward(output);
              output = output + torch::tanh(output);
-        return this->conv_3->forward(output);
+             output = this->conv_3->forward(output);
+        return output;
     }
 
 };
@@ -97,7 +96,7 @@ public:
         this->conv_3 = this->register_module("conv_3", torch::nn::Sequential(
             torch::nn::Conv2d(torch::nn::Conv2dOptions(out[1], out[2], kernel[2]).stride(stride[2]).bias(false)),
             torch::nn::GroupNorm(torch::nn::GroupNormOptions(num_groups, out[2])),
-            torch::nn::Tanh()
+            torch::nn::SiLU()
         ));
     }
     ~VideoHeadBlockImpl() {
@@ -112,13 +111,17 @@ public:
              output = output + torch::tanh(output);
              output = this->conv_2->forward(output);
              output = output + torch::tanh(output);
-        return this->conv_3->forward(output);
+             output = this->conv_3->forward(output);
+        return output;
     }
 
 };
 
 TORCH_MODULE(VideoHeadBlock);
 
+/**
+ * 媒体混合
+ */
 class MediaMixBlockImpl : public torch::nn::Module {
 
 private:
@@ -126,13 +129,15 @@ private:
     int out_h;
     torch::nn::Sequential audio{ nullptr };
     torch::nn::Sequential video{ nullptr };
+    torch::nn::Sequential media{ nullptr };
 
 public:
     MediaMixBlockImpl(
-        int in, int out,
+        int in,      int out,
         int audio_w, int audio_h,
         int video_w, int video_h,
-        int out_w  , int out_h
+        int out_w,   int out_h,
+        int num_groups = 16
     ) : out_w(out_w), out_h(out_h) {
         if(audio_w == out_w && audio_h == out_h) {
             this->audio = this->register_module("audio", torch::nn::Sequential(
@@ -143,7 +148,8 @@ public:
             this->audio = this->register_module("audio", torch::nn::Sequential(
                 torch::nn::Conv2d(torch::nn::Conv2dOptions(in, out, 3).padding(1).bias(false)),
                 torch::nn::Flatten(torch::nn::FlattenOptions().start_dim(2)),
-                torch::nn::Linear(torch::nn::LinearOptions(audio_w * audio_h, out_w * out_h).bias(false))
+                torch::nn::Linear(torch::nn::LinearOptions(audio_w * audio_h, out_w * out_h).bias(false)),
+                torch::nn::ReLU()
             ));
         }
         if(video_w == out_w && video_h == out_h) {
@@ -155,23 +161,31 @@ public:
             this->video = this->register_module("video", torch::nn::Sequential(
                 torch::nn::Conv2d(torch::nn::Conv2dOptions(in, out, 3).padding(1).bias(false)),
                 torch::nn::Flatten(torch::nn::FlattenOptions().start_dim(2)),
-                torch::nn::Linear(torch::nn::LinearOptions(video_w * video_h, out_w * out_h).bias(false))
+                torch::nn::Linear(torch::nn::LinearOptions(video_w * video_h, out_w * out_h).bias(false)),
+                torch::nn::ReLU()
             ));
         }
+        this->media = this->register_module("media", torch::nn::Sequential(
+            torch::nn::Conv2d(torch::nn::Conv2dOptions(out, out, 3).padding(1).bias(false)),
+            torch::nn::GroupNorm(torch::nn::GroupNormOptions(num_groups, out)),
+            torch::nn::ReLU()
+        ));
     }
     ~MediaMixBlockImpl() {
         this->unregister_module("audio");
         this->unregister_module("video");
+        this->unregister_module("media");
     }
     
 public:
     torch::Tensor forward(const torch::Tensor& audio, const torch::Tensor& video) {
         auto audio_out = this->audio->forward(audio);
         auto video_out = this->video->forward(video);
-        auto out = audio_out + video_out;
-        const int N = out.size(0);
-        const int C = out.size(1);
-        return out.reshape({ N, C, this->out_w, this->out_h });
+        auto media_out = audio_out + video_out;
+//      auto media_out = torch::concat({ audio_out, video_out });
+        const int N = media_out.size(0);
+        const int C = media_out.size(1);
+        return this->media->forward(media_out.reshape({ N, C, this->out_w, this->out_h }));
     }
 
 };
@@ -223,7 +237,9 @@ public:
             torch::nn::Conv2d(torch::nn::Conv2dOptions(out, out, 3).padding(1).bias(false))
         ));
         this->conv_3_1 = this->register_module("conv_3_1", torch::nn::Sequential(
-            torch::nn::Conv2d(torch::nn::Conv2dOptions(out * 2, out, 3).padding(1).bias(false))
+            torch::nn::Conv2d(torch::nn::Conv2dOptions(out * 2, out, 3).padding(1).bias(false)),
+            torch::nn::GroupNorm(torch::nn::GroupNormOptions(num_groups, out)),
+            torch::nn::SiLU()
         ));
     }
     ~ResidualBlockImpl() {
@@ -280,9 +296,7 @@ public:
     AttentionBlockImpl(const int channels, const int embed_dim, const int num_heads = 8, const int num_groups = 16, const float dropout = 0.3) {
         const int qkv_channels = channels * 3;
         this->qkv = this->register_module("qkv", torch::nn::Sequential(
-            torch::nn::Conv2d(torch::nn::Conv2dOptions(channels, qkv_channels, 1).bias(false)),
-            torch::nn::GroupNorm(torch::nn::GroupNormOptions(num_groups, qkv_channels)),
-            torch::nn::SiLU()
+            torch::nn::Conv2d(torch::nn::Conv2dOptions(channels, qkv_channels, 1).bias(false))
         ));
         this->attn = this->register_module("attn", torch::nn::MultiheadAttention(
             torch::nn::MultiheadAttentionOptions(embed_dim, num_heads).dropout(dropout))
@@ -319,6 +333,9 @@ public:
 
 TORCH_MODULE(AttentionBlock);
 
+/**
+ * 残差自注意力
+ */
 class ResidualAttentionBlockImpl : public torch::nn::Module {
 
 private:
@@ -357,6 +374,9 @@ public:
 
 TORCH_MODULE(ResidualAttentionBlock);
 
+/**
+ * 音频输出
+ */
 class AudioTailBlockImpl : public torch::nn::Module {
 
 private:
@@ -364,7 +384,13 @@ private:
     torch::nn::Sequential  conv     { nullptr };
 
 public:
-    AudioTailBlockImpl(const int in, const int out, const int embed_dim, std::vector<int> channels = { 128, 16, 2 }, std::vector<int> kernel = { 3, 3, 5 }) {
+    AudioTailBlockImpl(
+        const int in,
+        const int out,
+        const int embed_dim,
+        std::vector<int> channels = { 128, 16, 2 },
+        std::vector<int> kernel   = {   3,  3, 5 }
+    ) {
         this->resi_attn = this->register_module("resi_attn", chobits::nn::ResidualAttentionBlock(in, out, embed_dim));
         this->conv = this->register_module("conv", torch::nn::Sequential(
             torch::nn::ConvTranspose2d(torch::nn::ConvTranspose2dOptions(out,         channels[0], kernel[0]).stride(2).bias(false)),

@@ -81,11 +81,13 @@ add_library(
     chobits-core
     src/chobits/media.cpp
     src/chobits/model.cpp
+    src/chobits/player.cpp
+    src/chobits/chobits.cpp
 )
 
 target_include_directories(
-    chobits-core PUBLIC
-    include/
+    chobits-core
+    PUBLIC include/ ${FFMPEG_INCLUDE_DIRS}
 )
 
 target_link_libraries(
@@ -126,8 +128,7 @@ target_link_libraries(
 
 set_target_properties(
     ${PROJECT_NAME}
-    PROPERTIES PUBLIC_HEADER
-    "include/chobits/nn.hpp;include/chobits/media.hpp;include/chobits/model.hpp"
+    PROPERTIES PUBLIC_HEADER "include/chobits/nn.hpp;include/chobits/media.hpp;include/chobits/model.hpp;include/chobits/player.hpp;include/chobits/chobits.hpp;"
 )
 
 install(
@@ -173,9 +174,7 @@ if(BUILD_TEST)
     )
     add_test(NAME test_media COMMAND test_media)
     set_target_properties(test_media PROPERTIES FOLDER "test")
-endif()
 
-if(BUILD_TEST)
     add_executable(
         test_model
         test/test_model.cpp
