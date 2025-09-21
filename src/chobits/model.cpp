@@ -4,7 +4,6 @@
 #include "chobits/player.hpp"
 #include "chobits/chobits.hpp"
 
-#include <memory>
 #include <thread>
 #include <filesystem>
 
@@ -12,22 +11,23 @@
 
 /**
  * 输入：
- *   - 音频（耳朵）
- *   - 视频（眼睛）
- *   - 其他（感受）
+ *   - 音频（耳朵麦克风）
+ *   - 视频（眼睛摄像头）
  * 
  * 输出：
- *   - 音频（嘴巴）
- *   - 动作（肌肉）
+ *   - 音频（嘴巴扬声器）
+ *   - 动作（肌肉传感器）
  * 
  * 预测：
  *   - 音频：预测所有音频
  *   - 动作：控制运动、控制镜头（输出两个XY角度分量）
  *     * 视频训练：暂无
  *     * 现实训练：暂无
- *   - 预测一秒后的数据（慢慢的傻傻的也挺可爱）
+ *   - 预测五百毫秒后的数据（慢慢的傻傻的也挺可爱）
+ * 
+ * 记忆：短时记忆、识别模式
  */
-class Chobits : public torch::nn::Module {
+class ChobitsImpl : public torch::nn::Module {
 
 private:
     torch::Tensor                       state;
@@ -50,11 +50,26 @@ private:
     chobits::nn::AudioTailBlock         audio_tail       { nullptr };
 
 public:
-    Chobits() {
+    ChobitsImpl() {
     }
-    ~Chobits() {
+    ~ChobitsImpl() {
         this->unregister_module("audio_head");
         this->unregister_module("video_head");
+        this->unregister_module("audio_resi_attn_1");
+        this->unregister_module("video_resi_attn_1");
+        this->unregister_module("audio_media_mix_1");
+        this->unregister_module("video_media_mix_1");
+        this->unregister_module("audio_resi_attn_2");
+        this->unregister_module("video_resi_attn_2");
+        this->unregister_module("audio_media_mix_2");
+        this->unregister_module("video_media_mix_2");
+        this->unregister_module("audio_resi_attn_3");
+        this->unregister_module("video_resi_attn_3");
+        this->unregister_module("media_mix");
+        this->unregister_module("audio_resi_attn_4");
+        this->unregister_module("video_resi_attn_4");
+        this->unregister_module("media_mem");
+        this->unregister_module("audio_tail");
     }
 
 public:
@@ -72,9 +87,9 @@ public:
         this->video_media_mix_2 = this->register_module("video_media_mix_2", chobits::nn::MediaMixBlock(128, 256, 24, 74, 30, 52, 30, 52));
         this->audio_resi_attn_3 = this->register_module("audio_resi_attn_3", chobits::nn::ResidualAttentionBlock(256, 256, 24 * 74));
         this->video_resi_attn_3 = this->register_module("video_resi_attn_3", chobits::nn::ResidualAttentionBlock(256, 256, 30 * 52));
+        this->media_mix         = this->register_module("media_mix",         chobits::nn::MediaMixBlock(256, 256, 24, 74, 30, 52, 24, 74));
         this->audio_resi_attn_4 = this->register_module("audio_resi_attn_4", chobits::nn::ResidualAttentionBlock(64, 256, 24 * 74));
         this->video_resi_attn_4 = this->register_module("video_resi_attn_4", chobits::nn::ResidualAttentionBlock(64, 256, 30 * 52));
-        this->media_mix         = this->register_module("media_mix",         chobits::nn::MediaMixBlock(256, 256, 24, 74, 30, 52, 24, 74));
         this->media_mem         = this->register_module("media_mem",         chobits::nn::MediaMixBlock(256, 256, 24, 74, 30, 52, 24, 74));
         this->audio_tail        = this->register_module("audio_tail",        chobits::nn::AudioTailBlock(256, 256, 24 * 74));
     }
@@ -102,12 +117,16 @@ public:
 
 };
 
+TORCH_MODULE(Chobits);
+
+using AdamWOptimizer = std::shared_ptr<torch::optim::AdamW>;
+
 struct TrainerState {
-    float learning_rate  = 0.0001;
-    float clip_grad_norm = 1.0;
-    std::shared_ptr<Chobits>             model     = nullptr;
-    std::shared_ptr<torch::optim::AdamW> optimizer = nullptr;
-    torch::DeviceType                    device    = torch::cuda::is_available() ? torch::DeviceType::CUDA : torch::DeviceType::CPU;
+    float learning_rate            = 0.0001;
+    float clip_grad_norm           = 1.0;
+    Chobits              model     = nullptr;
+    AdamWOptimizer       optimizer = nullptr;
+    torch::DeviceType    device    = torch::cuda::is_available() ? torch::DeviceType::CUDA : torch::DeviceType::CPU;
 };
 
 static TrainerState trainer_state{};
@@ -134,7 +153,7 @@ bool chobits::model::Trainer::load(const std::string& path, bool load_file) {
         }
     }
     if(!trainer_state.model) {
-        trainer_state.model = std::make_shared<Chobits>();
+        trainer_state.model = Chobits();
         trainer_state.model->define();
     }
     trainer_state.model->to(trainer_state.device);
@@ -223,6 +242,8 @@ void chobits::model::Trainer::info() {
         total_numel += numel;
         std::printf("模型参数数量: %s = %ld\n", buffer.key().c_str(), numel);
     }
+    std::printf("模型参数总量: %ld\n", total_numel);
+    total_numel = 0;
     for(const auto& parameter : trainer_state.model->named_parameters()) {
         size_t numel = parameter.value().numel();
         total_numel += numel;

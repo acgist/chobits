@@ -33,7 +33,7 @@ struct Dataset {
     int batch_size = 10;
     int cache_size = 600;
     int audio_size = 48000;
-    std::mutex lock;
+    std::mutex mutex;
     std::condition_variable condition;
     std::vector<torch::Tensor> audio;
     std::vector<torch::Tensor> video;
@@ -43,6 +43,7 @@ static Dataset dataset = {};
 
 static SwrContext* init_audio_swr(AVCodecContext* ctx);
 static SwsContext* init_video_sws(int width, int height, AVPixelFormat format);
+
 static bool audio_to_tensor(SwrContext* swr, AVFrame* frame);
 static bool video_to_tensor(SwsContext* sws, AVFrame* frame);
 
@@ -79,7 +80,7 @@ bool chobits::media::open_file(const std::string& file) {
         std::printf("查找媒体轨道失败：%d - %d\n", audio_index, video_index);
         return false;
     }
-    std::printf("打开输入文件成功：%d - %d\n", audio_index, video_index);
+    std::printf("打开输入文件成功：%d - %d - %s\n", audio_index, video_index, file.c_str());
     const AVStream* audio_stream    = format_ctx->streams[audio_index];
     const AVCodec * audio_codec     = avcodec_find_decoder(audio_stream->codecpar->codec_id);
     AVCodecContext* audio_codec_ctx = avcodec_alloc_context3(audio_codec);
@@ -112,7 +113,7 @@ bool chobits::media::open_file(const std::string& file) {
         avcodec_free_context(&audio_codec_ctx);
         avcodec_free_context(&video_codec_ctx);
         avformat_close_input(&format_ctx);
-        std::printf("打开音视频重采样失败");
+        std::printf("打开音视频重采样失败\n");
         return false;
     }
     dataset.discard = false;
@@ -207,7 +208,7 @@ bool chobits::media::open_hardware() {
     if(ret != 0) {
         avformat_close_input(&audio_format_ctx);
         avformat_close_input(&video_format_ctx);
-        std::printf("打开音频硬件失败：%d - %s", ret, audio_device_name.c_str());
+        std::printf("打开音频硬件失败：%d - %s\n", ret, audio_device_name.c_str());
         return false;
     }
     ret = avformat_open_input(&video_format_ctx, video_device_name.c_str(), video_format, &video_options);
@@ -215,7 +216,7 @@ bool chobits::media::open_hardware() {
     if(ret != 0) {
         avformat_close_input(&audio_format_ctx);
         avformat_close_input(&video_format_ctx);
-        std::printf("打开视频硬件失败：%d - %s", ret, video_device_name.c_str());
+        std::printf("打开视频硬件失败：%d - %s\n", ret, video_device_name.c_str());
         return false;
     }
     av_dump_format(audio_format_ctx, 0, audio_format_ctx->url, 0);
@@ -238,7 +239,7 @@ bool chobits::media::open_hardware() {
         SwrContext* audio_swr = init_audio_swr(audio_codec_ctx);
         if(audio_swr == nullptr) {
             avcodec_free_context(&audio_codec_ctx);
-            std::printf("打开音频重采样失败");
+            std::printf("打开音频重采样失败\n");
             return;
         }
         AVFrame * frame  = av_frame_alloc();
@@ -275,7 +276,7 @@ bool chobits::media::open_hardware() {
         SwsContext* video_sws = init_video_sws(video_codec_ctx->width, video_codec_ctx->height, video_codec_ctx->pix_fmt);
         if(video_sws == nullptr) {
             avcodec_free_context(&video_codec_ctx);
-            std::printf("打开视频重采样失败");
+            std::printf("打开视频重采样失败\n");
             return;
         }
         AVFrame * frame  = av_frame_alloc();
@@ -310,7 +311,7 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> chobits::media::get_data() {
     std::vector<torch::Tensor> audio;
     std::vector<torch::Tensor> video;
     {
-        std::unique_lock<std::mutex> lock(dataset.lock);
+        std::unique_lock<std::mutex> lock(dataset.mutex);
         dataset.condition.wait(lock, []() {
             return
                 !(
@@ -341,7 +342,7 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> chobits::media::get_data() {
 
 void chobits::media::stop_all() {
     std::printf("关闭媒体\n");
-    std::unique_lock<std::mutex> lock(dataset.lock);
+    std::unique_lock<std::mutex> lock(dataset.mutex);
     dataset.condition.notify_all();
 }
 
@@ -392,7 +393,7 @@ static bool audio_to_tensor(SwrContext* swr, AVFrame* frame) {
     while(pos >= dataset.audio_size) {
         auto tensor = chobits::media::pcm_stft(reinterpret_cast<short*>(audio_buffer.data()), dataset.audio_size);
         {
-            std::unique_lock<std::mutex> lock(dataset.lock);
+            std::unique_lock<std::mutex> lock(dataset.mutex);
             if(dataset.audio.size() >= dataset.cache_size && dataset.discard) {
                 std::printf("丢弃音频数据\n");
             } else {
@@ -406,10 +407,11 @@ static bool audio_to_tensor(SwrContext* swr, AVFrame* frame) {
         }
     }
     if(!dataset.discard) {
-        std::unique_lock<std::mutex> lock(dataset.lock);
+        std::unique_lock<std::mutex> lock(dataset.mutex);
         dataset.condition.wait(lock, []() {
             return !(chobits::running && dataset.audio.size() > dataset.cache_size);
         });
+        dataset.condition.notify_all();
     }
     return true;
 }
@@ -417,11 +419,11 @@ static bool audio_to_tensor(SwrContext* swr, AVFrame* frame) {
 static bool video_to_tensor(SwsContext* sws, AVFrame* frame) {
     static int width = chobits::video_width * 3;
     static std::vector<uint8_t> video_buffer(av_image_get_buffer_size(video_pix_format, chobits::video_width, chobits::video_height, 1));
-    uint8_t* const buffer = video_buffer.data();
+    uint8_t* buffer = video_buffer.data();
     sws_scale(sws, (const uint8_t* const *) frame->data, frame->linesize, 0, frame->height, &buffer, &width);
     chobits::player::play_video(buffer, width);
     {
-        std::unique_lock<std::mutex> lock(dataset.lock);
+        std::unique_lock<std::mutex> lock(dataset.mutex);
         if(dataset.audio.size() >= dataset.video.size()) {
             auto tensor = torch::from_blob(
                 buffer,
@@ -439,10 +441,11 @@ static bool video_to_tensor(SwsContext* sws, AVFrame* frame) {
         }
     }
     if(!dataset.discard) {
-        std::unique_lock<std::mutex> lock(dataset.lock);
+        std::unique_lock<std::mutex> lock(dataset.mutex);
         dataset.condition.wait(lock, []() {
             return !(chobits::running && dataset.video.size() > dataset.cache_size);
         });
+        dataset.condition.notify_all();
     }
     return true;
 }

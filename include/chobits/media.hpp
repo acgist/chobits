@@ -33,8 +33,6 @@ extern bool open_hardware();
 extern void stop_all();
 
 /**
- * 数据集
- * 
  * @return [ audio, video, label ]
  */
 extern std::tuple<at::Tensor, at::Tensor, at::Tensor> get_data();

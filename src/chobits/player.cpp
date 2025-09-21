@@ -26,6 +26,8 @@ static PlayerState player_state = {};
 
 static bool init_audio_player();
 static bool init_video_player();
+static void stop_audio_player();
+static void stop_video_player();
 
 bool chobits::player::open_player() {
     int ret = SDL_Init(SDL_INIT_AUDIO | SDL_INIT_VIDEO);
@@ -35,9 +37,11 @@ bool chobits::player::open_player() {
     }
     if(init_audio_player() && init_video_player()) {
         SDL_Event event;
+        std::printf("打开播放器\n");
         while(chobits::running) {
             SDL_WaitEventTimeout(&event, 1000);
             if(event.type == SDL_QUIT) {
+                std::printf("关闭播放器\n");
                 chobits::running = false;
                 chobits::media::stop_all();
                 chobits::model::stop_all();
@@ -47,32 +51,16 @@ bool chobits::player::open_player() {
     } else {
         // -
     }
-    if(player_state.audio_id != 0) {
-        SDL_CloseAudioDevice(player_state.audio_id);
-        player_state.audio_id = 0;
-    }
-    if(player_state.texture) {
-        SDL_DestroyTexture(player_state.texture);
-        player_state.texture = nullptr;
-    }
-    if(player_state.renderer) {
-        SDL_DestroyRenderer(player_state.renderer);
-        player_state.renderer = nullptr;
-    }
-    if(player_state.window) {
-        SDL_DestroyWindow(player_state.window);
-        player_state.window = nullptr;
-    }
+    stop_audio_player();
+    stop_video_player();
     SDL_Quit();
     return true;
 }
 
 void chobits::player::stop_player() {
-    std::printf("关闭播放器\n");
     SDL_Event event;
     event.type = SDL_QUIT;
     SDL_PushEvent(&event);
-    SDL_Delay(10);
 }
 
 bool chobits::player::play_audio(const void* data, int len) {
@@ -121,4 +109,28 @@ static bool init_video_player() {
         return false;
     }
     return true;
+}
+
+static void stop_audio_player() {
+    std::printf("关闭音频播放器\n");
+    if(player_state.audio_id != 0) {
+        SDL_CloseAudioDevice(player_state.audio_id);
+        player_state.audio_id = 0;
+    }
+}
+
+static void stop_video_player() {
+    std::printf("关闭视频播放器\n");
+    if(player_state.texture) {
+        SDL_DestroyTexture(player_state.texture);
+        player_state.texture = nullptr;
+    }
+    if(player_state.renderer) {
+        SDL_DestroyRenderer(player_state.renderer);
+        player_state.renderer = nullptr;
+    }
+    if(player_state.window) {
+        SDL_DestroyWindow(player_state.window);
+        player_state.window = nullptr;
+    }
 }

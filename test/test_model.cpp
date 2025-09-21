@@ -109,7 +109,7 @@ int main() {
     // test_attention();
     // test_residual_attention();
     // test_audio_tail();
-    // test_model();
-    test_trainer();
+    test_model();
+    // test_trainer();
     return 0;
 }
