@@ -305,28 +305,34 @@ bool chobits::media::open_hardware() {
     return true;
 }
 
-std::tuple<at::Tensor, at::Tensor, at::Tensor> chobits::media::get_data() {
-    std::vector<torch::Tensor> label;
+std::tuple<at::Tensor, at::Tensor, at::Tensor> chobits::media::get_data(bool train) {
     std::vector<torch::Tensor> audio;
     std::vector<torch::Tensor> video;
+    std::vector<torch::Tensor> label;
     {
         std::unique_lock<std::mutex> lock(dataset.mutex);
-        dataset.condition.wait(lock, []() {
+        dataset.condition.wait(lock, [train]() {
+            auto batch_size = chobits::batch_size;
+            if(train) {
+                batch_size += 1;
+            }
             return
                 !(
                     chobits::running &&
                     (
-                        dataset.audio.size() < chobits::batch_size + 1 ||
-                        dataset.video.size() < chobits::batch_size + 1
+                        dataset.audio.size() < batch_size ||
+                        dataset.video.size() < batch_size
                     )
                 );
         });
         if(!chobits::running) {
             return {};
         }
-        audio.assign(dataset.audio.begin() + 0, dataset.audio.begin() + chobits::batch_size + 0);
-        video.assign(dataset.video.begin() + 0, dataset.video.begin() + chobits::batch_size + 0);
-        label.assign(dataset.audio.begin() + 1, dataset.audio.begin() + chobits::batch_size + 1);
+        audio.assign(dataset.audio.begin(), dataset.audio.begin() + chobits::batch_size);
+        video.assign(dataset.video.begin(), dataset.video.begin() + chobits::batch_size);
+        if(train) {
+            label.assign(dataset.audio.begin() + 1, dataset.audio.begin() + chobits::batch_size + 1);
+        }
         dataset.audio.erase(dataset.audio.begin(), dataset.audio.begin() + chobits::batch_size);
         dataset.video.erase(dataset.video.begin(), dataset.video.begin() + chobits::batch_size);
         std::printf("剩余数据：%d - %d\n", dataset.audio.size(), dataset.video.size());

@@ -206,6 +206,11 @@ void chobits::model::Trainer::train(const size_t epoch) {
         torch::Tensor loss = torch::mse_loss(pred, label);
         loss.backward();
         loss_val += loss.template item<float>();
+        if(chobits::batch_size == 1) {
+            torch::NoGradGuard no_grad_guard;
+            auto pcm = chobits::media::pcm_istft(pred);
+            chobits::player::play_audio(pcm.data(), pcm.size() * 2);
+        }
     }
     trainer_state.optimizer->step();
     torch::nn::utils::clip_grad_norm_(trainer_state.model->parameters(), trainer_state.clip_grad_norm);
@@ -218,17 +223,16 @@ void chobits::model::Trainer::eval() {
     trainer_state.model->eval();
     torch::NoGradGuard no_grad_guard;
     while(chobits::running) {
-        auto [audio, video, label] = chobits::media::get_data();
+        auto [audio, video, label] = chobits::media::get_data(false);
         if(audio.numel() == 0 || video.numel() == 0 || label.numel() == 0) {
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
             continue;
         }
         audio = audio.to(trainer_state.device);
         video = video.to(trainer_state.device);
-        label = label.to(trainer_state.device);
         auto pred = trainer_state.model->forward(audio, video);
-        torch::Tensor loss = torch::mse_loss(pred, label);
-        std::printf("验证损失：%f\n", loss.template item<float>());
+        auto pcm  = chobits::media::pcm_istft(pred);
+        chobits::player::play_audio(pcm.data(), pcm.size() * 2);
     }
 }
 
