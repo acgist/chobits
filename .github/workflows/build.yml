@@ -13,7 +13,7 @@ jobs:
         run: |
           mkdir deps
           cd    deps
-          sudo  add-apt-repository ppa:ubuntuhandbook1/ffmpeg6
+          sudo  add-apt-repository -y ppa:ubuntuhandbook1/ffmpeg6
           sudo  apt -y update
           sudo  apt -y install ffmpeg
           sudo  apt -y install libsdl2-dev

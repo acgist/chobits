@@ -4,6 +4,7 @@
 
 #include <mutex>
 #include <thread>
+#include <filesystem>
 #include <condition_variable>
 
 #include "torch/torch.h"
@@ -56,7 +57,24 @@ bool chobits::media::open_media(int argc, char const *argv[]) {
         player_thread.join();
         return ret;
     } else if(argc >= 2) {
-        return chobits::media::open_file(argv[1]);
+        auto path = argv[1];
+        if(std::filesystem::is_regular_file(path)) {
+            return chobits::media::open_file(path);
+        } else if(std::filesystem::is_directory(path)) {
+            const auto iterator = std::filesystem::directory_iterator(path);
+            for(const auto& entry : iterator) {
+                auto file_path = entry.path().string();
+                if(chobits::media::open_file(file_path)) {
+                    std::printf("文件处理完成：%s\n", file_path.c_str());
+                } else {
+                    std::printf("文件处理失败：%s\n", file_path.c_str());
+                }
+            }
+            return true;
+        } else {
+            std::printf("不支持的文件：%s\n", path);
+            return false;
+        }
     } else {
         std::printf("不支持的媒体\n");
         return false;
@@ -64,6 +82,10 @@ bool chobits::media::open_media(int argc, char const *argv[]) {
 }
 
 bool chobits::media::open_file(const std::string& file) {
+    if(!std::filesystem::is_regular_file(file)) {
+        std::printf("文件打开失败：%s\n", file.c_str());
+        return false;
+    }
     int ret = 0;
     AVFormatContext* format_ctx = avformat_alloc_context();
     ret = avformat_open_input(&format_ctx, file.c_str(), nullptr, nullptr);
