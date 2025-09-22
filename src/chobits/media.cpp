@@ -30,8 +30,7 @@ const static float NORMALIZATION = 32768.0F;
 
 struct Dataset {
     bool discard   = true;
-    int batch_size = 10;
-    int cache_size = 600;
+    int cache_size = 60;
     int audio_size = 48000;
     std::mutex mutex;
     std::condition_variable condition;
@@ -317,19 +316,19 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> chobits::media::get_data() {
                 !(
                     chobits::running &&
                     (
-                        dataset.audio.size() < dataset.batch_size + 1 ||
-                        dataset.video.size() < dataset.batch_size + 1
+                        dataset.audio.size() < chobits::batch_size + 1 ||
+                        dataset.video.size() < chobits::batch_size + 1
                     )
                 );
         });
         if(!chobits::running) {
             return {};
         }
-        audio.assign(dataset.audio.begin() + 0, dataset.audio.begin() + dataset.batch_size + 0);
-        video.assign(dataset.video.begin() + 0, dataset.video.begin() + dataset.batch_size + 0);
-        label.assign(dataset.audio.begin() + 1, dataset.audio.begin() + dataset.batch_size + 1);
-        dataset.audio.erase(dataset.audio.begin(), dataset.audio.begin() + dataset.batch_size);
-        dataset.video.erase(dataset.video.begin(), dataset.video.begin() + dataset.batch_size);
+        audio.assign(dataset.audio.begin() + 0, dataset.audio.begin() + chobits::batch_size + 0);
+        video.assign(dataset.video.begin() + 0, dataset.video.begin() + chobits::batch_size + 0);
+        label.assign(dataset.audio.begin() + 1, dataset.audio.begin() + chobits::batch_size + 1);
+        dataset.audio.erase(dataset.audio.begin(), dataset.audio.begin() + chobits::batch_size);
+        dataset.video.erase(dataset.video.begin(), dataset.video.begin() + chobits::batch_size);
         std::printf("剩余数据：%d - %d\n", dataset.audio.size(), dataset.video.size());
         dataset.condition.notify_all();
     }
@@ -343,6 +342,8 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> chobits::media::get_data() {
 void chobits::media::stop_all() {
     std::printf("关闭媒体\n");
     std::unique_lock<std::mutex> lock(dataset.mutex);
+    dataset.audio.clear();
+    dataset.video.clear();
     dataset.condition.notify_all();
 }
 
@@ -391,12 +392,23 @@ static bool audio_to_tensor(SwrContext* swr, AVFrame* frame) {
     // chobits::player::play_audio(buffer, size);
     pos += size;
     while(pos >= dataset.audio_size) {
-        auto tensor = chobits::media::pcm_stft(reinterpret_cast<short*>(audio_buffer.data()), dataset.audio_size);
         {
+            bool insert = false;
             std::unique_lock<std::mutex> lock(dataset.mutex);
-            if(dataset.audio.size() >= dataset.cache_size && dataset.discard) {
-                std::printf("丢弃音频数据\n");
+            if(dataset.audio.size() >= dataset.cache_size) {
+                if(dataset.discard) {
+                    // std::printf("丢弃音频数据：%ld\n", dataset.audio.size());
+                } else {
+                    dataset.condition.wait(lock, []() {
+                        return !(chobits::running && dataset.audio.size() > dataset.cache_size);
+                    });
+                    insert = true;
+                }
             } else {
+                insert = true;
+            }
+            if(insert) {
+                auto tensor = chobits::media::pcm_stft(reinterpret_cast<short*>(audio_buffer.data()), dataset.audio_size);
                 dataset.audio.push_back(tensor);
             }
             dataset.condition.notify_all();
@@ -405,13 +417,6 @@ static bool audio_to_tensor(SwrContext* swr, AVFrame* frame) {
         if(pos != 0) {
             std::memcpy(audio_buffer.data(), audio_buffer.data() + dataset.audio_size, pos);
         }
-    }
-    if(!dataset.discard) {
-        std::unique_lock<std::mutex> lock(dataset.mutex);
-        dataset.condition.wait(lock, []() {
-            return !(chobits::running && dataset.audio.size() > dataset.cache_size);
-        });
-        dataset.condition.notify_all();
     }
     return true;
 }
@@ -423,40 +428,51 @@ static bool video_to_tensor(SwsContext* sws, AVFrame* frame) {
     sws_scale(sws, (const uint8_t* const *) frame->data, frame->linesize, 0, frame->height, &buffer, &width);
     chobits::player::play_video(buffer, width);
     {
+        bool insert = false;
         std::unique_lock<std::mutex> lock(dataset.mutex);
         if(dataset.audio.size() >= dataset.video.size()) {
-            auto tensor = torch::from_blob(
-                buffer,
-                { chobits::video_height, chobits::video_width, 3 },
-                torch::kUInt8
-            ).to(torch::kFloat32).div(255.0).mul(2.0).sub(1.0).permute({ 2, 0, 1 }).contiguous();
-            {
-                if(dataset.video.size() >= dataset.cache_size && dataset.discard) {
-                    std::printf("丢弃视频数据\n");
+            if(dataset.video.size() >= dataset.cache_size) {
+                if(dataset.discard) {
+                    // std::printf("丢弃视频数据：%ld\n", dataset.video.size());
                 } else {
-                    dataset.video.push_back(tensor);
+                    dataset.condition.wait(lock, []() {
+                        return !(chobits::running && dataset.video.size() > dataset.cache_size);
+                    });
+                    insert = true;
                 }
-                dataset.condition.notify_all();
+            } else {
+                insert = true;
             }
+            if(insert) {
+                auto tensor = torch::from_blob(
+                    buffer,
+                    { chobits::video_height, chobits::video_width, 3 },
+                    torch::kUInt8
+                ).to(torch::kFloat32).div(255.0).mul(2.0).sub(1.0).permute({ 2, 0, 1 }).contiguous();
+                dataset.video.push_back(tensor);
+            }
+            dataset.condition.notify_all();
         }
-    }
-    if(!dataset.discard) {
-        std::unique_lock<std::mutex> lock(dataset.mutex);
-        dataset.condition.wait(lock, []() {
-            return !(chobits::running && dataset.video.size() > dataset.cache_size);
-        });
-        dataset.condition.notify_all();
     }
     return true;
 }
 
-at::Tensor chobits::media::pcm_stft(
-    short* pcm_data,
-    int pcm_size,
-    int n_fft,
-    int hop_size,
-    int win_size
-) {
+/**
+ * 短时傅里叶变换
+ * 
+ * 201 = win_size / 2 + 1
+ * 480 = 7 | 4800 = 61 | 48000 = 601
+ * [1, 201, 61, 2[实部, 虚部]]
+ * 
+ * @param pcm_data PCM数据
+ * @param pcm_size PCM长度
+ * @param n_fft    傅里叶变换的大小
+ * @param hop_size 相邻滑动窗口帧之间的距离
+ * @param win_size 窗口帧和STFT滤波器的大小
+ * 
+ * @return 张量
+ */
+at::Tensor chobits::media::pcm_stft(short* pcm_data, int pcm_size, int n_fft, int hop_size, int win_size) {
     auto data = torch::from_blob(pcm_data, { 1, pcm_size }, torch::kShort).to(torch::kFloat32) / NORMALIZATION;
     auto wind = torch::hann_window(win_size);
     auto real = torch::view_as_real(torch::stft(data, n_fft, hop_size, win_size, wind, true, "reflect", false, std::nullopt, true));
@@ -465,12 +481,17 @@ at::Tensor chobits::media::pcm_stft(
     return torch::stack({ mag, pha }, -1).squeeze().permute({ 2, 0, 1 });
 }
 
-std::vector<short> chobits::media::pcm_istft(
-    const at::Tensor& tensor,
-    int n_fft,
-    int hop_size,
-    int win_size
-) {
+/**
+ * 短时傅里叶逆变换
+ * 
+ * @param tensor   张量
+ * @param n_fft    傅里叶变换的大小
+ * @param hop_size 相邻滑动窗口帧之间的距离
+ * @param win_size 窗口帧和STFT滤波器的大小
+ * 
+ * @return PCM数据
+ */
+std::vector<short> chobits::media::pcm_istft(const at::Tensor& tensor, int n_fft, int hop_size, int win_size) {
     auto copy = tensor.permute({1, 2, 0}).unsqueeze(0);
     auto wind = torch::hann_window(win_size);
     auto mag  = copy.index({ "...", 0 });

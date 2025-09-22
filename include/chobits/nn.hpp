@@ -15,6 +15,9 @@
 #ifndef CHOBITS_NN_HPP
 #define CHOBITS_NN_HPP
 
+#include <cstdint>
+#include <cstdlib>
+
 #include "torch/nn.h"
 
 namespace chobits::nn {
@@ -400,6 +403,7 @@ public:
     }
     ~AudioTailBlockImpl() {
         this->unregister_module("resi_attn");
+        this->unregister_module("conv");
     }
 
 public:

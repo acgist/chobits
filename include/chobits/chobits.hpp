@@ -15,12 +15,10 @@
 #ifndef CHOBITS_HPP
 #define CHOBITS_HPP
 
-#include <cstdlib>
-#include <cstdint>
-
 namespace chobits {
 
 extern bool running;
+extern int  batch_size;
 extern int  audio_sample_rate;
 extern int  audio_nb_channels;
 extern int  video_width;

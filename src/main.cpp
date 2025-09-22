@@ -23,14 +23,7 @@ int main(int argc, char const *argv[]) {
         chobits::media::open_media(argc, argv);
     });
     std::thread model_thread([argc, argv]() {
-        chobits::model::Trainer trainer;
-        trainer.load();
-        if(argc >= 2 && std::strcmp("eval", argv[1]) == 0) {
-            trainer.eval();
-        } else {
-            trainer.train();
-            trainer.save();
-        }
+        chobits::model::open_model(argc, argv);
     });
     media_thread.join();
     model_thread.join();
@@ -53,6 +46,7 @@ static void stop_all() {
 static void sigint_handler(int code) {
     std::printf("处理信号：%d\n", code);
     if(code == SIGINT) {
+        std::printf("等待系统关闭...\n");
         stop_all();
     } else {
         // -

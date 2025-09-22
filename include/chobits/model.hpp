@@ -16,6 +16,8 @@
 #define CHOBITS_MODEL_HPP
 
 #include <string>
+#include <cstdint>
+#include <cstdlib>
 
 namespace chobits::model {
 
@@ -26,7 +28,7 @@ private:
 
 public:
     bool save(const std::string& path = "./chobits.pt");
-    bool load(const std::string& path = "./chobits.pt", bool load_file = true);
+    bool load(const std::string& path = "./chobits.pt");
     void train();
     void train(const size_t epoch);
     void eval();
@@ -34,6 +36,7 @@ public:
     
 };
 
+extern bool open_model(int argc, char const *argv[]);
 extern void stop_all();
 
 } // END OF chobits::model

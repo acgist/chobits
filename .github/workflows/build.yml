@@ -13,8 +13,10 @@ jobs:
         run: |
           mkdir deps
           cd    deps
-          sudo  apt install ffmpeg -y
-          sudo  apt install libsdl2-dev -y
+          sudo  add-apt-repository ppa:ubuntuhandbook1/ffmpeg6
+          sudo  apt -y update
+          sudo  apt -y install ffmpeg
+          sudo  apt -y install libsdl2-dev
           wget  https://download.pytorch.org/libtorch/cpu/libtorch-shared-with-deps-2.8.0%2Bcpu.zip > /dev/null 2>&1
           unzip libtorch-shared-with-deps-2.8.0+cpu.zip > /dev/null 2>&1
       - name: Deploy chobits
@@ -23,7 +25,7 @@ jobs:
           g++ -v
           cmake -version
           mkdir build
-          cd build
+          cd    build
           cmake .. -DCMAKE_BUILD_TYPE=Release
           make
           sudo make install

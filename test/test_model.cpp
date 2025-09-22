@@ -72,11 +72,18 @@ static void info(std::shared_ptr<torch::nn::Module> layer) {
     info(layer.ptr());
 }
 
+[[maybe_unused]] static void test_load_save() {
+    chobits::model::Trainer trainer;
+    trainer.load();
+    trainer.save();
+    trainer.load();
+}
+
 [[maybe_unused]] static void test_model() {
     auto audio = torch::randn({ 1, 2, 201, 601 });
     auto video = torch::randn({ 1, 3, 360, 640 });
     chobits::model::Trainer trainer;
-    trainer.load("chobits.pt", false);
+    trainer.load();
     trainer.test();
     // trainer.save("chobits.pt");
 }
@@ -92,9 +99,9 @@ static void info(std::shared_ptr<torch::nn::Module> layer) {
     std::thread model_thread([]() {
         chobits::model::Trainer trainer;
         trainer.load();
-        trainer.eval();
-        // trainer.train();
-        // trainer.save();
+        // trainer.eval();
+        trainer.train();
+        trainer.save();
     });
     player_thread.join();
     media_thread.join();
@@ -109,7 +116,8 @@ int main() {
     // test_attention();
     // test_residual_attention();
     // test_audio_tail();
-    test_model();
-    // test_trainer();
+    // test_load_save();
+    // test_model();
+    test_trainer();
     return 0;
 }
