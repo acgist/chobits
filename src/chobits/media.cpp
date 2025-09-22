@@ -335,7 +335,7 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> chobits::media::get_data(bool tra
         }
         dataset.audio.erase(dataset.audio.begin(), dataset.audio.begin() + chobits::batch_size);
         dataset.video.erase(dataset.video.begin(), dataset.video.begin() + chobits::batch_size);
-        std::printf("剩余数据：%ld - %ld\n", dataset.audio.size(), dataset.video.size());
+        // std::printf("剩余数据：%ld - %ld\n", dataset.audio.size(), dataset.video.size());
         dataset.condition.notify_all();
     }
     return {
@@ -386,18 +386,18 @@ static SwsContext* init_video_sws(int width, int height, AVPixelFormat format) {
 }
 
 static bool audio_to_tensor(SwrContext* swr, AVFrame* frame) {
-    static size_t pos = 0;
+    static size_t remain = 0;
     static std::vector<uint8_t> audio_buffer(chobits::audio_nb_channels * audio_bytes_per_sample * chobits::audio_sample_rate);
     const size_t size = chobits::audio_nb_channels * audio_bytes_per_sample * frame->nb_samples;
-    if(pos + size > audio_buffer.size()) {
-        std::printf("音频数据大小错误：%ld - %ld\n", pos, size);
+    if(remain + size > audio_buffer.size()) {
+        std::printf("音频数据大小错误：%ld - %ld\n", remain, size);
         return false;
     }
-    uint8_t* buffer = audio_buffer.data() + pos;
+    uint8_t* buffer = audio_buffer.data() + remain;
     swr_convert(swr, &buffer, frame->nb_samples, (const uint8_t**) frame->data, frame->nb_samples);
     chobits::player::play_audio(buffer, size);
-    pos += size;
-    while(pos >= dataset.audio_size) {
+    remain += size;
+    while(remain >= dataset.audio_size) {
         {
             bool insert = false;
             std::unique_lock<std::mutex> lock(dataset.mutex);
@@ -419,9 +419,9 @@ static bool audio_to_tensor(SwrContext* swr, AVFrame* frame) {
             }
             dataset.condition.notify_all();
         }
-        pos -= dataset.audio_size;
-        if(pos != 0) {
-            std::memcpy(audio_buffer.data(), audio_buffer.data() + dataset.audio_size, pos);
+        remain -= dataset.audio_size;
+        if(remain != 0) {
+            std::memcpy(audio_buffer.data(), audio_buffer.data() + dataset.audio_size, remain);
         }
     }
     return true;

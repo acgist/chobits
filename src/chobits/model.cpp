@@ -207,7 +207,7 @@ void chobits::model::Trainer::train(const size_t epoch) {
         loss_val += loss.template item<float>();
         if(chobits::batch_size == 1) {
             torch::NoGradGuard no_grad_guard;
-            auto pcm = chobits::media::pcm_istft(pred);
+            auto pcm = chobits::media::pcm_istft(pred.squeeze(0).cpu());
             chobits::player::play_audio(pcm.data(), pcm.size() * 2);
         }
     }
@@ -230,7 +230,7 @@ void chobits::model::Trainer::eval() {
         audio = audio.to(trainer_state.device);
         video = video.to(trainer_state.device);
         auto pred = trainer_state.model->forward(audio, video);
-        auto pcm  = chobits::media::pcm_istft(pred);
+        auto pcm  = chobits::media::pcm_istft(pred.squeeze(0).cpu());
         chobits::player::play_audio(pcm.data(), pcm.size() * 2);
     }
 }
@@ -266,7 +266,7 @@ bool chobits::model::open_model(int argc, char const *argv[]) {
     if(argc == 1 || (argc >= 2 && std::strcmp("eval", argv[1]) == 0)) {
         chobits::batch_size = 1;
     } else {
-        chobits::batch_size = 1;
+        chobits::batch_size = 10;
     }
     chobits::model::Trainer trainer;
     trainer.load();
