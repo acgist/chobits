@@ -2,9 +2,9 @@
 #include "chobits/model.hpp"
 #include "chobits/chobits.hpp"
 
-#include "signal.h"
-
 #include <thread>
+#include <csignal>
+#include <cstring>
 
 static void help();
 static void stop_all();

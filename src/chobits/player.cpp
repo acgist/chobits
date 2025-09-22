@@ -16,7 +16,10 @@ struct PlayerState {
         .channels = static_cast<uint8_t>(chobits::audio_nb_channels),
         .silence  = 0,
         .samples  = 4800,
-        .callback = nullptr
+        .padding  = 0,
+        .size     = 0,
+        .callback = nullptr,
+        .userdata = nullptr
     };
 };
 

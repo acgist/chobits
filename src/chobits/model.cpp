@@ -161,8 +161,7 @@ bool chobits::model::Trainer::load(const std::string& path) {
             std::printf("加载模型失败：%s", e.what());
         }
     }
-    trainer_state.model->memory.to(trainer_state.device);
-    // trainer_state.model->memory = trainer_state.model->memory.to(trainer_state.device);
+    trainer_state.model->memory = trainer_state.model->memory.to(trainer_state.device);
     trainer_state.model->to(trainer_state.device);
     trainer_state.model->eval();
     this->info();
@@ -188,7 +187,7 @@ void chobits::model::Trainer::train() {
 }
 
 void chobits::model::Trainer::train(const size_t epoch) {
-    static const size_t epoch_count = 2;
+    static const int epoch_count = 10;
     double loss_val = 0.0;
     trainer_state.model->train();
     const auto a = std::chrono::system_clock::now();

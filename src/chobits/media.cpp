@@ -29,9 +29,9 @@ const static int             audio_bytes_per_sample = av_get_bytes_per_sample(au
 const static float NORMALIZATION = 32768.0F;
 
 struct Dataset {
-    bool discard   = true;
-    int cache_size = 60;
-    int audio_size = 48000;
+    bool   discard    = true;
+    size_t cache_size = 60;
+    size_t audio_size = 48000;
     std::mutex mutex;
     std::condition_variable condition;
     std::vector<torch::Tensor> audio;
@@ -312,7 +312,7 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> chobits::media::get_data(bool tra
     {
         std::unique_lock<std::mutex> lock(dataset.mutex);
         dataset.condition.wait(lock, [train]() {
-            auto batch_size = chobits::batch_size;
+            size_t batch_size = chobits::batch_size;
             if(train) {
                 batch_size += 1;
             }
@@ -335,7 +335,7 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> chobits::media::get_data(bool tra
         }
         dataset.audio.erase(dataset.audio.begin(), dataset.audio.begin() + chobits::batch_size);
         dataset.video.erase(dataset.video.begin(), dataset.video.begin() + chobits::batch_size);
-        std::printf("剩余数据：%d - %d\n", dataset.audio.size(), dataset.video.size());
+        std::printf("剩余数据：%ld - %ld\n", dataset.audio.size(), dataset.video.size());
         dataset.condition.notify_all();
     }
     return {
@@ -386,16 +386,16 @@ static SwsContext* init_video_sws(int width, int height, AVPixelFormat format) {
 }
 
 static bool audio_to_tensor(SwrContext* swr, AVFrame* frame) {
-    static int pos = 0;
+    static size_t pos = 0;
     static std::vector<uint8_t> audio_buffer(chobits::audio_nb_channels * audio_bytes_per_sample * chobits::audio_sample_rate);
-    const int size = chobits::audio_nb_channels * audio_bytes_per_sample * frame->nb_samples;
+    const size_t size = chobits::audio_nb_channels * audio_bytes_per_sample * frame->nb_samples;
     if(pos + size > audio_buffer.size()) {
-        std::printf("音频数据大小错误：%d - %d\n", pos, size);
+        std::printf("音频数据大小错误：%ld - %ld\n", pos, size);
         return false;
     }
     uint8_t* buffer = audio_buffer.data() + pos;
     swr_convert(swr, &buffer, frame->nb_samples, (const uint8_t**) frame->data, frame->nb_samples);
-    // chobits::player::play_audio(buffer, size);
+    chobits::player::play_audio(buffer, size);
     pos += size;
     while(pos >= dataset.audio_size) {
         {
