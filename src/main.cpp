@@ -7,7 +7,6 @@
 #include <cstring>
 
 static void help();
-static void stop_all();
 static void sigint_handler(int code);
 
 int main(int argc, char const *argv[]) {
@@ -37,17 +36,10 @@ static void help() {
 现实生活训练：chobits\n)");
 }
 
-static void stop_all() {
-    chobits::running = false;
-    chobits::media::stop_all();
-    chobits::model::stop_all();
-}
-
 static void sigint_handler(int code) {
     std::printf("处理信号：%d\n", code);
     if(code == SIGINT) {
-        std::printf("等待系统关闭...\n");
-        stop_all();
+        chobits::stop_all();
     } else {
         // -
     }

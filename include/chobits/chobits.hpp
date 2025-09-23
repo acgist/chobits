@@ -24,6 +24,8 @@ extern int  audio_nb_channels;
 extern int  video_width;
 extern int  video_height;
 
+extern void stop_all();
+
 } // END OF chobits
 
 #endif // CHOBITS_HPP

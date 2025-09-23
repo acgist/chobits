@@ -27,30 +27,11 @@
     output.close();
 }
 
-[[maybe_unused]] static void test_rgb24() {
-    float data[4][5][3] = {
-        {
-            { 1, 1, 1 }, { 1, 1, 1 }, { 1, 1, 1 }, { 1, 1, 1 }, { 1, 1, 1 }
-        },
-        {
-            { 2, 2, 2 }, { 2, 2, 2 }, { 2, 2, 2 }, { 2, 2, 2 }, { 2, 2, 2 }
-        },
-        {
-            { 3, 3, 3 }, { 3, 3, 3 }, { 3, 3, 3 }, { 3, 3, 3 }, { 3, 3, 3 }
-        },
-        {
-            { 4, 4, 4 }, { 4, 4, 4 }, { 4, 4, 4 }, { 4, 4, 4 }, { 4, 4, 4 }
-        }
-    };
-    auto tensor = torch::from_blob(data, { 4, 5, 3 }, torch::kFloat);
-    std::cout << tensor << std::endl;
-    std::cout << tensor.permute({ 2, 0, 1 }) << std::endl;
-}
-
 [[maybe_unused]] static void test_open_file() {
     std::thread player_thread([]() {
         chobits::player::open_player();
     });
+    // file/http/rtmp/rtsp/m3u8
     chobits::media::open_file("D:/tmp/video.mp4");
     player_thread.join();
 }
@@ -82,9 +63,8 @@
 
 int main() {
     // test_pcm();
-    // test_rgb24();
-    // test_open_file();
+    test_open_file();
     // test_open_hardware();
-    test_get_data();
+    // test_get_data();
     return 0;
 }

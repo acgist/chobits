@@ -3,12 +3,14 @@
 #include "chobits/model.hpp"
 #include "chobits/player.hpp"
 
+#include <cinttypes>
+
 static void info(std::shared_ptr<torch::nn::Module> layer) {
     size_t total_numel = 0;
     for(const auto& parameter : layer->named_parameters()) {
         total_numel += parameter.value().numel();
     }
-    std::printf("参数总量：%ld\n", total_numel);
+    std::printf("参数总量：%" PRIu64 "\n", total_numel);
 }
 
 [[maybe_unused]] static void test_audio_head() {
@@ -20,7 +22,7 @@ static void info(std::shared_ptr<torch::nn::Module> layer) {
 
 [[maybe_unused]] static void test_video_head() {
     chobits::nn::VideoHeadBlock layer(3);
-    auto output = layer->forward(torch::randn({ 1, 3, 360, 640 }));
+    auto output = layer->forward(torch::randn({ 1, 3, 372, 640 }));
     std::cout << output.sizes() << std::endl;
     info(layer.ptr());
 }
@@ -80,8 +82,6 @@ static void info(std::shared_ptr<torch::nn::Module> layer) {
 }
 
 [[maybe_unused]] static void test_model() {
-    auto audio = torch::randn({ 1, 2, 201, 601 });
-    auto video = torch::randn({ 1, 3, 360, 640 });
     chobits::model::Trainer trainer;
     trainer.load();
     trainer.test();
@@ -117,7 +117,7 @@ int main() {
     // test_residual_attention();
     // test_audio_tail();
     // test_load_save();
-    // test_model();
-    test_trainer();
+    test_model();
+    // test_trainer();
     return 0;
 }

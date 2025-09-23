@@ -1,7 +1,7 @@
-#include "chobits/model.hpp"
-#include "chobits/media.hpp"
 #include "chobits/player.hpp"
 #include "chobits/chobits.hpp"
+
+#include <string>
 
 #include "SDL2/SDL.h"
 
@@ -17,7 +17,7 @@ struct PlayerState {
         .silence  = 0,
         .samples  = 4800,
         .padding  = 0,
-        .size     = 0,
+        .size     = 9600,
         .callback = nullptr,
         .userdata = nullptr
     };
@@ -43,10 +43,7 @@ bool chobits::player::open_player() {
             SDL_WaitEventTimeout(&event, 1000);
             if(event.type == SDL_QUIT) {
                 std::printf("关闭播放器\n");
-                std::printf("等待系统关闭...\n");
-                chobits::running = false;
-                chobits::media::stop_all();
-                chobits::model::stop_all();
+                chobits::stop_all();
                 break;
             }
         }
