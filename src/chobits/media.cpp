@@ -139,8 +139,7 @@ bool chobits::media::open_file(const std::string& file) {
         std::printf("打开视频解码器失败：%d\n", ret);
         return false;
     }
-    // 只有文件不能丢弃
-    dataset.discard = !std::filesystem::is_regular_file(file);
+    dataset.discard = false;
     double audio_time  = 0;
     double video_time  = 0;
     double audio_base  = av_q2d(audio_stream->time_base);
