@@ -99,7 +99,7 @@ bool chobits::media::open_file(const std::string& file) {
     // 有时候找不到：M3U8
     int audio_index = av_find_best_stream(format_ctx, AVMEDIA_TYPE_AUDIO, -1, -1, nullptr, 0);
     int video_index = av_find_best_stream(format_ctx, AVMEDIA_TYPE_VIDEO, -1, -1, nullptr, 0);
-    for(int i = 0; i < format_ctx->nb_streams; ++i) {
+    for(uint32_t i = 0; i < format_ctx->nb_streams; ++i) {
         auto stream = format_ctx->streams[i];
         if(stream->codecpar->codec_type == AVMEDIA_TYPE_AUDIO) {
             audio_index = stream->index;
@@ -139,7 +139,8 @@ bool chobits::media::open_file(const std::string& file) {
         std::printf("打开视频解码器失败：%d\n", ret);
         return false;
     }
-    dataset.discard = false;
+    // 只有文件不能丢弃
+    dataset.discard = !std::filesystem::is_regular_file(file);
     double audio_time  = 0;
     double video_time  = 0;
     double audio_base  = av_q2d(audio_stream->time_base);
@@ -389,7 +390,7 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> chobits::media::get_data(bool tra
     };
 }
 
-static SwrContext* init_audio_swr(AVCodecContext* ctx, AVFrame* frame) {
+static SwrContext* init_audio_swr(AVCodecContext* ctx, AVFrame*) {
     SwrContext* swr = swr_alloc();
     if(swr == nullptr) {
         std::printf("打开音频重采样失败\n");
