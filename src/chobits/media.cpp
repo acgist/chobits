@@ -96,8 +96,19 @@ bool chobits::media::open_file(const std::string& file) {
         return false;
     }
     av_dump_format(format_ctx, 0, format_ctx->url, 0);
-    const int audio_index = av_find_best_stream(format_ctx, AVMEDIA_TYPE_AUDIO, -1, -1, nullptr, 0);
-    const int video_index = av_find_best_stream(format_ctx, AVMEDIA_TYPE_VIDEO, -1, -1, nullptr, 0);
+    // 有时候找不到：M3U8
+    int audio_index = av_find_best_stream(format_ctx, AVMEDIA_TYPE_AUDIO, -1, -1, nullptr, 0);
+    int video_index = av_find_best_stream(format_ctx, AVMEDIA_TYPE_VIDEO, -1, -1, nullptr, 0);
+    for(int i = 0; i < format_ctx->nb_streams; ++i) {
+        auto stream = format_ctx->streams[i];
+        if(stream->codecpar->codec_type == AVMEDIA_TYPE_AUDIO) {
+            audio_index = stream->index;
+        } else if(stream->codecpar->codec_type == AVMEDIA_TYPE_VIDEO) {
+            video_index = stream->index;
+        } else {
+            // -
+        }
+    }
     if(audio_index < 0 || video_index < 0) {
         avformat_close_input(&format_ctx);
         std::printf("查找媒体轨道失败：%d - %d\n", audio_index, video_index);
@@ -435,7 +446,7 @@ static bool audio_to_tensor(SwrContext* swr, AVFrame* frame) {
         return false;
     }
     remain += size;
-    chobits::player::play_audio(buffer, size);
+    // chobits::player::play_audio(buffer, size);
     while(remain >= dataset.audio_size) {
         {
             bool insert = false;
