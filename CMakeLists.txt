@@ -52,8 +52,6 @@ if(CMAKE_HOST_WIN32)
         deps/sdl2
         deps/ffmpeg
     )
-    
-    find_package(FFMPEG CONFIG REQUIRED)
 else()
     set(
         FFMPEG_LIBRARIES
@@ -67,15 +65,16 @@ else()
 endif()
 
 find_package(CUDA)
+find_package(FFMPEG)
+
+find_package(SDL2  CONFIG REQUIRED)
+find_package(Torch CONFIG REQUIRED)
 
 if(CUDA_FOUND)
     message(STATUS "使用GPU推理")
 else()
     message(STATUS "使用CPU推理")
 endif()
-
-find_package(SDL2  CONFIG REQUIRED)
-find_package(Torch CONFIG REQUIRED)
 
 add_library(
     chobits-core
