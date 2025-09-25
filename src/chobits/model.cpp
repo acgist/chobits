@@ -152,7 +152,9 @@ bool chobits::model::Trainer::save(const std::string& path) {
     trainer_state.model->eval();
     trainer_state.model->to(torch::DeviceType::CPU);
     std::printf("保存模型：%s\n", path.c_str());
-    torch::save(trainer_state.model, path);
+    const std::string save_path = "chobits.ckpt";
+    torch::save(trainer_state.model, save_path);
+    std::filesystem::rename(save_path, path);
     trainer_state.model->to(trainer_state.device);
     return true;
 }
@@ -184,7 +186,7 @@ void chobits::model::Trainer::train() {
             this->train(epoch);
             scheduler.step();
             if(epoch % 100 == 0) {
-                this->save("chobits." + std::to_string(epoch % 10) + ".ckpt");
+                this->save("chobits." + std::to_string(epoch / 100 % 10) + ".ckpt");
             }
         }
     } catch(const std::exception& e) {
