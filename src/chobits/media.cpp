@@ -73,10 +73,13 @@ bool chobits::media::open_media(int argc, char const *argv[]) {
             chobits::stop_all();
             return true;
         } else {
-            if(chobits::media::open_file(path)) {
-                std::printf("文件处理完成：%s\n", path);
-            } else {
-                std::printf("文件处理失败：%s\n", path);
+            auto size = argc >= 3 ? std::atoi(argv[2]) : 1;
+            for(int index = 0; index < size; ++index) {
+                if(chobits::media::open_file(path)) {
+                    std::printf("文件处理完成：%s\n", path);
+                } else {
+                    std::printf("文件处理失败：%s\n", path);
+                }
             }
             chobits::stop_all();
             return true;

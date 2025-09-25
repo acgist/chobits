@@ -11,7 +11,7 @@ static void sigint_handler(int code);
 
 int main(int argc, char const *argv[]) {
     signal(SIGINT, sigint_handler);
-    #if _WIN32
+    #if (defined(_DEBUG) || !defined(NDEBUG)) && defined(_WIN32)
     system("chcp 65001");
     #endif
     if(argc >= 2 && std::strcmp("help", argv[1]) == 0) {
@@ -30,10 +30,11 @@ int main(int argc, char const *argv[]) {
 }
 
 static void help() {
-    std::printf(R"(帮助：chobits help
-视频文件训练：chobits file
-现实生活评估：chobits eval
-现实生活训练：chobits\n)");
+    std::printf(R"(帮助：chobits[.exe] help
+视频文件训练：chobits[.exe] file [训练次数]
+现实生活评估：chobits[.exe] eval
+现实生活训练：chobits[.exe]
+)");
 }
 
 static void sigint_handler(int code) {

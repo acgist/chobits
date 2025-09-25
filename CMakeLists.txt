@@ -52,6 +52,8 @@ if(CMAKE_HOST_WIN32)
         deps/sdl2
         deps/ffmpeg
     )
+
+    find_package(FFMPEG CONFIG REQUIRED)
 else()
     set(
         FFMPEG_LIBRARIES
@@ -65,7 +67,6 @@ else()
 endif()
 
 find_package(CUDA)
-find_package(FFMPEG)
 
 find_package(SDL2  CONFIG REQUIRED)
 find_package(Torch CONFIG REQUIRED)
@@ -106,12 +107,10 @@ if(CMAKE_HOST_WIN32)
 
     if(CMAKE_BUILD_TYPE STREQUAL "Debug")
         set(CMAKE_EXE_LINKER_FLAGS "/NODEFAULTLIB:MSVCRT")
-        
-        # target_link_options(${PROJECT_NAME} PRIVATE "/SUBSYSTEM:CONSOLE")
+        target_link_options(${PROJECT_NAME} PRIVATE "/SUBSYSTEM:CONSOLE")
     else()
         set(CMAKE_EXE_LINKER_FLAGS "/NODEFAULTLIB:MSVCRTD /entry:mainCRTStartup")
-
-        # target_link_options(${PROJECT_NAME} PRIVATE "/SUBSYSTEM:WINDOWS")
+        target_link_options(${PROJECT_NAME} PRIVATE "/SUBSYSTEM:WINDOWS")
     endif()
 else()
     add_executable(
