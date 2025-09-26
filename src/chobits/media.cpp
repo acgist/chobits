@@ -44,6 +44,8 @@ static Dataset dataset = {};
 static SwrContext* init_audio_swr(AVCodecContext* ctx, AVFrame* frame);
 static SwsContext* init_video_sws(AVCodecContext* ctx, AVFrame* frame);
 
+static std::string device_name(AVMediaType type);
+
 static bool audio_to_tensor(SwrContext* swr, AVFrame* frame);
 static bool video_to_tensor(SwsContext* sws, AVFrame* frame);
 
@@ -211,49 +213,27 @@ bool chobits::media::open_hardware() {
     int ret = 0;
     avdevice_register_all();
     // ffmpeg -devices
-    AVFormatContext    * console_format_ctx = avformat_alloc_context();
-    AVDictionary       * console_options    = nullptr;
-    const AVInputFormat* console_format     = av_find_input_format("dshow"); // linux audio = alsa | linux video = v4l2
-    av_dict_set(&console_options, "list_devices", "true", 0);
-    ret = avformat_open_input(&console_format_ctx, "dummy", console_format, &console_options); // 模拟信号: dummy|audio=dummy|video=dummy
-    av_dict_free(&console_options);
-    avformat_close_input(&console_format_ctx);
     // av_input_audio_device_next()
     // av_input_video_device_next()
-    std::string audio_device_name = "";
-    std::string video_device_name = "";
-    AVDeviceInfoList* device_list = nullptr;
-    ret = avdevice_list_input_sources(console_format, NULL, NULL, &device_list);
-    if (ret <= 0) {
-        std::printf("打开硬件输入失败：%d\n", ret);
-        avdevice_free_list_devices(&device_list);
-        return false;
-    }
-    for (int i = 0; i < device_list->nb_devices; ++i) {
-        AVDeviceInfo* device_info = device_list->devices[i];
-        std::printf("硬件输入设备：%s = %s\n", device_info->device_name, device_info->device_description);
-        for(int j = 0; j < device_info->nb_media_types; ++j) {
-            AVMediaType media_type = device_info->media_types[j];
-            if(media_type == AVMEDIA_TYPE_AUDIO) {
-                audio_device_name = device_info->device_description;
-            } else if(media_type == AVMEDIA_TYPE_VIDEO) {
-                video_device_name = device_info->device_description;
-            } else {
-                // -
-            }
-        }
-    }
-    avdevice_free_list_devices(&device_list);
+    #if _WIN32
+    const char* audio_format_name = "dshow";
+    const char* video_format_name = "dshow";
+    #else
+    const char* audio_format_name = "alsa";
+    const char* video_format_name = "v4l2";
+    #endif
+    std::string audio_device_name = device_name(AVMEDIA_TYPE_AUDIO);
+    std::string video_device_name = device_name(AVMEDIA_TYPE_VIDEO);
     std::printf("打开音频输入设备：%s\n", audio_device_name.c_str());
     std::printf("打开视频输入设备：%s\n", video_device_name.c_str());
     audio_device_name = "audio=" + audio_device_name;
     video_device_name = "video=" + video_device_name;
     AVFormatContext    * audio_format_ctx = avformat_alloc_context();
     AVDictionary       * audio_options    = nullptr;
-    const AVInputFormat* audio_format     = av_find_input_format("dshow");
+    const AVInputFormat* audio_format     = av_find_input_format(audio_format_name);
     AVFormatContext    * video_format_ctx = avformat_alloc_context();
     AVDictionary       * video_options    = nullptr;
-    const AVInputFormat* video_format     = av_find_input_format("dshow");
+    const AVInputFormat* video_format     = av_find_input_format(video_format_name);
     // 音频参数
     av_dict_set(&audio_options, "channels",          "2",         0);
     av_dict_set(&audio_options, "sample_rate",       "48000",     0);
@@ -467,6 +447,40 @@ static SwsContext* init_video_sws(AVCodecContext* ctx, AVFrame* frame) {
         return nullptr;
     }
     return sws;
+}
+
+static std::string device_name(AVMediaType type) {
+    AVDeviceInfoList* device_list = nullptr;
+    #if _WIN32
+    const AVInputFormat* console_format = av_find_input_format("dshow");
+    #else
+    const AVInputFormat* console_format = av_find_input_format(type == AVMEDIA_TYPE_AUDIO ? "alsa" : "v4l2");
+    #endif
+    int ret = avdevice_list_input_sources(console_format, nullptr, nullptr, &device_list);
+    if (ret <= 0) {
+        std::printf("打开硬件输入失败：%d\n", ret);
+        avdevice_free_list_devices(&device_list);
+        return "";
+    }
+    std::string name;
+    if(device_list->default_device < 0) {
+        for (int i = 0; i < device_list->nb_devices; ++i) {
+            AVDeviceInfo* device_info = device_list->devices[i];
+            std::printf("随机选择硬件输入设备：%d = %s = %s = %s\n", device_info->nb_media_types, av_get_media_type_string(type), device_info->device_name, device_info->device_description);
+            for(int j = 0; j < device_info->nb_media_types; ++j) {
+                AVMediaType media_type = device_info->media_types[j];
+                if(media_type == type) {
+                    name = device_info->device_name;
+                }
+            }
+        }
+    } else {
+        AVDeviceInfo* device_info = device_list->devices[device_list->default_device];
+        std::printf("选择默认硬件输入设备：%d = %s = %s = %s\n", device_info->nb_media_types, av_get_media_type_string(type), device_info->device_name, device_info->device_description);
+        name = device_info->device_name;
+    }
+    avdevice_free_list_devices(&device_list);
+    return name;
 }
 
 static bool audio_to_tensor(SwrContext* swr, AVFrame* frame) {
