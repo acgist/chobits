@@ -32,7 +32,7 @@ const static float NORMALIZATION = 32768.0F;
 struct Dataset {
     bool   discard    = true;
     size_t cache_size = 60;
-    size_t audio_size = 48000;
+    size_t audio_size = 48000; // 48000 / 48000 / 2 * 1000 = 500 ms
     std::mutex mutex;
     std::condition_variable condition;
     std::vector<torch::Tensor> audio;
@@ -49,6 +49,9 @@ static bool video_to_tensor(SwsContext* sws, AVFrame* frame);
 
 static void sws_free(SwsContext** sws);
 
+static at::Tensor pcm_stft(short* pcm_data, int pcm_size, int n_fft = 400, int hop_size = 80, int win_size = 400);
+static std::vector<short> pcm_istft(const at::Tensor& tensor, int n_fft = 400, int hop_size = 80, int win_size = 400);
+
 bool chobits::media::open_media(int argc, char const *argv[]) {
     if(argc == 1 || (argc >= 2 && std::strcmp("eval", argv[1]) == 0)) {
         std::thread player_thread([]() {
@@ -59,31 +62,30 @@ bool chobits::media::open_media(int argc, char const *argv[]) {
         player_thread.join();
         return ret;
     } else if(argc >= 2) {
-        auto path = argv[1];
-        if(std::filesystem::is_directory(path)) {
-            const auto iterator = std::filesystem::directory_iterator(path);
-            for(const auto& entry : iterator) {
-                auto file_path = entry.path().string();
-                if(chobits::media::open_file(file_path)) {
-                    std::printf("文件处理完成：%s\n", file_path.c_str());
-                } else {
-                    std::printf("文件处理失败：%s\n", file_path.c_str());
+        const auto path = argv[1];
+        const auto size = argc >= 3 ? std::atoi(argv[2]) : 1;
+        for(int index = 0; index < size; ++index) {
+            std::printf("训练轮次：%d\n", index);
+            if(std::filesystem::is_directory(path)) {
+                const auto iterator = std::filesystem::directory_iterator(path);
+                for(const auto& entry : iterator) {
+                    auto file_path = entry.path().string();
+                    if(chobits::media::open_file(file_path)) {
+                        std::printf("文件处理完成：%s\n", file_path.c_str());
+                    } else {
+                        std::printf("文件处理失败：%s\n", file_path.c_str());
+                    }
                 }
-            }
-            chobits::stop_all();
-            return true;
-        } else {
-            auto size = argc >= 3 ? std::atoi(argv[2]) : 1;
-            for(int index = 0; index < size; ++index) {
+            } else {
                 if(chobits::media::open_file(path)) {
                     std::printf("文件处理完成：%s\n", path);
                 } else {
                     std::printf("文件处理失败：%s\n", path);
                 }
             }
-            chobits::stop_all();
-            return true;
         }
+        chobits::stop_all();
+        return true;
     } else {
         std::printf("不支持的媒体\n");
         return false;
@@ -385,11 +387,24 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> chobits::media::get_data(bool tra
         // std::printf("剩余数据：%" PRIu64 " - %" PRIu64 "\n", dataset.audio.size(), dataset.video.size());
         dataset.condition.notify_all();
     }
-    return {
-        torch::stack(audio),
-        torch::stack(video),
-        torch::stack(label)
-    };
+    if(train) {
+        return {
+            torch::stack(audio),
+            torch::stack(video),
+            torch::stack(label)
+        };
+    } else {
+        return {
+            torch::stack(audio),
+            torch::stack(video),
+            {}
+        };
+    }
+}
+
+void chobits::media::set_data(const torch::Tensor& tensor) {
+    auto pcm = pcm_istft(tensor);
+    chobits::player::play_audio(pcm.data(), pcm.size() * 2);
 }
 
 static SwrContext* init_audio_swr(AVCodecContext* ctx, AVFrame*) {
@@ -467,7 +482,7 @@ static bool audio_to_tensor(SwrContext* swr, AVFrame* frame) {
                 insert = true;
             }
             if(insert) {
-                auto tensor = chobits::media::pcm_stft(reinterpret_cast<short*>(audio_buffer.data()), dataset.audio_size);
+                auto tensor = pcm_stft(reinterpret_cast<short*>(audio_buffer.data()), dataset.audio_size);
                 dataset.audio.push_back(tensor);
             }
             dataset.condition.notify_all();
@@ -540,7 +555,7 @@ static void sws_free(SwsContext** sws) {
  * 
  * @return 张量
  */
-at::Tensor chobits::media::pcm_stft(short* pcm_data, int pcm_size, int n_fft, int hop_size, int win_size) {
+static at::Tensor pcm_stft(short* pcm_data, int pcm_size, int n_fft, int hop_size, int win_size) {
     auto data = torch::from_blob(pcm_data, { 1, pcm_size }, torch::kShort).to(torch::kFloat32) / NORMALIZATION;
     auto wind = torch::hann_window(win_size);
     auto real = torch::view_as_real(torch::stft(data, n_fft, hop_size, win_size, wind, true, "reflect", false, std::nullopt, true));
@@ -559,7 +574,7 @@ at::Tensor chobits::media::pcm_stft(short* pcm_data, int pcm_size, int n_fft, in
  * 
  * @return PCM数据
  */
-std::vector<short> chobits::media::pcm_istft(const at::Tensor& tensor, int n_fft, int hop_size, int win_size) {
+static std::vector<short> pcm_istft(const at::Tensor& tensor, int n_fft, int hop_size, int win_size) {
     auto copy = tensor.permute({1, 2, 0}).unsqueeze(0);
     auto wind = torch::hann_window(win_size);
     auto mag  = copy.index({ "...", 0 });

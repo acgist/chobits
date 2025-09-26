@@ -17,12 +17,12 @@
 
 namespace chobits {
 
-extern bool running;
-extern int  batch_size;
-extern int  audio_sample_rate;
-extern int  audio_nb_channels;
-extern int  video_width;
-extern int  video_height;
+extern bool running;           // 是否运行
+extern int  batch_size;        // 训练批次
+extern int  audio_sample_rate; // 音频采样率
+extern int  audio_nb_channels; // 音频通道
+extern int  video_width;       // 视频宽度
+extern int  video_height;      // 视频高度
 
 extern void stop_all();
 

@@ -27,8 +27,8 @@ private:
     void info();
 
 public:
-    bool save(const std::string& path = "./chobits.pt");
-    bool load(const std::string& path = "./chobits.pt");
+    bool save(const std::string& path = "chobits.pt");
+    bool load(const std::string& path = "chobits.pt");
     void train();
     void train(const size_t epoch);
     void eval();

@@ -15,9 +15,6 @@
 #ifndef CHOBITS_NN_HPP
 #define CHOBITS_NN_HPP
 
-#include <cstdint>
-#include <cstdlib>
-
 #include "torch/nn.h"
 
 namespace chobits::nn {
@@ -111,9 +108,9 @@ public:
 public:
     torch::Tensor forward(const torch::Tensor& input) {
         auto output = this->conv_1->forward(input);
-             output = output + torch::tanh(output);
+             output = output + torch::silu(output);
              output = this->conv_2->forward(output);
-             output = output + torch::tanh(output);
+             output = output + torch::silu(output);
              output = this->conv_3->forward(output);
         return output;
     }
@@ -152,7 +149,7 @@ public:
                 torch::nn::Conv2d(torch::nn::Conv2dOptions(in, out, 3).padding(1).bias(false)),
                 torch::nn::Flatten(torch::nn::FlattenOptions().start_dim(2)),
                 torch::nn::Linear(torch::nn::LinearOptions(audio_w * audio_h, out_w * out_h).bias(false)),
-                torch::nn::ReLU()
+                torch::nn::Tanh()
             ));
         }
         if(video_w == out_w && video_h == out_h) {
@@ -165,13 +162,13 @@ public:
                 torch::nn::Conv2d(torch::nn::Conv2dOptions(in, out, 3).padding(1).bias(false)),
                 torch::nn::Flatten(torch::nn::FlattenOptions().start_dim(2)),
                 torch::nn::Linear(torch::nn::LinearOptions(video_w * video_h, out_w * out_h).bias(false)),
-                torch::nn::ReLU()
+                torch::nn::SiLU()
             ));
         }
         this->media = this->register_module("media", torch::nn::Sequential(
             torch::nn::Conv2d(torch::nn::Conv2dOptions(out, out, 3).padding(1).bias(false)),
             torch::nn::GroupNorm(torch::nn::GroupNormOptions(num_groups, out)),
-            torch::nn::ReLU()
+            torch::nn::Tanh()
         ));
     }
     ~MediaMixBlockImpl() {
@@ -261,20 +258,20 @@ public:
         auto result       = this->justify->forward(input);
         auto output_1     = result;
         auto output_1_1   = this->conv_1_1->forward(output_1);
-        auto output_1_1_1 = output_1_1 * torch::sigmoid(output_1_1);
+        auto output_1_1_1 = output_1_1 * torch::silu(output_1_1);
              output_1_1   = this->conv_1_2->forward(output_1_1_1);
-             output_1_1_1 = output_1_1 * torch::sigmoid(output_1_1);
+             output_1_1_1 = output_1_1 * torch::silu(output_1_1);
              output_1     = output_1 + output_1_1_1;
              output_1_1   = this->conv_1_3->forward(output_1);
-             output_1_1_1 = output_1_1 * torch::sigmoid(output_1_1);
+             output_1_1_1 = output_1_1 * torch::silu(output_1_1);
              output_1_1   = this->conv_1_4->forward(output_1_1_1);
-             output_1_1_1 = output_1_1 * torch::sigmoid(output_1_1);
+             output_1_1_1 = output_1_1 * torch::silu(output_1_1);
              output_1     = output_1 + output_1_1_1;
         auto output_2     = result;
         auto output_2_1   = this->conv_2_1->forward(output_2);
-        auto output_2_1_1 = output_2_1 * torch::sigmoid(output_2_1);
+        auto output_2_1_1 = output_2_1 * torch::silu(output_2_1);
              output_2_1   = this->conv_2_2->forward(output_2_1_1);
-             output_2_1_1 = output_2_1 * torch::sigmoid(output_2_1);
+             output_2_1_1 = output_2_1 * torch::silu(output_2_1);
              output_2     = output_2 + output_2_1_1;
         auto output_3     = torch::concat({ output_1, output_2 }, 1);
              output_3     = this->conv_3_1->forward(output_3);
@@ -398,7 +395,8 @@ public:
         this->conv = this->register_module("conv", torch::nn::Sequential(
             torch::nn::ConvTranspose2d(torch::nn::ConvTranspose2dOptions(out,         channels[0], kernel[0]).stride(2).bias(false)),
             torch::nn::ConvTranspose2d(torch::nn::ConvTranspose2dOptions(channels[0], channels[1], kernel[1]).stride(2).bias(false)),
-            torch::nn::ConvTranspose2d(torch::nn::ConvTranspose2dOptions(channels[1], channels[2], kernel[2]).stride(2).bias(false))
+            torch::nn::ConvTranspose2d(torch::nn::ConvTranspose2dOptions(channels[1], channels[2], kernel[2]).stride(2).bias(false)),
+            torch::nn::Tanh()
         ));
     }
     ~AudioTailBlockImpl() {

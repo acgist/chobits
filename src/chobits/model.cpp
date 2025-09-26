@@ -1,7 +1,6 @@
 #include "chobits/nn.hpp"
 #include "chobits/media.hpp"
 #include "chobits/model.hpp"
-#include "chobits/player.hpp"
 #include "chobits/chobits.hpp"
 
 #include <thread>
@@ -217,8 +216,7 @@ void chobits::model::Trainer::train(const size_t epoch) {
         loss_val += loss.template item<float>();
         if(chobits::batch_size == 1) {
             torch::NoGradGuard no_grad_guard;
-            auto pcm = chobits::media::pcm_istft(pred.squeeze(0).cpu());
-            chobits::player::play_audio(pcm.data(), pcm.size() * 2);
+            chobits::media::set_data(pred.squeeze(0).cpu());
         }
     }
     trainer_state.optimizer->step();
@@ -240,8 +238,7 @@ void chobits::model::Trainer::eval() {
         audio = audio.to(trainer_state.device);
         video = video.to(trainer_state.device);
         auto pred = trainer_state.model->forward(audio, video);
-        auto pcm  = chobits::media::pcm_istft(pred.squeeze(0).cpu());
-        chobits::player::play_audio(pcm.data(), pcm.size() * 2);
+        chobits::media::set_data(pred.squeeze(0).cpu());
     }
 }
 

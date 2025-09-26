@@ -3,29 +3,8 @@
 #include "chobits/chobits.hpp"
 
 #include <thread>
-#include <fstream>
 
 #include "torch/torch.h"
-
-[[maybe_unused]] static void test_pcm() {
-    std::ifstream input;
-    std::ofstream output;
-    input .open("D:/tmp/dzht.pcm",      std::ios_base::binary);
-    output.open("D:/tmp/dzht-copy.pcm", std::ios_base::binary);
-    if(!input.is_open()) {
-        input.close();
-        return;
-    }
-    std::vector<short> pcm;
-    pcm.resize(9600); // 48000 / 10 * 2
-    while(input.read(reinterpret_cast<char*>(pcm.data()), pcm.size() * 2)) {
-        auto tensor = chobits::media::pcm_stft(pcm.data(), input.gcount() / 2);
-        auto result = chobits::media::pcm_istft(tensor);
-        output.write(reinterpret_cast<char*>(result.data()), result.size() * 2);
-    }
-    input .close();
-    output.close();
-}
 
 [[maybe_unused]] static void test_open_file() {
     std::thread player_thread([]() {
@@ -45,26 +24,32 @@
 }
 
 [[maybe_unused]] static void test_get_data() {
-    std::thread thread([]() {
+    chobits::batch_size = 1;
+    std::thread player_thread([]() {
+        chobits::player::open_player();
+    });
+    std::thread media_thread([]() {
         chobits::media::open_file("D:/tmp/video.mp4");
         // chobits::media::open_hardware();
     });
     while(chobits::running) {
-        auto [audio, video, pred] = chobits::media::get_data();
+        auto [audio, video, pred] = chobits::media::get_data(false);
         std::cout << audio.sizes() << std::endl;
         std::cout << video.sizes() << std::endl;
         std::cout << pred .sizes() << std::endl;
-        if(audio.numel() == 0 || video.numel() == 0 || pred.numel() == 0) {
+        if(audio.numel() == 0 || video.numel() == 0) {
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        } else {
+            chobits::media::set_data(audio.squeeze(0));
         }
     }
-    thread.join();
+    player_thread.join();
+    media_thread.join();
 }
 
 int main() {
-    // test_pcm();
-    test_open_file();
+    // test_open_file();
     // test_open_hardware();
-    // test_get_data();
+    test_get_data();
     return 0;
 }
