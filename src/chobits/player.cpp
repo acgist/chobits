@@ -17,7 +17,7 @@ struct PlayerState {
         .silence  = 0,
         .samples  = 4800,
         .padding  = 0,
-        .size     = 9600,
+        .size     = 9600, // samples * 2 * 1
         .callback = nullptr,
         .userdata = nullptr
     };

@@ -101,9 +101,8 @@ bool chobits::media::open_file(const std::string& file) {
         return false;
     }
     av_dump_format(format_ctx, 0, format_ctx->url, 0);
-    // 有时候找不到：M3U8
-    int audio_index = av_find_best_stream(format_ctx, AVMEDIA_TYPE_AUDIO, -1, -1, nullptr, 0);
-    int video_index = av_find_best_stream(format_ctx, AVMEDIA_TYPE_VIDEO, -1, -1, nullptr, 0);
+    int audio_index = -1;
+    int video_index = -1;
     for(uint32_t i = 0; i < format_ctx->nb_streams; ++i) {
         auto stream = format_ctx->streams[i];
         if(stream->codecpar->codec_type == AVMEDIA_TYPE_AUDIO) {
@@ -211,19 +210,40 @@ bool chobits::media::open_file(const std::string& file) {
 bool chobits::media::open_hardware() {
     int ret = 0;
     avdevice_register_all();
+    // ffmpeg -devices
     AVFormatContext    * console_format_ctx = avformat_alloc_context();
     AVDictionary       * console_options    = nullptr;
-    const AVInputFormat* console_format     = av_find_input_format("dshow");
+    const AVInputFormat* console_format     = av_find_input_format("dshow"); // linux audio = alsa | linux video = v4l2
     av_dict_set(&console_options, "list_devices", "true", 0);
-    avformat_open_input(&console_format_ctx, "video=dummy", console_format, &console_options);
+    ret = avformat_open_input(&console_format_ctx, "dummy", console_format, &console_options); // 模拟信号: dummy|audio=dummy|video=dummy
     av_dict_free(&console_options);
     avformat_close_input(&console_format_ctx);
-    std::string audio_device_name = "麦克风阵列 (适用于数字麦克风的英特尔® 智音技术)";
-    std::string video_device_name = "Integrated Camera";
-    // std::printf("请选择音频输入设备名称：\n");
-    // std::cin >> audio_device_name;
-    // std::printf("请选择视频输入设备名称：\n");
-    // std::cin >> video_device_name;
+    // av_input_audio_device_next()
+    // av_input_video_device_next()
+    std::string audio_device_name = "";
+    std::string video_device_name = "";
+    AVDeviceInfoList* device_list = nullptr;
+    ret = avdevice_list_input_sources(console_format, NULL, NULL, &device_list);
+    if (ret <= 0) {
+        std::printf("打开硬件输入失败：%d\n", ret);
+        avdevice_free_list_devices(&device_list);
+        return false;
+    }
+    for (int i = 0; i < device_list->nb_devices; ++i) {
+        AVDeviceInfo* device_info = device_list->devices[i];
+        std::printf("硬件输入设备：%s = %s\n", device_info->device_name, device_info->device_description);
+        for(int j = 0; j < device_info->nb_media_types; ++j) {
+            AVMediaType media_type = device_info->media_types[j];
+            if(media_type == AVMEDIA_TYPE_AUDIO) {
+                audio_device_name = device_info->device_description;
+            } else if(media_type == AVMEDIA_TYPE_VIDEO) {
+                video_device_name = device_info->device_description;
+            } else {
+                // -
+            }
+        }
+    }
+    avdevice_free_list_devices(&device_list);
     std::printf("打开音频输入设备：%s\n", audio_device_name.c_str());
     std::printf("打开视频输入设备：%s\n", video_device_name.c_str());
     audio_device_name = "audio=" + audio_device_name;
