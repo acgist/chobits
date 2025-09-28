@@ -4,7 +4,7 @@
 
 #include <thread>
 
-#include "torch/torch.h"
+#include "ATen/Tensor.h"
 
 [[maybe_unused]] static void test_open_file() {
     chobits::train = false;

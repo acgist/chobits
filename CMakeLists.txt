@@ -6,7 +6,7 @@ if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE Debug)
 endif()
 
-option(BUILD_TEST        "是否编译测试代码" ON)
+option(BUILD_TEST        "是否编译测试代码" OFF)
 option(BUILD_SHARED_LIBS "是否编译为共享库" OFF)
 
 set_property(GLOBAL PROPERTY USE_FOLDERS ON)

@@ -7,7 +7,7 @@
 #include <filesystem>
 #include <condition_variable>
 
-#include "torch/torch.h"
+#include "torch/fft.h"
 
 extern "C" {
 

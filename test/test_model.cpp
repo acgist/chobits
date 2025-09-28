@@ -117,7 +117,7 @@ int main() {
     // test_residual_attention();
     // test_audio_tail();
     // test_load_save();
-    test_model();
+    // test_model();
     // test_trainer();
     return 0;
 }
