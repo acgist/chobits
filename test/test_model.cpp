@@ -103,9 +103,10 @@ static void info(std::shared_ptr<torch::nn::Module> layer) {
         trainer.train();
         trainer.save();
     });
-    player_thread.join();
     media_thread.join();
     model_thread.join();
+    chobits::player::stop_player();
+    player_thread.join();
 }
 
 int main() {

@@ -13,6 +13,7 @@
     });
     // file/http/rtmp/rtsp/m3u8
     chobits::media::open_file("D:/tmp/video.mp4");
+    chobits::player::stop_player();
     player_thread.join();
 }
 
@@ -22,6 +23,7 @@
         chobits::player::open_player();
     });
     chobits::media::open_hardware();
+    chobits::player::stop_player();
     player_thread.join();
 }
 
@@ -45,8 +47,9 @@
             chobits::media::set_data(audio.squeeze(0));
         }
     }
-    player_thread.join();
     media_thread.join();
+    chobits::player::stop_player();
+    player_thread.join();
 }
 
 int main() {

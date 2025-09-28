@@ -62,6 +62,7 @@ bool chobits::media::open_media(int argc, char const *argv[]) {
         bool ret = chobits::media::open_hardware();
         chobits::player::stop_player();
         player_thread.join();
+        chobits::stop_all();
         return ret;
     } else if(argc >= 2) {
         const auto path = argv[1];
@@ -464,7 +465,7 @@ static std::string device_name(AVMediaType type, const char* format_name) {
     if(device_list->default_device < 0) {
         for (int i = 0; i < device_list->nb_devices; ++i) {
             AVDeviceInfo* device_info = device_list->devices[i];
-            std::printf("随机选择硬件输入设备：%d = %s = %s = %s\n", device_info->nb_media_types, av_get_media_type_string(type), device_info->device_name, device_info->device_description);
+            std::printf("所有硬件输入设备：%d = %s = %s = %s\n", device_info->nb_media_types, av_get_media_type_string(type), device_info->device_name, device_info->device_description);
             for(int j = 0; j < device_info->nb_media_types; ++j) {
                 AVMediaType media_type = device_info->media_types[j];
                 if(media_type == type) {
@@ -474,12 +475,12 @@ static std::string device_name(AVMediaType type, const char* format_name) {
         }
     } else {
         AVDeviceInfo* device_info = device_list->devices[device_list->default_device];
-        std::printf("选择默认硬件输入设备：%d = %s = %s = %s\n", device_info->nb_media_types, av_get_media_type_string(type), device_info->device_name, device_info->device_description);
+        std::printf("默认硬件输入设备：%d = %s = %s = %s\n", device_info->nb_media_types, av_get_media_type_string(type), device_info->device_name, device_info->device_description);
         name = device_info->device_name;
     }
     if(name.empty() && device_list->nb_devices > 0) {
         AVDeviceInfo* device_info = device_list->devices[0];
-        std::printf("强制选择硬件输入设备：%d = %s = %s = %s\n", device_info->nb_media_types, av_get_media_type_string(type), device_info->device_name, device_info->device_description);
+        std::printf("选择硬件输入设备：%d = %s = %s = %s\n", device_info->nb_media_types, av_get_media_type_string(type), device_info->device_name, device_info->device_description);
         name = device_info->device_name;
     }
     avdevice_free_list_devices(&device_list);

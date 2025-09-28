@@ -52,7 +52,7 @@ bool chobits::player::open_player() {
             }
         }
     } else {
-        // -
+        std::printf("打开播放器失败\n");
     }
     stop_audio_player();
     stop_video_player();
@@ -87,22 +87,22 @@ bool chobits::player::play_video(const void* data, int len) {
         }
         ret = SDL_GL_MakeCurrent(SDL_GL_GetCurrentWindow(), SDL_GL_GetCurrentContext());
         if(ret != 0) {
-            std::printf("视频绑定失败：%s\n", SDL_GetError());
+            std::printf("窗口绑定失败：%s\n", SDL_GetError());
             return false;
         }
         ret = SDL_UpdateTexture(player_state.texture, nullptr, data, len);
         if(ret != 0) {
-            std::printf("视频播放失败：%s\n", SDL_GetError());
+            std::printf("视频更新失败：%s\n", SDL_GetError());
             return false;
         }
         ret = SDL_RenderClear(player_state.renderer);
         if(ret != 0) {
-            std::printf("视频播放失败：%s\n", SDL_GetError());
+            std::printf("视频清除失败：%s\n", SDL_GetError());
             return false;
         }
         ret = SDL_RenderCopy(player_state.renderer, player_state.texture, nullptr, nullptr);
         if(ret != 0) {
-            std::printf("视频播放失败：%s\n", SDL_GetError());
+            std::printf("视频拷贝失败：%s\n", SDL_GetError());
             return false;
         }
         SDL_RenderPresent(player_state.renderer);
@@ -132,7 +132,7 @@ static bool init_video_player() {
         std::printf("打开窗口失败：%s\n", SDL_GetError());
         return false;
     }
-    player_state.renderer = SDL_CreateRenderer(player_state.window, -1, SDL_RENDERER_ACCELERATED);
+    player_state.renderer = SDL_CreateRenderer(player_state.window, -1, 0);
     if(!player_state.renderer) {
         std::printf("打开渲染失败：%s\n", SDL_GetError());
         return false;

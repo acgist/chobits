@@ -117,11 +117,11 @@ public:
              audio_out  = this->audio_resi_attn_l_3->forward(audio_mix);
              video_out  = this->video_resi_attn_l_3->forward(video_mix);
         auto media_mix  = this->audio_video_mix_l_3->forward(audio_out, video_out);
-             media_mix  = this->media_resi_attn_s_2->forward(media_mix + torch::sigmoid(this->memory_l));
+             media_mix  = this->media_resi_attn_s_2->forward(media_mix + 0.5 * torch::tanh(this->memory_l));
         auto audio_mem  = this->audio_resi_attn_s_1->forward(audio_head);
         auto video_mem  = this->video_resi_attn_s_1->forward(video_head);
         auto media_mem  = this->audio_video_mem_s_1->forward(audio_mem, video_mem);
-             media_mem  = this->media_resi_attn_s_2->forward(media_mem + torch::sigmoid(this->memory_s));
+             media_mem  = this->media_resi_attn_s_2->forward(media_mem + 0.5 * torch::tanh(this->memory_s));
         this->memory_l  = media_mix.detach();
         this->memory_s  = media_mem.detach();
         auto media_out  = media_mix + media_mem;

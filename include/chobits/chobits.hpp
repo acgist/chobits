@@ -29,4 +29,6 @@ extern void stop_all();
 
 } // END OF chobits
 
+namespace angelbits = chobits;
+
 #endif // CHOBITS_HPP
