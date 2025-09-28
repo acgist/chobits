@@ -18,6 +18,7 @@
 namespace chobits {
 
 extern bool running;           // 是否运行
+extern bool train;             // 是否训练
 extern int  batch_size;        // 训练批次
 extern int  audio_sample_rate; // 音频采样率
 extern int  audio_nb_channels; // 音频通道

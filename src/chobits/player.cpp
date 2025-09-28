@@ -6,11 +6,13 @@
 #include "SDL2/SDL.h"
 
 struct PlayerState {
-    SDL_AudioDeviceID audio_id = 0;
     SDL_Window  * window   = nullptr;
     SDL_Renderer* renderer = nullptr;
     SDL_Texture * texture  = nullptr;
-    SDL_AudioSpec audio_spec = {
+    SDL_mutex   * mutex    = nullptr;
+    SDL_GLContext context  = nullptr;
+    SDL_AudioDeviceID audio_id   = 0;
+    SDL_AudioSpec     audio_spec = {
         .freq     = chobits::audio_sample_rate,
         .format   = AUDIO_S16,
         .channels = static_cast<uint8_t>(chobits::audio_nb_channels),
@@ -45,6 +47,8 @@ bool chobits::player::open_player() {
                 std::printf("关闭播放器\n");
                 chobits::stop_all();
                 break;
+            } else {
+                // -
             }
         }
     } else {
@@ -64,7 +68,11 @@ void chobits::player::stop_player() {
 
 bool chobits::player::play_audio(const void* data, int len) {
     if(chobits::running && player_state.audio_id != 0) {
-        SDL_QueueAudio(player_state.audio_id, data, len);
+        int ret = SDL_QueueAudio(player_state.audio_id, data, len);
+        if(ret != 0) {
+            std::printf("音频播放失败：%s\n", SDL_GetError());
+            return false;
+        }
         return true;
     }
     return false;
@@ -72,10 +80,37 @@ bool chobits::player::play_audio(const void* data, int len) {
 
 bool chobits::player::play_video(const void* data, int len) {
     if(chobits::running && player_state.renderer && player_state.texture) {
-        SDL_RenderClear(player_state.renderer);
-        SDL_UpdateTexture(player_state.texture, nullptr, data, len);
-        SDL_RenderCopy(player_state.renderer, player_state.texture, nullptr, nullptr);
+        int ret = SDL_LockMutex(player_state.mutex);
+        if(ret != 0) {
+            std::printf("视频加锁失败：%s\n", SDL_GetError());
+            return false;
+        }
+        ret = SDL_GL_MakeCurrent(SDL_GL_GetCurrentWindow(), SDL_GL_GetCurrentContext());
+        if(ret != 0) {
+            std::printf("视频绑定失败：%s\n", SDL_GetError());
+            return false;
+        }
+        ret = SDL_UpdateTexture(player_state.texture, nullptr, data, len);
+        if(ret != 0) {
+            std::printf("视频播放失败：%s\n", SDL_GetError());
+            return false;
+        }
+        ret = SDL_RenderClear(player_state.renderer);
+        if(ret != 0) {
+            std::printf("视频播放失败：%s\n", SDL_GetError());
+            return false;
+        }
+        ret = SDL_RenderCopy(player_state.renderer, player_state.texture, nullptr, nullptr);
+        if(ret != 0) {
+            std::printf("视频播放失败：%s\n", SDL_GetError());
+            return false;
+        }
         SDL_RenderPresent(player_state.renderer);
+        ret = SDL_UnlockMutex(player_state.mutex);
+        if(ret != 0) {
+            return false;
+            std::printf("视频解锁失败：%s\n", SDL_GetError());
+        }
         return true;
     }
     return false;
@@ -84,7 +119,7 @@ bool chobits::player::play_video(const void* data, int len) {
 static bool init_audio_player() {
     player_state.audio_id = SDL_OpenAudioDevice(nullptr, 0, &player_state.audio_spec, nullptr, SDL_AUDIO_ALLOW_FREQUENCY_CHANGE);
     if(player_state.audio_id == 0) {
-        std::printf("打开音频失败\n");
+        std::printf("打开音频失败：%s\n", SDL_GetError());
         return false;
     }
     SDL_PauseAudioDevice(player_state.audio_id, 0);
@@ -94,17 +129,27 @@ static bool init_audio_player() {
 static bool init_video_player() {
     player_state.window = SDL_CreateWindow("Chobits", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, chobits::video_width, chobits::video_height, SDL_WINDOW_OPENGL);
     if(!player_state.window) {
-        std::printf("打开窗口失败\n");
+        std::printf("打开窗口失败：%s\n", SDL_GetError());
         return false;
     }
     player_state.renderer = SDL_CreateRenderer(player_state.window, -1, SDL_RENDERER_ACCELERATED);
     if(!player_state.renderer) {
-        std::printf("打开渲染失败\n");
+        std::printf("打开渲染失败：%s\n", SDL_GetError());
         return false;
     }
     player_state.texture = SDL_CreateTexture(player_state.renderer, SDL_PIXELFORMAT_RGB24, SDL_TEXTUREACCESS_STREAMING, chobits::video_width, chobits::video_height);
     if(!player_state.texture) {
-        std::printf("打开纹理失败\n");
+        std::printf("打开纹理失败：%s\n", SDL_GetError());
+        return false;
+    }
+    player_state.mutex = SDL_CreateMutex();
+    if(!player_state.mutex) {
+        std::printf("打开互斥失败：%s\n", SDL_GetError());
+        return false;
+    }
+    player_state.context = SDL_GL_CreateContext(player_state.window);
+    if(!player_state.context) {
+        std::printf("打开OpenGL失败：%s\n", SDL_GetError());
         return false;
     }
     return true;
@@ -131,5 +176,13 @@ static void stop_video_player() {
     if(player_state.window) {
         SDL_DestroyWindow(player_state.window);
         player_state.window = nullptr;
+    }
+    if(player_state.mutex) {
+        SDL_DestroyMutex(player_state.mutex);
+        player_state.mutex = nullptr;
+    }
+    if(player_state.context) {
+        SDL_GL_DeleteContext(player_state.context);
+        player_state.context = nullptr;
     }
 }

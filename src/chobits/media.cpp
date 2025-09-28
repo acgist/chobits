@@ -44,7 +44,7 @@ static Dataset dataset = {};
 static SwrContext* init_audio_swr(AVCodecContext* ctx, AVFrame* frame);
 static SwsContext* init_video_sws(AVCodecContext* ctx, AVFrame* frame);
 
-static std::string device_name(AVMediaType type);
+static std::string device_name(AVMediaType type, const char* format_name);
 
 static bool audio_to_tensor(SwrContext* swr, AVFrame* frame);
 static bool video_to_tensor(SwsContext* sws, AVFrame* frame);
@@ -222,12 +222,14 @@ bool chobits::media::open_hardware() {
     const char* audio_format_name = "alsa";
     const char* video_format_name = "v4l2";
     #endif
-    std::string audio_device_name = device_name(AVMEDIA_TYPE_AUDIO);
-    std::string video_device_name = device_name(AVMEDIA_TYPE_VIDEO);
+    std::string audio_device_name = device_name(AVMEDIA_TYPE_AUDIO, audio_format_name);
+    std::string video_device_name = device_name(AVMEDIA_TYPE_VIDEO, video_format_name);
     std::printf("打开音频输入设备：%s\n", audio_device_name.c_str());
     std::printf("打开视频输入设备：%s\n", video_device_name.c_str());
+    #if _WIN32
     audio_device_name = "audio=" + audio_device_name;
     video_device_name = "video=" + video_device_name;
+    #endif
     AVFormatContext    * audio_format_ctx = avformat_alloc_context();
     AVDictionary       * audio_options    = nullptr;
     const AVInputFormat* audio_format     = av_find_input_format(audio_format_name);
@@ -449,13 +451,9 @@ static SwsContext* init_video_sws(AVCodecContext* ctx, AVFrame* frame) {
     return sws;
 }
 
-static std::string device_name(AVMediaType type) {
-    AVDeviceInfoList* device_list = nullptr;
-    #if _WIN32
-    const AVInputFormat* console_format = av_find_input_format("dshow");
-    #else
-    const AVInputFormat* console_format = av_find_input_format(type == AVMEDIA_TYPE_AUDIO ? "alsa" : "v4l2");
-    #endif
+static std::string device_name(AVMediaType type, const char* format_name) {
+    AVDeviceInfoList   * device_list    = nullptr;
+    const AVInputFormat* console_format = av_find_input_format(format_name);
     int ret = avdevice_list_input_sources(console_format, nullptr, nullptr, &device_list);
     if (ret <= 0) {
         std::printf("打开硬件输入失败：%d\n", ret);
@@ -479,6 +477,11 @@ static std::string device_name(AVMediaType type) {
         std::printf("选择默认硬件输入设备：%d = %s = %s = %s\n", device_info->nb_media_types, av_get_media_type_string(type), device_info->device_name, device_info->device_description);
         name = device_info->device_name;
     }
+    if(name.empty() && device_list->nb_devices > 0) {
+        AVDeviceInfo* device_info = device_list->devices[0];
+        std::printf("强制选择硬件输入设备：%d = %s = %s = %s\n", device_info->nb_media_types, av_get_media_type_string(type), device_info->device_name, device_info->device_description);
+        name = device_info->device_name;
+    }
     avdevice_free_list_devices(&device_list);
     return name;
 }
@@ -493,14 +496,10 @@ static bool audio_to_tensor(SwrContext* swr, AVFrame* frame) {
         return false;
     }
     const size_t size = chobits::audio_nb_channels * audio_bytes_per_sample * out_samples;
-    if(remain + size > audio_buffer.size()) {
-        std::printf("音频数据大小错误：%" PRIu64 " - %" PRIu64 "\n", remain, size);
-        return false;
-    }
     remain += size;
     // chobits::player::play_audio(buffer, size);
     while(remain >= dataset.audio_size) {
-        {
+        if(chobits::train) {
             bool insert = false;
             std::unique_lock<std::mutex> lock(dataset.mutex);
             if(dataset.audio.size() >= dataset.cache_size) {
@@ -539,7 +538,7 @@ static bool video_to_tensor(SwsContext* sws, AVFrame* frame) {
         return false;
     }
     chobits::player::play_video(buffer, width);
-    {
+    if(chobits::train) {
         bool insert = false;
         std::unique_lock<std::mutex> lock(dataset.mutex);
         if(dataset.audio.size() >= dataset.video.size()) {

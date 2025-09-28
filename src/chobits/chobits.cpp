@@ -5,6 +5,7 @@
 #include <string>
 
 bool chobits::running           = true;
+bool chobits::train             = true;
 int  chobits::batch_size        = 10;
 int  chobits::audio_sample_rate = 48000;
 int  chobits::audio_nb_channels = 1;

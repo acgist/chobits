@@ -7,6 +7,7 @@
 #include "torch/torch.h"
 
 [[maybe_unused]] static void test_open_file() {
+    chobits::train = false;
     std::thread player_thread([]() {
         chobits::player::open_player();
     });
@@ -16,6 +17,7 @@
 }
 
 [[maybe_unused]] static void test_open_hardware() {
+    chobits::train = false;
     std::thread player_thread([]() {
         chobits::player::open_player();
     });
