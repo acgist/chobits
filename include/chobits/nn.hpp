@@ -369,6 +369,40 @@ public:
 TORCH_MODULE(ResidualAttentionBlock);
 
 /**
+ * 记忆
+ */
+class MemoryBlockImpl : public torch::nn::Module {
+
+private:
+    torch::nn::Sequential memory{ nullptr };
+
+public:
+    MemoryBlockImpl(
+        const int channel,
+        const int w,
+        const int h
+    ) {
+        this->memory = this->register_module("memory", torch::nn::Sequential(
+            torch::nn::Conv2d(torch::nn::Conv2dOptions(channel, channel, 3).padding(1).bias(false)),
+            torch::nn::Flatten(torch::nn::FlattenOptions().start_dim(1)),
+            torch::nn::Linear(torch::nn::LinearOptions(channel * w * h, 1).bias(false))
+        ));
+    }
+    ~MemoryBlockImpl() {
+        this->unregister_module("memory");
+    }
+
+public:
+    torch::Tensor forward(const torch::Tensor& input) {
+        auto output = this->memory->forward(input);
+        return torch::sigmoid(output);
+    }
+
+};
+
+TORCH_MODULE(MemoryBlock);
+
+/**
  * 音频输出
  */
 class AudioTailBlockImpl : public torch::nn::Module {

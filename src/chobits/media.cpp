@@ -67,7 +67,7 @@ bool chobits::media::open_media(int argc, char const *argv[]) {
     } else if(argc >= 2) {
         const auto path = argv[1];
         const auto size = argc >= 3 ? std::atoi(argv[2]) : 1;
-        for(int index = 0; index < size; ++index) {
+        for(int index = 0; index < size && chobits::running; ++index) {
             std::printf("训练轮次：%d\n", index);
             if(std::filesystem::is_directory(path)) {
                 const auto iterator = std::filesystem::directory_iterator(path);

@@ -67,6 +67,13 @@ static void info(std::shared_ptr<torch::nn::Module> layer) {
     info(layer.ptr());
 }
 
+[[maybe_unused]] static void test_memory() {
+    chobits::nn::MemoryBlock layer(128, 24, 74);
+    auto output = layer->forward(torch::randn({ 10, 128, 24, 74 }));
+    std::cout << output << std::endl;
+    info(layer.ptr());
+}
+
 [[maybe_unused]] static void test_audio_tail() {
     chobits::nn::AudioTailBlock layer(256, 256, 24 * 74);
     auto output = layer->forward(torch::randn({ 1, 256, 24, 74 }));
@@ -116,9 +123,10 @@ int main() {
     // test_residual();
     // test_attention();
     // test_residual_attention();
+    // test_memory();
     // test_audio_tail();
     // test_load_save();
     // test_model();
-    // test_trainer();
+    test_trainer();
     return 0;
 }
