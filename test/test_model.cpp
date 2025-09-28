@@ -105,10 +105,10 @@ static void info(std::shared_ptr<torch::nn::Module> layer) {
     });
     std::thread model_thread([]() {
         chobits::model::Trainer trainer;
-        trainer.load();
-        // trainer.eval();
-        trainer.train();
-        trainer.save();
+        trainer.load("D:/tmp/chobits.1.ckpt");
+        trainer.eval();
+        // trainer.train();
+        // trainer.save();
     });
     media_thread.join();
     model_thread.join();

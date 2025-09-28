@@ -245,7 +245,7 @@ void chobits::model::Trainer::eval() {
     torch::NoGradGuard no_grad_guard;
     while(chobits::running) {
         auto [audio, video, label] = chobits::media::get_data(false);
-        if(audio.numel() == 0 || video.numel() == 0 || label.numel() == 0) {
+        if(audio.numel() == 0 || video.numel() == 0) {
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
             continue;
         }
