@@ -10,7 +10,6 @@ static void help();
 static void signal_handler(int code);
 
 int main(int argc, char const *argv[]) {
-    signal(SIGINT, signal_handler);
     char buffer[1024];
     std::setvbuf(stdout, buffer, _IOLBF, sizeof(buffer));
     #if (defined(_DEBUG) || !defined(NDEBUG)) && defined(_WIN32)
@@ -18,8 +17,11 @@ int main(int argc, char const *argv[]) {
     #endif
     if(argc >= 2 && std::strcmp("help", argv[1]) == 0) {
         help();
+        std::fflush(stdout);
         return 0;
     }
+    std::signal(SIGINT, signal_handler);
+    std::signal(SIGTERM, signal_handler);
     std::thread media_thread([argc, argv]() {
         chobits::media::open_media(argc, argv);
     });
