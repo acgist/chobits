@@ -29,9 +29,10 @@ namespace chobits::media {
 
 extern bool open_media(int argc, char const *argv[]);
 extern bool open_file(const std::string& file);
-extern bool open_hardware();
+extern bool open_device();
 extern void stop_all();
 
+// 是否成功 音频 视频 预测
 extern std::tuple<bool, at::Tensor, at::Tensor, at::Tensor> get_data(bool train = true);
 extern void set_data(const at::Tensor& tensor);
 

@@ -17,12 +17,12 @@
     player_thread.join();
 }
 
-[[maybe_unused]] static void test_open_hardware() {
+[[maybe_unused]] static void test_open_device() {
     chobits::train = false;
     std::thread player_thread([]() {
         chobits::player::open_player();
     });
-    chobits::media::open_hardware();
+    chobits::media::open_device();
     chobits::player::stop_player();
     player_thread.join();
 }
@@ -34,7 +34,7 @@
     });
     std::thread media_thread([]() {
         chobits::media::open_file("D:/tmp/video.mp4");
-        // chobits::media::open_hardware();
+        // chobits::media::open_device();
     });
     while(chobits::running) {
         auto [success, audio, video, pred] = chobits::media::get_data(false);
@@ -54,7 +54,7 @@
 
 int main() {
     // test_open_file();
-    // test_open_hardware();
+    // test_open_device();
     test_get_data();
     return 0;
 }

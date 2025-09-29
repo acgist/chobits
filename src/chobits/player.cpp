@@ -61,7 +61,7 @@ bool chobits::player::open_player() {
 }
 
 void chobits::player::stop_player() {
-    int flags = SDL_INIT_AUDIO | SDL_INIT_VIDEO;
+    Uint32 flags = SDL_INIT_AUDIO | SDL_INIT_VIDEO;
     if(SDL_WasInit(flags) == flags) {
         SDL_Event event;
         event.type = SDL_QUIT;

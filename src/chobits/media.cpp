@@ -59,7 +59,7 @@ bool chobits::media::open_media(int argc, char const *argv[]) {
         std::thread player_thread([]() {
             chobits::player::open_player();
         });
-        bool ret = chobits::media::open_hardware();
+        bool ret = chobits::media::open_device();
         chobits::player::stop_player();
         player_thread.join();
         chobits::stop_all();
@@ -211,7 +211,7 @@ bool chobits::media::open_file(const std::string& file) {
     return true;
 }
 
-bool chobits::media::open_hardware() {
+bool chobits::media::open_device() {
     // ffmpeg -devices
     int ret = 0;
     avdevice_register_all();

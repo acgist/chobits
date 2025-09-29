@@ -101,7 +101,7 @@ static void info(std::shared_ptr<torch::nn::Module> layer) {
     });
     std::thread media_thread([]() {
         // chobits::media::open_file("D:/tmp/video.mp4");
-        chobits::media::open_hardware();
+        chobits::media::open_device();
     });
     std::thread model_thread([]() {
         chobits::model::Trainer trainer;
