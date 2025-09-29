@@ -21,7 +21,7 @@
 
 namespace at {
 
-    class Tensor;
+class Tensor;
 
 }; // END OF at
 
@@ -32,7 +32,7 @@ extern bool open_file(const std::string& file);
 extern bool open_hardware();
 extern void stop_all();
 
-extern std::tuple<at::Tensor, at::Tensor, at::Tensor> get_data(bool train = true);
+extern std::tuple<bool, at::Tensor, at::Tensor, at::Tensor> get_data(bool train = true);
 extern void set_data(const at::Tensor& tensor);
 
 } // END OF chobits::media

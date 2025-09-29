@@ -30,8 +30,8 @@ const static int             audio_bytes_per_sample = av_get_bytes_per_sample(au
 const static float NORMALIZATION = 32768.0F;
 
 struct Dataset {
-    bool   discard    = true;
-    size_t cache_size = 60;
+    bool   discard    = true;  // 是否丢弃数据
+    size_t cache_size = 60;    // 缓存数据大小
     size_t audio_size = 48000; // 48000 / 48000 / 2 * 1000 = 500 ms
     std::mutex mutex;
     std::condition_variable condition;
@@ -46,10 +46,10 @@ static SwsContext* init_video_sws(AVCodecContext* ctx, AVFrame* frame);
 
 static std::string device_name(AVMediaType type, const char* format_name);
 
+static void sws_free(SwsContext** sws);
+
 static bool audio_to_tensor(SwrContext* swr, AVFrame* frame);
 static bool video_to_tensor(SwsContext* sws, AVFrame* frame);
-
-static void sws_free(SwsContext** sws);
 
 static at::Tensor pcm_stft(short* pcm_data, int pcm_size, int n_fft = 400, int hop_size = 80, int win_size = 400);
 static std::vector<short> pcm_istft(const at::Tensor& tensor, int n_fft = 400, int hop_size = 80, int win_size = 400);
@@ -100,6 +100,7 @@ bool chobits::media::open_file(const std::string& file) {
     AVFormatContext* format_ctx = avformat_alloc_context();
     ret = avformat_open_input(&format_ctx, file.c_str(), nullptr, nullptr);
     if(ret != 0) {
+        avformat_close_input(&format_ctx);
         std::printf("打开输入文件失败：%d - %s\n", ret, file.c_str());
         return false;
     }
@@ -199,10 +200,10 @@ bool chobits::media::open_file(const std::string& file) {
         }
         av_packet_unref(packet);
     }
-    av_frame_free(&frame);
-    av_packet_free(&packet);
     swr_free(&audio_swr);
     sws_free(&video_sws);
+    av_frame_free(&frame);
+    av_packet_free(&packet);
     avcodec_free_context(&audio_codec_ctx);
     avcodec_free_context(&video_codec_ctx);
     avformat_close_input(&format_ctx);
@@ -211,11 +212,9 @@ bool chobits::media::open_file(const std::string& file) {
 }
 
 bool chobits::media::open_hardware() {
+    // ffmpeg -devices
     int ret = 0;
     avdevice_register_all();
-    // ffmpeg -devices
-    // av_input_audio_device_next()
-    // av_input_video_device_next()
     #if _WIN32
     const char* audio_format_name = "dshow";
     const char* video_format_name = "dshow";
@@ -241,7 +240,7 @@ bool chobits::media::open_hardware() {
     av_dict_set(&audio_options, "channels",          "2",         0);
     av_dict_set(&audio_options, "sample_rate",       "48000",     0);
     av_dict_set(&audio_options, "sample_format",     "pcm_s16le", 0);
-    av_dict_set(&audio_options, "audio_buffer_size", "100",       0);
+    av_dict_set(&audio_options, "audio_buffer_size", "100",       0); // 毫秒
     // 视频参数
     av_dict_set(&video_options, "framerate",    "30",      0);
     av_dict_set(&video_options, "video_size",   "640*360", 0);
@@ -299,9 +298,9 @@ bool chobits::media::open_hardware() {
             }
             av_packet_unref(packet);
         }
+        swr_free(&audio_swr);
         av_frame_free(&frame);
         av_packet_free(&packet);
-        swr_free(&audio_swr);
         avcodec_free_context(&audio_codec_ctx);
     });
     std::thread video_thread([video_format_ctx, &video_frame_count]() {
@@ -336,16 +335,16 @@ bool chobits::media::open_hardware() {
             }
             av_packet_unref(packet);
         }
+        sws_free(&video_sws);
         av_frame_free(&frame);
         av_packet_free(&packet);
-        sws_free(&video_sws);
         avcodec_free_context(&video_codec_ctx);
     });
     audio_thread.join();
     video_thread.join();
     avformat_close_input(&audio_format_ctx);
     avformat_close_input(&video_format_ctx);
-    std::printf("文件处理完成：%" PRIu64 " - %" PRIu64 "\n", audio_frame_count, video_frame_count);
+    std::printf("媒体处理完成：%" PRIu64 " - %" PRIu64 "\n", audio_frame_count, video_frame_count);
     return true;
 }
 
@@ -357,7 +356,7 @@ void chobits::media::stop_all() {
     dataset.condition.notify_all();
 }
 
-std::tuple<at::Tensor, at::Tensor, at::Tensor> chobits::media::get_data(bool train) {
+std::tuple<bool, at::Tensor, at::Tensor, at::Tensor> chobits::media::get_data(bool train) {
     std::vector<torch::Tensor> audio;
     std::vector<torch::Tensor> video;
     std::vector<torch::Tensor> label;
@@ -378,7 +377,7 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> chobits::media::get_data(bool tra
                 );
         });
         if(!chobits::running) {
-            return {};
+            return {false, {}, {}, {}};
         }
         audio.assign(dataset.audio.begin(), dataset.audio.begin() + chobits::batch_size);
         video.assign(dataset.video.begin(), dataset.video.begin() + chobits::batch_size);
@@ -392,12 +391,14 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> chobits::media::get_data(bool tra
     }
     if(train) {
         return {
+            true,
             torch::stack(audio),
             torch::stack(video),
             torch::stack(label)
         };
     } else {
         return {
+            true,
             torch::stack(audio),
             torch::stack(video),
             {}
@@ -453,38 +454,55 @@ static SwsContext* init_video_sws(AVCodecContext* ctx, AVFrame* frame) {
 }
 
 static std::string device_name(AVMediaType type, const char* format_name) {
-    AVDeviceInfoList   * device_list    = nullptr;
-    const AVInputFormat* console_format = av_find_input_format(format_name);
-    int ret = avdevice_list_input_sources(console_format, nullptr, nullptr, &device_list);
+    // av_input_audio_device_next()
+    // av_input_video_device_next()
+    std::string name;
+    AVDeviceInfoList   * device_list   = nullptr;
+    const AVInputFormat* device_format = av_find_input_format(format_name);
+    int ret = avdevice_list_input_sources(device_format, nullptr, nullptr, &device_list);
     if (ret <= 0) {
         std::printf("打开硬件输入失败：%d\n", ret);
         avdevice_free_list_devices(&device_list);
-        return "";
+        return name;
     }
-    std::string name;
-    if(device_list->default_device < 0) {
+    int index = device_list->default_device;
+    if(index < 0 && device_list->nb_devices > 0) {
+        index = 0;
         for (int i = 0; i < device_list->nb_devices; ++i) {
             AVDeviceInfo* device_info = device_list->devices[i];
-            std::printf("所有硬件输入设备：%d = %s = %s = %s\n", device_info->nb_media_types, av_get_media_type_string(type), device_info->device_name, device_info->device_description);
+            std::printf(
+                "所有硬件输入设备：%d = %s = %s = %s\n",
+                device_info->nb_media_types,
+                av_get_media_type_string(type),
+                device_info->device_name,
+                device_info->device_description
+            );
             for(int j = 0; j < device_info->nb_media_types; ++j) {
                 AVMediaType media_type = device_info->media_types[j];
                 if(media_type == type) {
-                    name = device_info->device_name;
+                    index = i;
                 }
             }
         }
-    } else {
-        AVDeviceInfo* device_info = device_list->devices[device_list->default_device];
-        std::printf("默认硬件输入设备：%d = %s = %s = %s\n", device_info->nb_media_types, av_get_media_type_string(type), device_info->device_name, device_info->device_description);
-        name = device_info->device_name;
     }
-    if(name.empty() && device_list->nb_devices > 0) {
-        AVDeviceInfo* device_info = device_list->devices[0];
-        std::printf("选择硬件输入设备：%d = %s = %s = %s\n", device_info->nb_media_types, av_get_media_type_string(type), device_info->device_name, device_info->device_description);
+    if(index >= 0) {
+        AVDeviceInfo* device_info = device_list->devices[index];
+        std::printf(
+            "选择硬件输入设备：%d = %s = %s = %s\n",
+            device_info->nb_media_types,
+            av_get_media_type_string(type),
+            device_info->device_name,
+            device_info->device_description
+        );
         name = device_info->device_name;
     }
     avdevice_free_list_devices(&device_list);
     return name;
+}
+
+static void sws_free(SwsContext** sws) {
+    sws_freeContext(*sws);
+    *sws = nullptr;
 }
 
 static bool audio_to_tensor(SwrContext* swr, AVFrame* frame) {
@@ -530,7 +548,7 @@ static bool audio_to_tensor(SwrContext* swr, AVFrame* frame) {
 }
 
 static bool video_to_tensor(SwsContext* sws, AVFrame* frame) {
-    static int width = chobits::video_width * 3;
+    const static int width = chobits::video_width * 3;
     static std::vector<uint8_t> video_buffer(av_image_get_buffer_size(video_pix_format, chobits::video_width, chobits::video_height, 1));
     uint8_t* buffer = video_buffer.data();
     const int height = sws_scale(sws, (const uint8_t* const *) frame->data, frame->linesize, 0, frame->height, &buffer, &width);
@@ -567,11 +585,6 @@ static bool video_to_tensor(SwsContext* sws, AVFrame* frame) {
         }
     }
     return true;
-}
-
-static void sws_free(SwsContext** sws) {
-    sws_freeContext(*sws);
-    *sws = nullptr;
 }
 
 /**

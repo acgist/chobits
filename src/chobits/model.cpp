@@ -212,8 +212,8 @@ void chobits::model::Trainer::train(const size_t epoch) {
     const auto a = std::chrono::system_clock::now();
     trainer_state.optimizer->zero_grad();
     for (int i = 0; i < epoch_count && chobits::running; ++i) {
-        auto [audio, video, label] = chobits::media::get_data();
-        if(audio.numel() == 0 || video.numel() == 0 || label.numel() == 0) {
+        auto [success, audio, video, label] = chobits::media::get_data();
+        if(!success) {
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
             continue;
         }
@@ -244,8 +244,8 @@ void chobits::model::Trainer::eval() {
     trainer_state.model->eval();
     torch::NoGradGuard no_grad_guard;
     while(chobits::running) {
-        auto [audio, video, label] = chobits::media::get_data(false);
-        if(audio.numel() == 0 || video.numel() == 0) {
+        auto [success, audio, video, label] = chobits::media::get_data(false);
+        if(!success) {
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
             continue;
         }

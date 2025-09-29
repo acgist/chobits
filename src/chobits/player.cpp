@@ -35,16 +35,16 @@ static void stop_video_player();
 bool chobits::player::open_player() {
     int ret = SDL_Init(SDL_INIT_AUDIO | SDL_INIT_VIDEO);
     if(ret != 0) {
-        std::printf("打开播放器失败：%d\n", ret);
+        std::printf("打开播放器失败：%s\n", SDL_GetError());
         return false;
     }
     if(init_audio_player() && init_video_player()) {
         SDL_Event event;
-        std::printf("打开播放器\n");
+        std::printf("打开播放器成功\n");
         while(chobits::running) {
             SDL_WaitEventTimeout(&event, 1000);
             if(event.type == SDL_QUIT) {
-                std::printf("关闭播放器\n");
+                std::printf("退出播放器\n");
                 chobits::stop_all();
                 break;
             } else {
@@ -61,9 +61,13 @@ bool chobits::player::open_player() {
 }
 
 void chobits::player::stop_player() {
-    SDL_Event event;
-    event.type = SDL_QUIT;
-    SDL_PushEvent(&event);
+    int flags = SDL_INIT_AUDIO | SDL_INIT_VIDEO;
+    if(SDL_WasInit(flags) == flags) {
+        SDL_Event event;
+        event.type = SDL_QUIT;
+        int ret = SDL_PushEvent(&event);
+        std::printf("关闭播放器：%d\n", ret);
+    }
 }
 
 bool chobits::player::play_audio(const void* data, int len) {

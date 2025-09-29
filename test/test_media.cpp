@@ -37,14 +37,14 @@
         // chobits::media::open_hardware();
     });
     while(chobits::running) {
-        auto [audio, video, pred] = chobits::media::get_data(false);
+        auto [success, audio, video, pred] = chobits::media::get_data(false);
         std::cout << audio.sizes() << std::endl;
         std::cout << video.sizes() << std::endl;
         std::cout << pred .sizes() << std::endl;
-        if(audio.numel() == 0 || video.numel() == 0) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        if(success) {
+            chobits::media::set_data(audio.squeeze(0).cpu());
         } else {
-            chobits::media::set_data(audio.squeeze(0));
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
         }
     }
     media_thread.join();
