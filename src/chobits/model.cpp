@@ -243,29 +243,16 @@ void chobits::model::Trainer::train(const size_t epoch) {
     std::printf("训练轮次：%" PRIu64 " 损失：%f 耗时：%" PRIu64 "\n", epoch, loss_val / epoch_count, duration);
 }
 
-void chobits::model::Trainer::eval() {
+void chobits::model::Trainer::eval(const bool save_file) {
     trainer_state.model->eval();
     torch::NoGradGuard no_grad_guard;
-    while(chobits::running) {
-        auto [success, audio, video, label] = chobits::media::get_data(false);
-        if(!success) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(100));
-            continue;
+    std::ofstream stream;
+    if(save_file) {
+        stream.open("chobits.pcm", std::ios::binary);
+        if(stream.fail()) {
+            std::printf("无法创建音频文件\n");
+            return;
         }
-        audio = audio.to(trainer_state.device);
-        video = video.to(trainer_state.device);
-        auto pred = trainer_state.model->forward(audio, video);
-        chobits::media::set_data(pred.squeeze(0).cpu());
-    }
-}
-
-void chobits::model::Trainer::test() {
-    trainer_state.model->eval();
-    torch::NoGradGuard no_grad_guard;
-    std::ofstream stream("chobits.pcm", std::ios::binary);
-    if(stream.fail()) {
-        std::printf("无法创建文件\n");
-        return;
     }
     while(chobits::running) {
         auto [success, audio, video, label] = chobits::media::get_data(false);
@@ -277,10 +264,14 @@ void chobits::model::Trainer::test() {
         video = video.to(trainer_state.device);
         auto pred = trainer_state.model->forward(audio, video);
         auto pcm  = chobits::media::set_data(pred.squeeze(0).cpu());
-        stream.write(reinterpret_cast<const char*>(pcm.data()), pcm.size() * sizeof(short));
-        std::printf("写入音频数据：%" PRIu64 "\n", pcm.size());
+        if(save_file) {
+            stream.write(reinterpret_cast<const char*>(pcm.data()), pcm.size() * sizeof(short));
+            std::printf("写入音频数据：%" PRIu64 "\n", pcm.size());
+        }
     }
-    stream.close();
+    if(save_file) {
+        stream.close();
+    }
 }
 
 void chobits::model::Trainer::info() {

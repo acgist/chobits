@@ -31,8 +31,7 @@ public:
     bool load(const std::string& path = "chobits.pt");
     void train();
     void train(const size_t epoch);
-    void eval();
-    void test();
+    void eval(const bool save_file = false);
     
 };
 
