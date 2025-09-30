@@ -436,7 +436,6 @@ public:
         auto output = this->resi_attn->forward(input);
         output = this->output->forward(output);
         return output;
-        // return torch::tanh(output);
     }
 
 };

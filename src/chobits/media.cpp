@@ -606,8 +606,13 @@ static at::Tensor pcm_stft(short* pcm_data, int pcm_size, int n_fft, int hop_siz
     static auto wind = torch::hann_window(win_size);
     auto data = torch::from_blob(pcm_data, { 1, pcm_size }, torch::kShort).to(torch::kFloat32);
     auto com  = torch::stft(data, n_fft, hop_size, win_size, wind, true, "reflect", false, std::nullopt, true);
+    #ifdef CHOBITS_NORMALIZATION
     auto mag  = torch::log10(torch::abs(com) + 1e-4) / 4;
     auto pha  = torch::angle(com) / std::numbers::pi;
+    #else
+    auto mag  = torch::log10(torch::abs(com) + 1e-4);
+    auto pha  = torch::angle(com);
+    #endif
     return torch::concat({ mag, pha });
 }
 
@@ -623,8 +628,13 @@ static at::Tensor pcm_stft(short* pcm_data, int pcm_size, int n_fft, int hop_siz
  */
 static std::vector<short> pcm_istft(const at::Tensor& tensor, int n_fft, int hop_size, int win_size) {
     static auto wind = torch::hann_window(win_size);
+    #ifdef CHOBITS_NORMALIZATION
     auto mag  = torch::pow(10, tensor[0] * 4) - 1e-4;
     auto pha  = tensor[1] * std::numbers::pi;
+    #else
+    auto mag  = torch::pow(10, tensor[0]) - 1e-4;
+    auto pha  = tensor[1];
+    #endif
     auto com  = torch::polar(mag, pha);
     auto ret  = torch::istft(com.unsqueeze(0), n_fft, hop_size, win_size, wind, true);
     float* data = reinterpret_cast<float*>(ret.data_ptr());
