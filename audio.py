@@ -50,4 +50,4 @@ def generate_spectrogram(audio_path):
     plt.show()
 
 if __name__ == "__main__":
-    generate_spectrogram("D:/tmp/dzht.wav")
+    generate_spectrogram("D:/tmp/chobits.wav")

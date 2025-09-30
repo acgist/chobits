@@ -24,9 +24,11 @@
  *   - 动作：控制运动、控制镜头（输出两个XY角度分量）
  *     * 视频训练：暂无
  *     * 现实训练：暂无
- *   - 预测五百毫秒后的数据（慢慢的傻傻的也挺可爱）
+ *   - 预测一秒后的数据（慢慢的傻傻的也挺可爱）
  * 
  * 记忆：短时记忆、长时记忆、识别模式
+ * 
+ * EMA
  */
 class ChobitsImpl : public torch::nn::Module {
 
@@ -234,8 +236,8 @@ void chobits::model::Trainer::train(const size_t epoch) {
             chobits::media::set_data(pred.squeeze(0).cpu());
         }
     }
-    trainer_state.optimizer->step();
     torch::nn::utils::clip_grad_norm_(trainer_state.model->parameters(), trainer_state.clip_grad_norm);
+    trainer_state.optimizer->step();
     const auto z = std::chrono::system_clock::now();
     const auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(z - a).count();
     std::printf("训练轮次：%" PRIu64 " 损失：%f 耗时：%" PRIu64 "\n", epoch, loss_val / epoch_count, duration);

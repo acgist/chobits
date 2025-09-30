@@ -422,7 +422,9 @@ public:
         this->resi_attn = this->register_module("resi_attn", chobits::nn::ResidualAttentionBlock(in, out, embed_dim, 2));
         this->output = this->register_module("output", torch::nn::Sequential(
             torch::nn::ConvTranspose2d(torch::nn::ConvTranspose2dOptions(out,         channels[0], kernel[0]).stride(2).bias(false)),
+            torch::nn::SiLU(),
             torch::nn::ConvTranspose2d(torch::nn::ConvTranspose2dOptions(channels[0], channels[1], kernel[1]).stride(2).bias(false)),
+            torch::nn::SiLU(),
             torch::nn::ConvTranspose2d(torch::nn::ConvTranspose2dOptions(channels[1], channels[2], kernel[2]).stride(2).bias(false))
         ));
     }

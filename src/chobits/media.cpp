@@ -31,7 +31,7 @@ const static int             audio_bytes_per_sample = av_get_bytes_per_sample(au
 struct Dataset {
     bool   discard    = true;  // 是否丢弃数据
     size_t cache_size = 60;    // 缓存数据大小
-    size_t audio_size = 48000; // 48000 / 48000 / 2 * 1000 = 500 ms
+    size_t audio_size = 96000; // 96000 / 48000 / 2 * 1000 = 1000 ms
     std::mutex mutex;
     std::condition_variable condition;
     std::vector<torch::Tensor> audio;
@@ -507,7 +507,7 @@ static void sws_free(SwsContext** sws) {
 
 static bool audio_to_tensor(SwrContext* swr, AVFrame* frame) {
     static size_t remain = 0;
-    static std::vector<uint8_t> audio_buffer(chobits::audio_nb_channels * audio_bytes_per_sample * chobits::audio_sample_rate);
+    static std::vector<uint8_t> audio_buffer(2 * chobits::audio_nb_channels * audio_bytes_per_sample * chobits::audio_sample_rate);
     uint8_t* buffer = audio_buffer.data() + remain;
     const int out_samples = swr_convert(swr, &buffer, swr_get_out_samples(swr, frame->nb_samples), (const uint8_t**) frame->data, frame->nb_samples);
     if(out_samples < 0) {
@@ -534,7 +534,7 @@ static bool audio_to_tensor(SwrContext* swr, AVFrame* frame) {
                 insert = true;
             }
             if(insert) {
-                auto tensor = pcm_stft(reinterpret_cast<short*>(audio_buffer.data()), dataset.audio_size);
+                auto tensor = pcm_stft(reinterpret_cast<short*>(audio_buffer.data()), dataset.audio_size / sizeof(short));
                 dataset.audio.push_back(tensor);
             }
             dataset.condition.notify_all();
@@ -635,9 +635,9 @@ static std::vector<short> pcm_istft(const at::Tensor& tensor, int n_fft, int hop
     auto mag  = torch::pow(10, tensor[0]) - 1e-4;
     auto pha  = tensor[1];
     #endif
-    auto com  = torch::polar(mag, pha);
-    auto ret  = torch::istft(com.unsqueeze(0), n_fft, hop_size, win_size, wind, true);
-    float* data = reinterpret_cast<float*>(ret.data_ptr());
+    auto com  = torch::polar(mag, pha).unsqueeze(0);
+    auto ret  = torch::istft(com, n_fft, hop_size, win_size, wind, true).to(torch::kShort);
+    short* data = reinterpret_cast<short*>(ret.data_ptr());
     std::vector<short> pcm;
     pcm.resize(ret.sizes()[1]);
     std::copy_n(data, pcm.size(), pcm.data());
