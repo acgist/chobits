@@ -4,6 +4,7 @@
 
 #include <mutex>
 #include <thread>
+#include <numbers>
 #include <filesystem>
 #include <condition_variable>
 
@@ -26,8 +27,6 @@ const static AVPixelFormat video_pix_format = AV_PIX_FMT_RGB24;
 const static AVSampleFormat  audio_format           = AV_SAMPLE_FMT_S16;
 const static AVChannelLayout audio_layout           = AV_CHANNEL_LAYOUT_MONO;
 const static int             audio_bytes_per_sample = av_get_bytes_per_sample(audio_format);
-
-const static float NORMALIZATION = 32768.0F;
 
 struct Dataset {
     bool   discard    = true;  // 是否丢弃数据
@@ -592,7 +591,7 @@ static bool video_to_tensor(SwsContext* sws, AVFrame* frame) {
  * 
  * 201 = win_size / 2 + 1
  * 480 = 7 | 4800 = 61 | 48000 = 601
- * [1, 201, 61, 2[实部, 虚部]]
+ * [2(相位, 角度), 201, 601]
  * 
  * @param pcm_data PCM数据
  * @param pcm_size PCM长度
@@ -603,12 +602,12 @@ static bool video_to_tensor(SwsContext* sws, AVFrame* frame) {
  * @return 张量
  */
 static at::Tensor pcm_stft(short* pcm_data, int pcm_size, int n_fft, int hop_size, int win_size) {
-    auto data = torch::from_blob(pcm_data, { 1, pcm_size }, torch::kShort).to(torch::kFloat32) / NORMALIZATION;
-    auto wind = torch::hann_window(win_size);
-    auto real = torch::view_as_real(torch::stft(data, n_fft, hop_size, win_size, wind, true, "reflect", false, std::nullopt, true));
-    auto mag  = torch::sqrt(real.pow(2).sum(-1));
-    auto pha  = torch::atan2(real.index({ "...", 1 }), real.index({ "...", 0 }));
-    return torch::stack({ mag, pha }, -1).squeeze().permute({ 2, 0, 1 });
+    static auto wind = torch::hann_window(win_size);
+    auto data = torch::from_blob(pcm_data, { 1, pcm_size }, torch::kShort).to(torch::kFloat32);
+    auto com  = torch::stft(data, n_fft, hop_size, win_size, wind, true, "reflect", false, std::nullopt, true);
+    auto mag  = torch::log10(torch::abs(com) + 1e-6);
+    auto pha  = torch::angle(com) / std::numbers::pi;
+    return torch::concat({ mag, pha });
 }
 
 /**
@@ -622,12 +621,11 @@ static at::Tensor pcm_stft(short* pcm_data, int pcm_size, int n_fft, int hop_siz
  * @return PCM数据
  */
 static std::vector<short> pcm_istft(const at::Tensor& tensor, int n_fft, int hop_size, int win_size) {
-    auto copy = tensor.permute({1, 2, 0}).unsqueeze(0);
-    auto wind = torch::hann_window(win_size);
-    auto mag  = copy.index({ "...", 0 });
-    auto pha  = copy.index({ "...", 1 });
-    auto com  = torch::complex(mag * torch::cos(pha), mag * torch::sin(pha));
-    auto ret  = torch::istft(com, n_fft, hop_size, win_size, wind, true) * NORMALIZATION;
+    static auto wind = torch::hann_window(win_size);
+    auto mag  = torch::pow(10, tensor[0]) - 1e-6;
+    auto pha  = tensor[1] * std::numbers::pi;
+    auto com  = torch::polar(mag, pha);
+    auto ret  = torch::istft(com.unsqueeze(0), n_fft, hop_size, win_size, wind, true);
     float* data = reinterpret_cast<float*>(ret.data_ptr());
     std::vector<short> pcm;
     pcm.resize(ret.sizes()[1]);
