@@ -405,9 +405,10 @@ std::tuple<bool, at::Tensor, at::Tensor, at::Tensor> chobits::media::get_data(bo
     }
 }
 
-void chobits::media::set_data(const torch::Tensor& tensor) {
+std::vector<short> chobits::media::set_data(const torch::Tensor& tensor) {
     auto pcm = pcm_istft(tensor);
-    chobits::player::play_audio(pcm.data(), pcm.size() * 2);
+    chobits::player::play_audio(pcm.data(), pcm.size() * sizeof(short));
+    return pcm;
 }
 
 static SwrContext* init_audio_swr(AVCodecContext* ctx, AVFrame*) {
@@ -605,7 +606,7 @@ static at::Tensor pcm_stft(short* pcm_data, int pcm_size, int n_fft, int hop_siz
     static auto wind = torch::hann_window(win_size);
     auto data = torch::from_blob(pcm_data, { 1, pcm_size }, torch::kShort).to(torch::kFloat32);
     auto com  = torch::stft(data, n_fft, hop_size, win_size, wind, true, "reflect", false, std::nullopt, true);
-    auto mag  = torch::log10(torch::abs(com) + 1e-6);
+    auto mag  = torch::log10(torch::abs(com) + 1e-4) / 4;
     auto pha  = torch::angle(com) / std::numbers::pi;
     return torch::concat({ mag, pha });
 }
@@ -622,7 +623,7 @@ static at::Tensor pcm_stft(short* pcm_data, int pcm_size, int n_fft, int hop_siz
  */
 static std::vector<short> pcm_istft(const at::Tensor& tensor, int n_fft, int hop_size, int win_size) {
     static auto wind = torch::hann_window(win_size);
-    auto mag  = torch::pow(10, tensor[0]) - 1e-6;
+    auto mag  = torch::pow(10, tensor[0] * 4) - 1e-4;
     auto pha  = tensor[1] * std::numbers::pi;
     auto com  = torch::polar(mag, pha);
     auto ret  = torch::istft(com.unsqueeze(0), n_fft, hop_size, win_size, wind, true);

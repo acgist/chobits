@@ -89,10 +89,14 @@ static void info(std::shared_ptr<torch::nn::Module> layer) {
 }
 
 [[maybe_unused]] static void test_model() {
+    std::thread media_thread([]() {
+        chobits::media::open_file("D:/tmp/video.mp4");
+    });
     chobits::model::Trainer trainer;
     trainer.load();
     trainer.test();
     // trainer.save("chobits.pt");
+    media_thread.join();
 }
 
 [[maybe_unused]] static void test_trainer() {
@@ -105,7 +109,7 @@ static void info(std::shared_ptr<torch::nn::Module> layer) {
     });
     std::thread model_thread([]() {
         chobits::model::Trainer trainer;
-        trainer.load("D:/tmp/chobits.1.ckpt");
+        trainer.load("D:/tmp/chobits.ckpt");
         trainer.eval();
         // trainer.train();
         // trainer.save();

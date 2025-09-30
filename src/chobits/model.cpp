@@ -4,6 +4,7 @@
 #include "chobits/chobits.hpp"
 
 #include <thread>
+#include <fstream>
 #include <cinttypes>
 #include <filesystem>
 
@@ -128,7 +129,7 @@ public:
         auto video_mem  = this->video_resi_attn_s_1->forward(video_head);
         auto media_mem  = this->audio_video_mem_s_1->forward(audio_mem, video_mem);
              media_mem  = this->media_resi_attn_s_2->forward(media_mem + this->memory_s_prob->forward(media_mix).unsqueeze(-1).unsqueeze(-1) * this->memory_s);
-        auto media_out  = media_mix + media_mem;
+        auto media_out  = torch::silu(media_mix + media_mem);
              media_out  = this->audio_tail->forward(media_out);
         {
             torch::NoGradGuard no_grad_guard;
@@ -225,7 +226,7 @@ void chobits::model::Trainer::train(const size_t epoch) {
         // torch::mse_loss
         // torch::huber_loss
         // torch::smooth_l1_loss
-        torch::Tensor loss = torch::huber_loss(pred, label);
+        torch::Tensor loss = torch::mse_loss(pred, label);
         loss.backward();
         loss_val += loss.template item<float>();
         if(chobits::batch_size == 1) {
@@ -259,11 +260,25 @@ void chobits::model::Trainer::eval() {
 void chobits::model::Trainer::test() {
     trainer_state.model->eval();
     torch::NoGradGuard no_grad_guard;
-    auto audio = trainer_state.model->forward(
-        torch::randn({ 10, 2, 201, 601 }),
-        torch::randn({ 10, 3, 372, 640 })
-    );
-    std::cout << audio.sizes() << std::endl;
+    std::ofstream stream("chobits.pcm", std::ios::binary);
+    if(stream.fail()) {
+        std::printf("无法创建文件\n");
+        return;
+    }
+    while(chobits::running) {
+        auto [success, audio, video, label] = chobits::media::get_data(false);
+        if(!success) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            continue;
+        }
+        audio = audio.to(trainer_state.device);
+        video = video.to(trainer_state.device);
+        auto pred = trainer_state.model->forward(audio, video);
+        auto pcm  = chobits::media::set_data(pred.squeeze(0).cpu());
+        stream.write(reinterpret_cast<const char*>(pcm.data()), pcm.size() * sizeof(short));
+        std::printf("写入音频数据：%" PRIu64 "\n", pcm.size());
+    }
+    stream.close();
 }
 
 void chobits::model::Trainer::info() {
@@ -271,16 +286,16 @@ void chobits::model::Trainer::info() {
     for(const auto& buffer : trainer_state.model->named_buffers()) {
         int64_t numel = buffer.value().numel();
         total_numel += numel;
-        std::printf("缓存参数数量: %s = %" PRIu64 "\n", buffer.key().c_str(), numel);
+        std::printf("缓存参数数量：%s = %" PRIu64 "\n", buffer.key().c_str(), numel);
     }
-    std::printf("缓存参数总量: %" PRIu64 "\n", total_numel);
+    std::printf("缓存参数总量：%" PRIu64 "\n", total_numel);
     total_numel = 0;
     for(const auto& parameter : trainer_state.model->named_parameters()) {
         int64_t numel = parameter.value().numel();
         total_numel += numel;
-        std::printf("模型参数数量: %s = %" PRIu64 "\n", parameter.key().c_str(), numel);
+        std::printf("模型参数数量：%s = %" PRIu64 "\n", parameter.key().c_str(), numel);
     }
-    std::printf("模型参数总量: %" PRIu64 "\n", total_numel);
+    std::printf("模型参数总量：%" PRIu64 "\n", total_numel);
 }
 
 bool chobits::model::open_model(int argc, char const *argv[]) {
