@@ -13,16 +13,9 @@ static void info(std::shared_ptr<torch::nn::Module> layer) {
     std::printf("参数总量：%" PRIu64 "\n", total_numel);
 }
 
-[[maybe_unused]] static void test_audio_head() {
-    chobits::nn::AudioHeadBlock layer(2);
+[[maybe_unused]] static void test_media_head() {
+    chobits::nn::MediaHeadBlock layer(16, std::vector<int>{ 2, 8, 32, 64 }, std::vector<int>{ 3, 3, 3 }, std::vector<int>{ 2, 2, 2 });
     auto output = layer->forward(torch::randn({ 1, 2, 201, 601 }));
-    std::cout << output.sizes() << std::endl;
-    info(layer.ptr());
-}
-
-[[maybe_unused]] static void test_video_head() {
-    chobits::nn::VideoHeadBlock layer(3);
-    auto output = layer->forward(torch::randn({ 1, 3, 372, 640 }));
     std::cout << output.sizes() << std::endl;
     info(layer.ptr());
 }
@@ -32,7 +25,8 @@ static void info(std::shared_ptr<torch::nn::Module> layer) {
         64, 128,    
         24,  74,
         30,  52,
-        24,  74
+        30,  52
+        // 24,  74
     );
     auto output = layer->forward(
         torch::randn({ 1, 64, 24, 74 }),
@@ -42,41 +36,27 @@ static void info(std::shared_ptr<torch::nn::Module> layer) {
     info(layer.ptr());
 }
 
-[[maybe_unused]] static void test_residual() {
-    chobits::nn::ResidualBlock layer(64, 128);
-    auto output = layer->forward(torch::randn({ 1, 64, 20, 20 }));
-    std::cout << output.sizes() << std::endl;
-    info(layer.ptr());
-}
-
 [[maybe_unused]] static void test_attention() {
     chobits::nn::AttentionBlock audio_layer(64, 24 * 74);
-    auto audio_output = audio_layer->forward(torch::randn({ 1, 64, 24, 74 }));
+    auto audio_output = audio_layer->forward(torch::randn({ 10, 64, 24, 74 }));
     std::cout << audio_output.sizes() << std::endl;
     info(audio_layer.ptr());
     chobits::nn::AttentionBlock video_layer(64, 30 * 52);
-    auto video_output = video_layer->forward(torch::randn({ 1, 64, 30, 52 }));
+    auto video_output = video_layer->forward(torch::randn({ 10, 64, 30, 52 }));
     std::cout << video_output.sizes() << std::endl;
     info(video_layer.ptr());
 }
 
-[[maybe_unused]] static void test_residual_attention() {
-    chobits::nn::ResidualAttentionBlock layer(64, 128, 24 * 74);
-    auto output = layer->forward(torch::randn({ 1, 64, 24, 74 }));
+[[maybe_unused]] static void test_memory_prob() {
+    chobits::nn::MemoryProbBlock layer(128, 24, 74);
+    auto output = layer->forward(torch::randn({ 10, 128, 24, 74 }), torch::randn({ 1, 128, 24, 74 }));
     std::cout << output.sizes() << std::endl;
     info(layer.ptr());
 }
 
-[[maybe_unused]] static void test_memory() {
-    chobits::nn::MemoryBlock layer(128, 24, 74);
-    auto output = layer->forward(torch::randn({ 10, 128, 24, 74 }));
-    std::cout << output << std::endl;
-    info(layer.ptr());
-}
-
 [[maybe_unused]] static void test_audio_tail() {
-    chobits::nn::AudioTailBlock layer(256, 256, 24 * 74);
-    auto output = layer->forward(torch::randn({ 1, 256, 24, 74 }));
+    chobits::nn::AudioTailBlock layer(std::vector<int>{ 24 * 74, 48 * 148 }, std::vector<int>{ 8, 8 }, std::vector<int>{ 128, 32, 8, 1 }, std::vector<int>{ 4, 5, 5 }, std::vector<int>{ 2, 2, 2 });
+    auto output = layer->forward(torch::randn({ 1, 128, 24, 74 }));
     std::cout << output.sizes() << std::endl;
     info(layer.ptr());
 }
@@ -121,16 +101,13 @@ static void info(std::shared_ptr<torch::nn::Module> layer) {
 }
 
 int main() {
-    // test_audio_head();
-    // test_video_head();
+    // test_media_head();
     // test_media_mix();
-    // test_residual();
     // test_attention();
-    // test_residual_attention();
-    // test_memory();
+    // test_memory_prob();
     // test_audio_tail();
-    // test_load_save();
+    test_load_save();
     // test_model_eval();
-    test_model_train();
+    // test_model_train();
     return 0;
 }
