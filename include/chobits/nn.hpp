@@ -121,7 +121,6 @@ TORCH_MODULE(AttentionBlock);
 class MediaMixBlockImpl : public torch::nn::Module {
 
 private:
-    bool audio_;
     torch::nn::Sequential audio{ nullptr };
     torch::nn::Sequential video{ nullptr };
 
@@ -133,7 +132,6 @@ public:
         int out_w,   int out_h
     ) {
         if(audio_w == out_w && audio_h == out_h) {
-            this->audio_ = true;
             this->audio = this->register_module("audio", torch::nn::Sequential(
                 torch::nn::Conv2d(torch::nn::Conv2dOptions(in, out, 3).padding(1).bias(false))
             ));
@@ -146,7 +144,6 @@ public:
             ));
         }
         if(video_w == out_w && video_h == out_h) {
-            this->audio_ = false;
             this->video = this->register_module("video", torch::nn::Sequential(
                 torch::nn::Conv2d(torch::nn::Conv2dOptions(in, out, 3).padding(1).bias(false))
             ));
@@ -165,10 +162,15 @@ public:
     }
     
 public:
-    torch::Tensor forward(const torch::Tensor& audio, const torch::Tensor& video) {
+    torch::Tensor forward_audio(const torch::Tensor& audio, const torch::Tensor& video) {
         auto audio_out = this->audio->forward(audio);
         auto video_out = this->video->forward(video);
-        return this->audio_ ? (audio_out + audio_out * video_out.unsqueeze(-1)) : (video_out + video_out * audio_out.unsqueeze(-1));
+        return audio_out + audio_out * video_out.unsqueeze(-1);
+    }
+    torch::Tensor forward_video(const torch::Tensor& audio, const torch::Tensor& video) {
+        auto audio_out = this->audio->forward(audio);
+        auto video_out = this->video->forward(video);
+        return video_out + video_out * audio_out.unsqueeze(-1);
     }
 
 };
@@ -176,40 +178,45 @@ public:
 TORCH_MODULE(MediaMixBlock);
 
 /**
- * 记忆概率
+ * 记忆叠加
  */
-class MemoryProbBlockImpl : public torch::nn::Module {
+class MemoryOverlayBlockImpl : public torch::nn::Module {
 
 private:
-    torch::nn::Sequential prob{ nullptr };
+    torch::nn::Sequential       overlay{ nullptr };
+    chobits::nn::AttentionBlock attn   { nullptr };
 
 public:
-    MemoryProbBlockImpl(
+    MemoryOverlayBlockImpl(
         const int channel,
         const int w,
         const int h,
         int num_groups = 16
     ) {
-        this->prob = this->register_module("prob", torch::nn::Sequential(
+        this->overlay = this->register_module("overlay", torch::nn::Sequential(
             torch::nn::Conv2d(torch::nn::Conv2dOptions(channel, channel, 3).padding(1).bias(false)),
             torch::nn::GroupNorm(torch::nn::GroupNormOptions(num_groups, channel)),
             torch::nn::Flatten(torch::nn::FlattenOptions().start_dim(1)),
             torch::nn::Linear(torch::nn::LinearOptions(channel * w * h, 1).bias(false)),
             torch::nn::Sigmoid()
         ));
+        this->attn = this->register_module("attn", chobits::nn::AttentionBlock(channel, w * h));
     }
-    ~MemoryProbBlockImpl() {
-        this->unregister_module("prob");
+    ~MemoryOverlayBlockImpl() {
+        this->unregister_module("overlay");
+        this->unregister_module("attn");
     }
 
 public:
     torch::Tensor forward(const torch::Tensor& input, const torch::Tensor& memory) {
-        return input + this->prob->forward(input).unsqueeze(-1).unsqueeze(-1) * memory;
+        auto output = this->overlay->forward(input).unsqueeze(-1).unsqueeze(-1) * memory;
+             output = input + output;
+        return this->attn->forward(output);
     }
 
 };
 
-TORCH_MODULE(MemoryProbBlock);
+TORCH_MODULE(MemoryOverlayBlock);
 
 /**
  * 音频输出
@@ -231,14 +238,12 @@ public:
         this->mag = this->register_module("mag", torch::nn::Sequential(
             chobits::nn::AttentionBlock(channels[0], embed_dim[0], num_heads[0]),
             torch::nn::ConvTranspose2d(torch::nn::ConvTranspose2dOptions(channels[0], channels[1], kernel[0]).stride(stride[0]).padding(1).bias(false)),
-            // chobits::nn::AttentionBlock(channels[1], embed_dim[1], num_heads[1]),
             torch::nn::ConvTranspose2d(torch::nn::ConvTranspose2dOptions(channels[1], channels[2], kernel[1]).stride(stride[1]).bias(false)),
             torch::nn::ConvTranspose2d(torch::nn::ConvTranspose2dOptions(channels[2], channels[3], kernel[2]).stride(stride[2]).bias(false))
         ));
         this->pha = this->register_module("pha", torch::nn::Sequential(
             chobits::nn::AttentionBlock(channels[0], embed_dim[0], num_heads[0]),
             torch::nn::ConvTranspose2d(torch::nn::ConvTranspose2dOptions(channels[0], channels[1], kernel[0]).stride(stride[0]).padding(1).bias(false)),
-            // chobits::nn::AttentionBlock(channels[1], embed_dim[1], num_heads[1]),
             torch::nn::ConvTranspose2d(torch::nn::ConvTranspose2dOptions(channels[1], channels[2], kernel[1]).stride(stride[1]).bias(false)),
             torch::nn::ConvTranspose2d(torch::nn::ConvTranspose2dOptions(channels[2], channels[3], kernel[2]).stride(stride[2]).bias(false))
         ));

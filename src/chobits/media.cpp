@@ -58,6 +58,7 @@ bool chobits::media::open_media(int argc, char const *argv[]) {
         std::thread player_thread([]() {
             chobits::player::open_player();
         });
+        chobits::play_audio = true;
         bool ret = chobits::media::open_device();
         chobits::player::stop_player();
         player_thread.join();

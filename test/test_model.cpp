@@ -20,22 +20,6 @@ static void info(std::shared_ptr<torch::nn::Module> layer) {
     info(layer.ptr());
 }
 
-[[maybe_unused]] static void test_media_mix() {
-    chobits::nn::MediaMixBlock layer(
-        64, 128,    
-        24,  74,
-        30,  52,
-        30,  52
-        // 24,  74
-    );
-    auto output = layer->forward(
-        torch::randn({ 1, 64, 24, 74 }),
-        torch::randn({ 1, 64, 30, 52 })
-    );
-    std::cout << output.sizes() << std::endl;
-    info(layer.ptr());
-}
-
 [[maybe_unused]] static void test_attention() {
     chobits::nn::AttentionBlock audio_layer(64, 24 * 74);
     auto audio_output = audio_layer->forward(torch::randn({ 10, 64, 24, 74 }));
@@ -47,8 +31,35 @@ static void info(std::shared_ptr<torch::nn::Module> layer) {
     info(video_layer.ptr());
 }
 
-[[maybe_unused]] static void test_memory_prob() {
-    chobits::nn::MemoryProbBlock layer(128, 24, 74);
+[[maybe_unused]] static void test_media_mix() {
+    chobits::nn::MediaMixBlock audio_layer(
+        64, 128,    
+        24,  74,
+        30,  52,
+        24,  74
+    );
+    auto audio_output = audio_layer->forward_audio(
+        torch::randn({ 1, 64, 24, 74 }),
+        torch::randn({ 1, 64, 30, 52 })
+    );
+    std::cout << audio_output.sizes() << std::endl;
+    info(audio_layer.ptr());
+    chobits::nn::MediaMixBlock video_layer(
+        64, 128,    
+        24,  74,
+        30,  52,
+        30,  52
+    );
+    auto video_output = video_layer->forward_video(
+        torch::randn({ 1, 64, 24, 74 }),
+        torch::randn({ 1, 64, 30, 52 })
+    );
+    std::cout << video_output.sizes() << std::endl;
+    info(video_layer.ptr());
+}
+
+[[maybe_unused]] static void test_memory_overlay() {
+    chobits::nn::MemoryOverlayBlock layer(128, 24, 74);
     auto output = layer->forward(torch::randn({ 10, 128, 24, 74 }), torch::randn({ 1, 128, 24, 74 }));
     std::cout << output.sizes() << std::endl;
     info(layer.ptr());
@@ -102,11 +113,11 @@ static void info(std::shared_ptr<torch::nn::Module> layer) {
 
 int main() {
     // test_media_head();
-    // test_media_mix();
     // test_attention();
-    // test_memory_prob();
+    // test_media_mix();
+    test_memory_overlay();
     // test_audio_tail();
-    test_load_save();
+    // test_load_save();
     // test_model_eval();
     // test_model_train();
     return 0;
