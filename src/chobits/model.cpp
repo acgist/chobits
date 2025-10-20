@@ -35,25 +35,16 @@ class ChobitsImpl : public torch::nn::Module {
 friend chobits::model::Trainer;
 
 private:
-    torch::Tensor                   memory;
-    chobits::nn::MediaHeadBlock     audio_head         { nullptr };
-    chobits::nn::MediaHeadBlock     video_head         { nullptr };
-    chobits::nn::AttentionBlock     audio_attention_l_1{ nullptr };
-    chobits::nn::AttentionBlock     video_attention_l_1{ nullptr };
-    chobits::nn::MediaMixBlock      audio_media_mix_l_1{ nullptr };
-    chobits::nn::MediaMixBlock      video_media_mix_l_1{ nullptr };
-    chobits::nn::AttentionBlock     audio_attention_l_2{ nullptr };
-    chobits::nn::AttentionBlock     video_attention_l_2{ nullptr };
-    chobits::nn::MediaMixBlock      audio_media_mix_l_2{ nullptr };
-    chobits::nn::MediaMixBlock      video_media_mix_l_2{ nullptr };
-    chobits::nn::AttentionBlock     audio_attention_l_3{ nullptr };
-    chobits::nn::AttentionBlock     video_attention_l_3{ nullptr };
-    chobits::nn::MediaMixBlock      audio_video_mix_l_3{ nullptr };
-    chobits::nn::AttentionBlock     audio_attention_s_1{ nullptr };
-    chobits::nn::AttentionBlock     video_attention_s_1{ nullptr };
-    chobits::nn::MediaMixBlock      audio_video_mix_s_1{ nullptr };
-    chobits::nn::MemoryOverlayBlock memory_overlay     { nullptr };
-    chobits::nn::AudioTailBlock     audio_tail         { nullptr };
+    torch::Tensor               memory_;
+    chobits::nn::MediaHeadBlock audio_head         { nullptr };
+    chobits::nn::MediaHeadBlock video_head         { nullptr };
+    chobits::nn::MediaMixBlock  audio_media_mix    { nullptr };
+    chobits::nn::AttentionBlock audio_attention_l_1{ nullptr };
+    chobits::nn::AttentionBlock audio_attention_l_2{ nullptr };
+    chobits::nn::AttentionBlock audio_attention_l_3{ nullptr };
+    chobits::nn::AttentionBlock audio_attention_s_1{ nullptr };
+    chobits::nn::MemoryBlock    memory             { nullptr };
+    chobits::nn::AudioTailBlock audio_tail         { nullptr };
 
 public:
     ChobitsImpl() {
@@ -61,81 +52,51 @@ public:
     ~ChobitsImpl() {
         this->unregister_module("audio_head");
         this->unregister_module("video_head");
+        this->unregister_module("audio_media_mix");
         this->unregister_module("audio_attention_l_1");
-        this->unregister_module("video_attention_l_1");
-        this->unregister_module("audio_media_mix_l_1");
-        this->unregister_module("video_media_mix_l_1");
         this->unregister_module("audio_attention_l_2");
-        this->unregister_module("video_attention_l_2");
-        this->unregister_module("audio_media_mix_l_2");
-        this->unregister_module("video_media_mix_l_2");
         this->unregister_module("audio_attention_l_3");
-        this->unregister_module("video_attention_l_3");
-        this->unregister_module("audio_video_mix_l_3");
         this->unregister_module("audio_attention_s_1");
-        this->unregister_module("video_attention_s_1");
-        this->unregister_module("audio_video_mix_s_1");
-        this->unregister_module("memory_overlay");
+        this->unregister_module("memory");
         this->unregister_module("audio_tail");
     }
 
 public:
     void define() {
-        this->memory              = torch::zeros({ 1, 128, 24, 74 });
-        this->audio_head          = this->register_module("audio_head",          chobits::nn::MediaHeadBlock(16, std::vector<int>{ 2, 8, 32, 128 }, std::vector<int>{ 3, 3, 3 }, std::vector<int>{ 2, 2, 2 }));
-        this->video_head          = this->register_module("video_head",          chobits::nn::MediaHeadBlock(16, std::vector<int>{ 3, 8, 32, 128 }, std::vector<int>{ 3, 3, 3 }, std::vector<int>{ 3, 2, 2 }));
+        this->memory_             = torch::zeros({ 1, 128, 24, 74 });
+        this->audio_head          = this->register_module("audio_head",          chobits::nn::MediaHeadBlock(std::vector<int>{ 2, 8, 32, 128 }, std::vector<int>{ 3, 3, 3 }, std::vector<int>{ 2, 2, 2 }, 24 * 74));
+        this->video_head          = this->register_module("video_head",          chobits::nn::MediaHeadBlock(std::vector<int>{ 3, 8, 32, 128 }, std::vector<int>{ 3, 3, 3 }, std::vector<int>{ 3, 2, 2 }, 29 * 52));
+        this->audio_media_mix     = this->register_module("audio_media_mix",     chobits::nn::MediaMixBlock(128, 128, 24, 74, 29, 52));
         this->audio_attention_l_1 = this->register_module("audio_attention_l_1", chobits::nn::AttentionBlock(128, 24 * 74));
-        this->video_attention_l_1 = this->register_module("video_attention_l_1", chobits::nn::AttentionBlock(128, 30 * 52));
-        this->audio_media_mix_l_1 = this->register_module("audio_media_mix_l_1", chobits::nn::MediaMixBlock(128, 256, 24, 74, 30, 52, 24, 74));
-        this->video_media_mix_l_1 = this->register_module("video_media_mix_l_1", chobits::nn::MediaMixBlock(128, 256, 24, 74, 30, 52, 30, 52));
-        this->audio_attention_l_2 = this->register_module("audio_attention_l_2", chobits::nn::AttentionBlock(256, 24 * 74));
-        this->video_attention_l_2 = this->register_module("video_attention_l_2", chobits::nn::AttentionBlock(256, 30 * 52));
-        this->audio_media_mix_l_2 = this->register_module("audio_media_mix_l_2", chobits::nn::MediaMixBlock(256, 128, 24, 74, 30, 52, 24, 74));
-        this->video_media_mix_l_2 = this->register_module("video_media_mix_l_2", chobits::nn::MediaMixBlock(256, 128, 24, 74, 30, 52, 30, 52));
+        this->audio_attention_l_2 = this->register_module("audio_attention_l_2", chobits::nn::AttentionBlock(128, 24 * 74));
         this->audio_attention_l_3 = this->register_module("audio_attention_l_3", chobits::nn::AttentionBlock(128, 24 * 74));
-        this->video_attention_l_3 = this->register_module("video_attention_l_3", chobits::nn::AttentionBlock(128, 30 * 52));
-        this->audio_video_mix_l_3 = this->register_module("audio_video_mix_l_3", chobits::nn::MediaMixBlock(128, 128, 24, 74, 30, 52, 24, 74));
         this->audio_attention_s_1 = this->register_module("audio_attention_s_1", chobits::nn::AttentionBlock(128, 24 * 74));
-        this->video_attention_s_1 = this->register_module("video_attention_s_1", chobits::nn::AttentionBlock(128, 30 * 52));
-        this->audio_video_mix_s_1 = this->register_module("audio_video_mix_s_1", chobits::nn::MediaMixBlock(128, 128, 24, 74, 30, 52, 24, 74));
-        this->memory_overlay      = this->register_module("memory_overlay",      chobits::nn::MemoryOverlayBlock(128, 24, 74));
-        this->audio_tail          = this->register_module("audio_tail",          chobits::nn::AudioTailBlock(std::vector<int>{ 24 * 74, 48 * 148 }, std::vector<int>{ 8, 8 }, std::vector<int>{ 128, 32, 8, 1 }, std::vector<int>{ 4, 5, 5 }, std::vector<int>{ 2, 2, 2 }));
+        this->memory              = this->register_module("memory",              chobits::nn::MemoryBlock(128, 24, 74));
+        this->audio_tail          = this->register_module("audio_tail",          chobits::nn::AudioTailBlock(std::vector<int>{ 128, 32, 8, 2 }, std::vector<int>{ 4, 5, 5 }, std::vector<int>{ 2, 2, 2 }, 24 * 74));
     }
     torch::Tensor forward_(const torch::Tensor& audio, const torch::Tensor& video) {
         auto audio_head  = this->audio_head->forward(audio);
         auto video_head  = this->video_head->forward(video);
-        auto media_mix_l = this->audio_video_mix_l_3->forward_audio(audio_head, video_head);
-        auto media_mix_s = this->audio_video_mix_s_1->forward_audio(audio_head, video_head);
-        auto media_mix   = media_mix_l + media_mix_s;
-        auto media_out   = this->audio_tail->forward(media_mix);
-        return media_out;
+        auto audio_mix   = this->audio_media_mix->forward(audio_head, video_head);
+        auto audio_out   = this->audio_tail->forward(audio_mix);
+        return audio_out;
     }
     torch::Tensor forward(const torch::Tensor& audio, const torch::Tensor& video) {
         auto audio_head  = this->audio_head->forward(audio);
         auto video_head  = this->video_head->forward(video);
-        auto audio_out_l = this->audio_attention_l_1->forward(audio_head);
-        auto video_out_l = this->video_attention_l_1->forward(video_head);
-        auto audio_mix_l = this->audio_media_mix_l_1->forward_audio(audio_out_l, video_out_l);
-        auto video_mix_l = this->video_media_mix_l_1->forward_video(audio_out_l, video_out_l);
-             audio_out_l = this->audio_attention_l_2->forward(audio_mix_l);
-             video_out_l = this->video_attention_l_2->forward(video_mix_l);
-             audio_mix_l = this->audio_media_mix_l_2->forward_audio(audio_out_l, video_out_l);
-             video_mix_l = this->video_media_mix_l_2->forward_video(audio_out_l, video_out_l);
-             audio_out_l = this->audio_attention_l_3->forward(audio_mix_l);
-             video_out_l = this->video_attention_l_3->forward(video_mix_l);
-        auto media_mix_l = this->audio_video_mix_l_3->forward_audio(audio_out_l, video_out_l);
-        auto audio_out_s = this->audio_attention_s_1->forward(audio_head);
-        auto video_out_s = this->video_attention_s_1->forward(video_head);
-        auto media_mix_s = this->audio_video_mix_s_1->forward_audio(audio_out_s, video_out_s);
-        auto media_mix   = media_mix_l + media_mix_s;
-        auto media_mem   = this->memory_overlay->forward(media_mix, this->memory);
-        auto media_out   = this->audio_tail->forward(media_mem);
+        auto audio_mix   = this->audio_media_mix->forward(audio_head, video_head);
+        auto audio_out_l = this->audio_attention_l_1->forward(audio_mix);
+             audio_out_l = this->audio_attention_l_2->forward(audio_out_l);
+             audio_out_l = this->audio_attention_l_3->forward(audio_out_l);
+        auto audio_out_s = this->audio_attention_s_1->forward(audio_mix);
+             audio_mix   = audio_out_l + audio_out_s;
+        auto audio_mem   = this->memory->forward(audio_mix, this->memory_);
+        auto audio_out   = this->audio_tail->forward(audio_mem);
         {
             torch::NoGradGuard no_grad_guard;
-            // media_mix ? media_mem ?
-            this->memory = torch::sum(media_mem.detach(), { 0 }, true) / chobits::batch_size;
+            this->memory_ = torch::sum(audio_mem.detach(), { 0 }, true) / chobits::batch_size;
         }
-        return media_out;
+        return audio_out;
     }
 
 };
@@ -146,7 +107,7 @@ using AdamWOptimizer = std::shared_ptr<torch::optim::AdamW>;
 
 struct TrainerState {
     float learning_rate            = 0.0001;
-    float clip_grad_norm           = 1.0;
+    float clip_grad_norm           = 10.0;
     Chobits              model     = nullptr;
     AdamWOptimizer       optimizer = nullptr;
     torch::DeviceType    device    = torch::cuda::is_available() ? torch::DeviceType::CUDA : torch::DeviceType::CPU;
@@ -179,7 +140,7 @@ bool chobits::model::Trainer::load(const std::string& path) {
             std::printf("加载模型失败：%s\n", e.what());
         }
     }
-    trainer_state.model->memory = trainer_state.model->memory.to(trainer_state.device);
+    trainer_state.model->memory_ = trainer_state.model->memory_.to(trainer_state.device);
     trainer_state.model->to(trainer_state.device);
     trainer_state.model->eval();
     this->info();
@@ -221,7 +182,7 @@ void chobits::model::Trainer::train(const size_t epoch) {
         video = video.to(trainer_state.device);
         label = label.to(trainer_state.device);
         auto pred_audio = trainer_state.model->forward_(audio, video);
-        auto pred_label = trainer_state.model->forward (audio, video);
+        auto pred_label = trainer_state.model->forward(audio, video);
         torch::Tensor loss_audio = torch::mse_loss(pred_audio, audio);
         torch::Tensor loss_label = torch::mse_loss(pred_label, label);
         torch::Tensor loss       = loss_audio + loss_label;

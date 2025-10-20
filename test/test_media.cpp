@@ -12,7 +12,11 @@
         chobits::player::open_player();
     });
     // file/http/rtmp/rtsp/m3u8
+    #if _WIN32
     chobits::media::open_file("D:/tmp/video.mp4");
+    #else
+    chobits::media::open_file("video/32429377729-1-192.mp4");
+    #endif
     chobits::player::stop_player();
     player_thread.join();
 }
@@ -33,7 +37,11 @@
         chobits::player::open_player();
     });
     std::thread media_thread([]() {
+        #if _WIN32
         chobits::media::open_file("D:/tmp/video.mp4");
+        #else
+        chobits::media::open_file("video/32429377729-1-192.mp4");
+        #endif
         // chobits::media::open_device();
     });
     while(chobits::running) {
