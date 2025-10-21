@@ -51,6 +51,7 @@
         std::cout << pred .sizes() << std::endl;
         if(success) {
             chobits::media::set_data(audio.squeeze(0).cpu());
+            std::this_thread::sleep_for(std::chrono::milliseconds(1000 / 25));
         } else {
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
         }

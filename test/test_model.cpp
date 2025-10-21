@@ -14,51 +14,43 @@ static void info(std::shared_ptr<torch::nn::Module> layer) {
 }
 
 [[maybe_unused]] static void test_attention() {
-    chobits::nn::AttentionBlock audio_layer(128, 24 * 74);
-    auto audio_output = audio_layer->forward(torch::randn({ 10, 128, 24, 74 }));
-    std::cout << audio_output.sizes() << std::endl;
-    info(audio_layer.ptr());
-    chobits::nn::AttentionBlock video_layer(128, 29 * 52);
-    auto video_output = video_layer->forward(torch::randn({ 10, 128, 29, 52 }));
-    std::cout << video_output.sizes() << std::endl;
-    info(video_layer.ptr());
+    chobits::nn::AttentionBlock layer(128, 3000);
+    auto output = layer->forward(torch::randn({ 10, 128, 3000 }));
+    std::cout << output.sizes() << std::endl;
+    info(layer.ptr());
 }
 
 [[maybe_unused]] static void test_media_head() {
-    chobits::nn::MediaHeadBlock audio_layer(std::vector<int>{ 2, 8, 32, 128 }, std::vector<int>{ 3, 3, 3 }, std::vector<int>{ 2, 2, 2 }, 24 * 74);
-    auto audio_output = audio_layer->forward(torch::randn({ 1, 2, 201, 601 }));
-    std::cout << audio_output.sizes() << std::endl;
-    info(audio_layer.ptr());
-    chobits::nn::MediaHeadBlock video_layer(std::vector<int>{ 3, 8, 32, 128 }, std::vector<int>{ 3, 3, 3 }, std::vector<int>{ 3, 2, 2 }, 29 * 52);
+    chobits::nn::AudioHeadBlock audio_layer(           std::vector<int>{ 1, 8, 32, 128 }, std::vector<int>{ 4, 4, 4 }, std::vector<int>{ 4, 2, 2 }, std::vector<int>{ 1, 1, 1 });
+    chobits::nn::VideoHeadBlock video_layer(920, 3000, std::vector<int>{ 3, 8, 32, 128 }, std::vector<int>{ 3, 3, 3 }, std::vector<int>{ 2, 2, 4 }, std::vector<int>{ 1, 1, 1 });
+    auto audio_output = audio_layer->forward(torch::randn({ 1, 1, 48000    }));
     auto video_output = video_layer->forward(torch::randn({ 1, 3, 360, 640 }));
     std::cout << video_output.sizes() << std::endl;
+    std::cout << audio_output.sizes() << std::endl;
+    info(audio_layer.ptr());
     info(video_layer.ptr());
 }
 
 [[maybe_unused]] static void test_media_mix() {
-    chobits::nn::MediaMixBlock layer(
-        64, 128,    
-        24,  74,
-        29,  52
-    );
+    chobits::nn::MediaMixBlock layer(3000, 128, 4, 2, 1);
     auto output = layer->forward(
-        torch::randn({ 1, 64, 24, 74 }),
-        torch::randn({ 1, 64, 29, 52 })
+        torch::randn({ 10, 128, 3000 }),
+        torch::randn({ 10, 128, 3000 })
     );
     std::cout << output.sizes() << std::endl;
     info(layer.ptr());
 }
 
 [[maybe_unused]] static void test_audio_tail() {
-    chobits::nn::AudioTailBlock layer(std::vector<int>{ 128, 32, 8, 2 }, std::vector<int>{ 4, 5, 5 }, std::vector<int>{ 2, 2, 2 }, 24 * 74);
-    auto output = layer->forward(torch::randn({ 1, 128, 24, 74 }));
+    chobits::nn::AudioTailBlock layer(std::vector<int>{ 128, 64, 8, 1 }, std::vector<int>{ 4, 4, 4 }, std::vector<int>{ 2, 2, 4 }, std::vector<int>{ 1, 1, 0 });
+    auto output = layer->forward(torch::randn({ 1, 128, 3000 }));
     std::cout << output.sizes() << std::endl;
     info(layer.ptr());
 }
 
 [[maybe_unused]] static void test_memory() {
-    chobits::nn::MemoryBlock layer(128, 24, 74);
-    auto output = layer->forward(torch::randn({ 10, 128, 24, 74 }), torch::randn({ 1, 128, 24, 74 }));
+    chobits::nn::MemoryBlock layer(3000, 128);
+    auto output = layer->forward(torch::randn({ 10, 128, 3000 }), torch::randn({ 1, 128, 3000 }));
     std::cout << output.sizes() << std::endl;
     info(layer.ptr());
 }
@@ -116,12 +108,12 @@ static void info(std::shared_ptr<torch::nn::Module> layer) {
 
 int main() {
     // test_attention();
-    test_media_head();
+    // test_media_head();
     // test_media_mix();
     // test_audio_tail();
     // test_memory();
     // test_load_save();
-    // test_model_eval();
+    test_model_eval();
     // test_model_train();
     return 0;
 }

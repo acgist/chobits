@@ -22,6 +22,8 @@ extern "C" {
 
 }
 
+const static int audio_normalization = 32768.0;
+
 const static AVPixelFormat video_pix_format = AV_PIX_FMT_RGB24;
 
 const static AVSampleFormat  audio_format           = AV_SAMPLE_FMT_S16;
@@ -49,9 +51,6 @@ static void sws_free(SwsContext** sws);
 
 static bool audio_to_tensor(SwrContext* swr, AVFrame* frame);
 static bool video_to_tensor(SwsContext* sws, AVFrame* frame);
-
-static at::Tensor pcm_stft(short* pcm_data, int pcm_size, int n_fft = 400, int hop_size = 80, int win_size = 400);
-static std::vector<short> pcm_istft(const at::Tensor& tensor, int n_fft = 400, int hop_size = 80, int win_size = 400);
 
 bool chobits::media::open_media(int argc, char const *argv[]) {
     if(argc == 1 || (argc >= 2 && std::strcmp("eval", argv[1]) == 0)) {
@@ -407,8 +406,13 @@ std::tuple<bool, at::Tensor, at::Tensor, at::Tensor> chobits::media::get_data(bo
 }
 
 std::vector<short> chobits::media::set_data(const torch::Tensor& tensor) {
-    auto pcm = pcm_istft(tensor);
-    chobits::player::play_audio(pcm.data(), pcm.size() * sizeof(short));
+    auto pcm_tensor = tensor.mul(audio_normalization).to(torch::kShort);
+    auto pcm_size   = pcm_tensor.sizes()[0];
+    auto pcm_data   = reinterpret_cast<short*>(pcm_tensor.data_ptr());
+    std::vector<short> pcm;
+    pcm.resize(pcm_size);
+    std::copy_n(pcm_data, pcm_size, pcm.data());
+    chobits::player::play_audio(pcm.data(), pcm_size * sizeof(short));
     return pcm;
 }
 
@@ -535,8 +539,10 @@ static bool audio_to_tensor(SwrContext* swr, AVFrame* frame) {
                 insert = true;
             }
             if(insert) {
-                auto tensor = pcm_stft(reinterpret_cast<short*>(audio_buffer.data()), dataset.audio_size / sizeof(short));
-                dataset.audio.push_back(tensor);
+                auto pcm_data = reinterpret_cast<short*>(audio_buffer.data());
+                auto pcm_size = int(dataset.audio_size / sizeof(short));
+                auto tensor   = torch::from_blob(pcm_data, { 1, pcm_size }, torch::kShort).to(torch::kFloat32).div(audio_normalization);
+                dataset.audio.push_back(std::move(tensor));
             }
             dataset.condition.notify_all();
         }
@@ -586,61 +592,4 @@ static bool video_to_tensor(SwsContext* sws, AVFrame* frame) {
         }
     }
     return true;
-}
-
-/**
- * 短时傅里叶变换
- * 
- * 201 = win_size / 2 + 1
- * 480 = 7 | 4800 = 61 | 48000 = 601
- * [2(相位, 角度), 201, 601]
- * 
- * @param pcm_data PCM数据
- * @param pcm_size PCM长度
- * @param n_fft    傅里叶变换的大小
- * @param hop_size 相邻滑动窗口帧之间的距离
- * @param win_size 窗口帧和STFT滤波器的大小
- * 
- * @return 张量
- */
-static at::Tensor pcm_stft(short* pcm_data, int pcm_size, int n_fft, int hop_size, int win_size) {
-    static auto wind = torch::hann_window(win_size);
-    auto data = torch::from_blob(pcm_data, { 1, pcm_size }, torch::kShort).to(torch::kFloat32);
-    auto com  = torch::stft(data, n_fft, hop_size, win_size, wind, true, "reflect", false, std::nullopt, true);
-    #ifdef CHOBITS_NORMALIZATION
-    auto mag  = torch::log10(torch::abs(com) + 1e-4) / 4;
-    auto pha  = torch::angle(com) / std::numbers::pi;
-    #else
-    auto mag  = torch::log10(torch::abs(com) + 1e-4);
-    auto pha  = torch::angle(com);
-    #endif
-    return torch::concat({ mag, pha });
-}
-
-/**
- * 短时傅里叶逆变换
- * 
- * @param tensor   张量
- * @param n_fft    傅里叶变换的大小
- * @param hop_size 相邻滑动窗口帧之间的距离
- * @param win_size 窗口帧和STFT滤波器的大小
- * 
- * @return PCM数据
- */
-static std::vector<short> pcm_istft(const at::Tensor& tensor, int n_fft, int hop_size, int win_size) {
-    static auto wind = torch::hann_window(win_size);
-    #ifdef CHOBITS_NORMALIZATION
-    auto mag  = torch::pow(10, tensor[0] * 4) - 1e-4;
-    auto pha  = tensor[1] * std::numbers::pi;
-    #else
-    auto mag  = torch::pow(10, tensor[0]) - 1e-4;
-    auto pha  = tensor[1];
-    #endif
-    auto com  = torch::polar(mag, pha).unsqueeze(0);
-    auto ret  = torch::istft(com, n_fft, hop_size, win_size, wind, true).to(torch::kShort);
-    short* data = reinterpret_cast<short*>(ret.data_ptr());
-    std::vector<short> pcm;
-    pcm.resize(ret.sizes()[1]);
-    std::copy_n(data, pcm.size(), pcm.data());
-    return pcm;
 }
