@@ -5,10 +5,11 @@
 #include <string>
 
 bool chobits::running           = true;
-bool chobits::train             = true;
 bool chobits::play_audio        = false;
 int  chobits::batch_size        = 1;
-int  chobits::audio_sample_rate = 48000;
+int  chobits::batch_wind        = 5;
+int  chobits::per_wind_second   = 10;
+int  chobits::audio_sample_rate = 8000;
 int  chobits::audio_nb_channels = 1;
 int  chobits::video_width       = 640;
 int  chobits::video_height      = 360;

@@ -25,6 +25,13 @@ int main(int argc, char const *argv[]) {
         std::fflush(stdout);
         return 0;
     }
+    if(argc == 1 || (argc >= 2 && std::strcmp("eval", argv[1]) == 0)) {
+        chobits::play_audio = true;
+        chobits::batch_size = 1;
+    } else {
+        chobits::play_audio = false;
+        chobits::batch_size = argc >= 4 ? std::atoi(argv[3]) : 10;
+    }
     std::signal(SIGINT, signal_handler);
     std::signal(SIGTERM, signal_handler);
     std::thread media_thread([argc, argv]() {
@@ -42,8 +49,8 @@ int main(int argc, char const *argv[]) {
 static void help() {
     std::printf(R"(帮助：chobits[.exe] [?|help]
 视频文件训练：chobits[.exe] file [训练次数] [训练批次]
-现实生活评估：chobits[.exe] eval
-现实生活训练：chobits[.exe]
+媒体设备评估：chobits[.exe] eval
+媒体设备训练：chobits[.exe]
 )");
 }
 
