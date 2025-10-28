@@ -15,38 +15,45 @@ static void info(std::shared_ptr<torch::nn::Module> layer) {
 }
 
 [[maybe_unused]] static void test_attention() {
-    chobits::nn::AttentionBlock layer(800, 512);
-    auto output = layer->forward(torch::randn({ 1, 512, 800 }));
+    chobits::nn::AttentionBlock layer(800, 256);
+    auto output = layer->forward(torch::randn({ 1, 256, 800 }));
+    std::cout << output.sizes() << std::endl;
+    info(layer.ptr());
+}
+
+[[maybe_unused]] static void test_res_net() {
+    chobits::nn::ResNetBlock layer(256, 256);
+    auto output = layer->forward(torch::randn({ 1, 256, 800 }));
     std::cout << output.sizes() << std::endl;
     info(layer.ptr());
 }
 
 [[maybe_unused]] static void test_audio_head() {
-    chobits::nn::AudioHeadBlock layer(3, 1, std::vector<int>{ 1, 8, 64, 512 }, std::vector<int>{ 4, 4, 3 });
-    auto output = layer->forward(torch::randn({ 1, 1, 48000 }));
+    chobits::nn::AudioHeadBlock layer(std::vector<int>{ 30, 64, 128, 256 });
+    auto output = layer->forward(torch::randn({ 1, 30, 800 }));
     std::cout << output.sizes() << std::endl;
     info(layer.ptr());
 }
 
 [[maybe_unused]] static void test_video_head() {
-    chobits::nn::VideoHeadBlock layer(400, 1000, 3, 1, std::vector<int>{ 3, 8, 64, 512 }, std::vector<int>{ 3, 4, 3, 4, 2, 2 });
-    auto output = layer->forward(torch::randn({ 1, 3, 360, 640 }));
+    chobits::nn::VideoHeadBlock layer(std::vector<int>{ 30, 64, 128, 256 }, std::vector<int>{ 3, 2, 3, 2, 2, 4 });
+    auto output = layer->forward(torch::randn({ 1, 30, 360, 640 }));
     std::cout << output.sizes() << std::endl;
     info(layer.ptr());
 }
 
 [[maybe_unused]] static void test_media_mix() {
-    chobits::nn::MediaMixBlock layer(800, 512, 3, 1, 2);
-    auto output = layer->forward(
-        torch::randn({ 1, 512, 800 }),
-        torch::randn({ 1, 512, 800 })
+    chobits::nn::MediaMixBlock layer(256, 512);
+    auto [ audio_out, video_out, output ] = layer->forward(
+        torch::randn({ 1, 256, 800 }),
+        torch::randn({ 1, 256, 800 })
     );
     std::cout << output.sizes() << std::endl;
     info(layer.ptr());
 }
 
 [[maybe_unused]] static void test_audio_tail() {
-    chobits::nn::AudioTailBlock layer(800, 3, 1, std::vector<int>{ 512, 64, 8, 1 }, std::vector<double>{ 3, 4, 4 });
+    chobits::nn::AudioTailBlock layer(std::vector<int>{ 512, 64, 8, 1 }, 5, 2);
     auto output = layer->forward(torch::randn({ 1, 512, 800 }));
     std::cout << output.sizes() << std::endl;
     info(layer.ptr());
@@ -106,6 +113,7 @@ static void info(std::shared_ptr<torch::nn::Module> layer) {
 
 int main() {
     // test_attention();
+    // test_res_net();
     // test_audio_head();
     // test_video_head();
     // test_media_mix();

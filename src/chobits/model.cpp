@@ -43,17 +43,16 @@ public:
 
 public:
     void define() {
-        this->audio_head = this->register_module("audio_head", chobits::nn::AudioHeadBlock(           3, 1, std::vector<int>{ 1, 8, 64, 512 }, std::vector<int>{ 4, 4, 3          }));
-        this->video_head = this->register_module("video_head", chobits::nn::VideoHeadBlock(400, 1000, 3, 1, std::vector<int>{ 3, 8, 64, 512 }, std::vector<int>{ 3, 4, 3, 4, 2, 2 }));
-        this->media_mix  = this->register_module("media_mix",  chobits::nn::MediaMixBlock(1000, 512, 3, 1, 2));
-        this->audio_tail = this->register_module("audio_tail", chobits::nn::AudioTailBlock(1000, 3, 1, std::vector<int>{ 512, 64, 8, 1 }, std::vector<double>{ 3, 4, 4 }));
+        this->audio_head = this->register_module("audio_head", chobits::nn::AudioHeadBlock(std::vector<int>{ 30, 64, 128, 256 }));
+        this->video_head = this->register_module("video_head", chobits::nn::VideoHeadBlock(std::vector<int>{ 30, 64, 128, 256 }, std::vector<int>{ 3, 2, 3, 2, 2, 4 }));
+        this->media_mix  = this->register_module("media_mix",  chobits::nn::MediaMixBlock(256, 512));
+        this->audio_tail = this->register_module("audio_tail", chobits::nn::AudioTailBlock(std::vector<int>{ 512, 64, 8, 1 }, 5, 2));
     }
     torch::Tensor forward(const torch::Tensor& audio, const torch::Tensor& video) {
-        auto audio_head = this->audio_head->forward(audio);
-        auto video_head = this->video_head->forward(video);
-        auto media_mix  = this->media_mix->forward(audio_head, video_head);
-        auto audio_out  = this->audio_tail->forward(media_mix);
-        return audio_out;
+        auto audio_256 = this->audio_head->forward(audio);
+        auto video_256 = this->video_head->forward(video);
+        auto [ audio_512, video_512, mixer_512 ] = this->media_mix->forward(audio_256, video_256);
+        return this->audio_tail->forward(mixer_512);
     }
 
 };

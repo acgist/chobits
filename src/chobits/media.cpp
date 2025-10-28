@@ -361,25 +361,32 @@ std::tuple<bool, at::Tensor, at::Tensor, at::Tensor> chobits::media::get_data(bo
     {
         std::unique_lock<std::mutex> lock(dataset.mutex);
         dataset.condition.wait(lock, [train]() {
-            const int length = train ? chobits::batch_size + chobits::batch_wind : chobits::batch_size + chobits::batch_wind - 1;
+            const size_t length = train ? chobits::batch_size + chobits::batch_wind + 1 : chobits::batch_size + chobits::batch_wind;
             return
                 !(
                     chobits::running &&
                     (
-                        dataset.audio.size() <= length ||
-                        dataset.video.size() <= length
+                        dataset.audio.size() < length ||
+                        dataset.video.size() < length
                     )
                 );
         });
         if(!chobits::running) {
             return {false, {}, {}, {}};
         }
-        for (size_t i = 0; i < chobits::batch_size; i++) {
+        for (int i = 0; i < chobits::batch_size; i++) {
             std::vector<torch::Tensor> wind(chobits::batch_wind);
             wind.assign(dataset.audio.begin() + i, dataset.audio.begin() + i + chobits::batch_wind);
             audio.push_back(torch::concat(wind));
         }
-        video.assign(dataset.video.begin() + chobits::batch_wind - 1, dataset.video.begin() + chobits::batch_wind + chobits::batch_size - 1);
+        for (int i = 0; i < chobits::batch_size; i++) {
+            auto iter = dataset.video.begin() + i;
+            std::vector<torch::Tensor> wind;
+            for(int j = 0; j < chobits::batch_wind; j += chobits::video_skip) {
+                wind.push_back(*(iter + j));
+            }
+            video.push_back(torch::concat(wind));
+        }
         if(train) {
             label.assign(dataset.audio.begin() + chobits::batch_wind, dataset.audio.begin() + chobits::batch_wind + chobits::batch_size);
         }

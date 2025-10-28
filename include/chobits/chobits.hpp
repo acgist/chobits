@@ -21,6 +21,7 @@ extern bool running;           // 是否运行
 extern bool play_audio;        // 播放音频
 extern int  batch_size;        // 训练批次
 extern int  batch_wind;        // 每批窗口
+extern int  video_skip;        // 视频跳帧
 extern int  per_wind_second;   // 每秒窗口
 extern int  audio_sample_rate; // 音频采样率
 extern int  audio_nb_channels; // 音频通道

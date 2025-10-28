@@ -8,6 +8,8 @@
 
 int main() {
     chobits::batch_size = 1;
+    // chobits::batch_wind = 1;
+    // chobits::video_skip = 1;
     std::thread player_thread([]() {
         chobits::player::open_player();
     });
