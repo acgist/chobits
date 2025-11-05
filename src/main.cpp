@@ -22,23 +22,35 @@ int main(int argc, char const *argv[]) {
         std::strcmp("--help", argv[1]) == 0
     )) {
         help();
-        std::fflush(stdout);
         return 0;
     }
     if(argc == 1 || (argc >= 2 && std::strcmp("eval", argv[1]) == 0)) {
-        chobits::play_audio = true;
-        chobits::batch_size = 1;
+        chobits::mode_eval   = std::strcmp("eval", argv[1]) == 0;
+        chobits::mode_file   = false;
+        chobits::drop_busy   = true;
+        chobits::play_audio  = true;
+        chobits::batch_size  = 1;
+        chobits::train_epoch = 1;
+        chobits::train_path  = "";
+    } else if(argc >= 2) {
+        chobits::mode_eval   = false;
+        chobits::mode_file   = true;
+        chobits::drop_busy   = false;
+        chobits::play_audio  = false;
+        chobits::batch_size  = argc >= 4 ? std::atoi(argv[3]) : 10;
+        chobits::train_epoch = argc >= 3 ? std::atoi(argv[2]) : 1;
+        chobits::train_path  = argv[1];
     } else {
-        chobits::play_audio = false;
-        chobits::batch_size = argc >= 4 ? std::atoi(argv[3]) : 10;
+        help();
+        return 0;
     }
     std::signal(SIGINT, signal_handler);
     std::signal(SIGTERM, signal_handler);
-    std::thread media_thread([argc, argv]() {
-        chobits::media::open_media(argc, argv);
+    std::thread media_thread([]() {
+        chobits::media::open_media();
     });
-    std::thread model_thread([argc, argv]() {
-        chobits::model::open_model(argc, argv);
+    std::thread model_thread([]() {
+        chobits::model::open_model();
     });
     media_thread.join();
     model_thread.join();
@@ -52,6 +64,7 @@ static void help() {
 媒体设备评估：chobits[.exe] eval
 媒体设备训练：chobits[.exe]
 )");
+    std::fflush(stdout);
 }
 
 static void signal_handler(int code) {

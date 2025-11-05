@@ -2,13 +2,15 @@
 #include "chobits/model.hpp"
 #include "chobits/chobits.hpp"
 
-#include <string>
-
 bool chobits::running           = true;
+bool chobits::mode_eval         = false;
+bool chobits::mode_file         = true;
+bool chobits::drop_busy         = false;
 bool chobits::play_audio        = false;
 int  chobits::batch_size        = 1;
-int  chobits::batch_wind        = 30;
-int  chobits::video_skip        = 3;
+int  chobits::train_epoch       = 1;
+std::string chobits::train_path = "";
+
 int  chobits::per_wind_second   = 10;
 int  chobits::audio_sample_rate = 8000;
 int  chobits::audio_nb_channels = 1;

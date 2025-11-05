@@ -4,23 +4,11 @@
 #include "chobits/chobits.hpp"
 
 #include <thread>
-#include <fstream>
 #include <cinttypes>
 #include <filesystem>
 
 #include "torch/torch.h"
 
-/**
- * 输入：
- *   - 音频（耳朵麦克风）
- *   - 视频（眼睛摄像头）
- * 
- * 输出：
- *   - 音频（嘴巴扬声器）
- *   - 动作（肌肉传感器）
- * 
- * EMA
- */
 class ChobitsImpl : public torch::nn::Module {
 
 friend chobits::model::Trainer;
@@ -43,16 +31,16 @@ public:
 
 public:
     void define() {
-        this->audio_head = this->register_module("audio_head", chobits::nn::AudioHeadBlock(std::vector<int>{ 30, 64, 128, 256 }));
-        this->video_head = this->register_module("video_head", chobits::nn::VideoHeadBlock(std::vector<int>{ 30, 64, 128, 256 }, std::vector<int>{ 3, 2, 3, 2, 2, 4 }));
-        this->media_mix  = this->register_module("media_mix",  chobits::nn::MediaMixBlock(256, 512));
-        this->audio_tail = this->register_module("audio_tail", chobits::nn::AudioTailBlock(std::vector<int>{ 512, 64, 8, 1 }, 5, 2));
+        this->audio_head = this->register_module("audio_head", chobits::nn::AudioHeadBlock());
+        this->video_head = this->register_module("video_head", chobits::nn::VideoHeadBlock(std::vector<int>{ 3, 100, 400, 800 }, std::vector<int>{ 5, 5, 3, 4, 3, 2 }));
+        this->media_mix  = this->register_module("media_mix",  chobits::nn::MediaMixBlock());
+        this->audio_tail = this->register_module("audio_tail", chobits::nn::AudioTailBlock());
     }
     torch::Tensor forward(const torch::Tensor& audio, const torch::Tensor& video) {
-        auto audio_256 = this->audio_head->forward(audio);
-        auto video_256 = this->video_head->forward(video);
-        auto [ audio_512, video_512, mixer_512 ] = this->media_mix->forward(audio_256, video_256);
-        return this->audio_tail->forward(mixer_512);
+        auto audio_out = this->audio_head->forward(audio);
+        auto video_out = this->video_head->forward(video);
+        auto media_mix = this->media_mix->forward(audio_out, video_out);
+        return this->audio_tail->forward(media_mix);
     }
 
 };
@@ -62,11 +50,10 @@ TORCH_MODULE(Chobits);
 using AdamWOptimizer = std::shared_ptr<torch::optim::AdamW>;
 
 struct TrainerState {
-    float learning_rate            = 0.0001;
-    float clip_grad_norm           = 10.0;
-    Chobits              model     = nullptr;
-    AdamWOptimizer       optimizer = nullptr;
-    torch::DeviceType    device    = torch::cuda::is_available() ? torch::DeviceType::CUDA : torch::DeviceType::CPU;
+    float learning_rate         = 0.0001;
+    float clip_grad_norm        = 10.0;
+    Chobits              model  = nullptr;
+    torch::DeviceType    device = torch::cuda::is_available() ? torch::DeviceType::CUDA : torch::DeviceType::CPU;
 };
 
 static TrainerState trainer_state{};
@@ -104,13 +91,28 @@ bool chobits::model::Trainer::load(const std::string& path) {
 
 void chobits::model::Trainer::train() {
     try {
-        trainer_state.optimizer = std::make_shared<torch::optim::AdamW>(trainer_state.model->parameters(), trainer_state.learning_rate);
-        auto scheduler = torch::optim::StepLR(*trainer_state.optimizer, 10, 0.9999);
-        for (size_t epoch = 1; epoch <= 100'000'000LL && chobits::running; ++epoch) {
-            this->train(epoch);
-            scheduler.step();
-            if(epoch % 100 == 0) {
-                this->save("chobits." + std::to_string(epoch / 100 % 10) + ".ckpt");
+        trainer_state.model->train();
+        auto optimizer  = torch::optim::AdamW(trainer_state.model->parameters(), trainer_state.learning_rate);
+        auto scheduler  = torch::optim::StepLR(optimizer, 10, 0.9999);
+        auto loss_val   = 0.0F;
+        auto time_point = std::chrono::system_clock::now();
+        static const int per_op_epoch = 10;
+        static const int per_ck_epoch = 1000;
+        for (size_t epoch = 1; epoch <= 100'000'000ULL && chobits::running; ++epoch) {
+            this->train(loss_val);
+            if(epoch % per_op_epoch == 0) {
+                torch::nn::utils::clip_grad_norm_(trainer_state.model->parameters(), trainer_state.clip_grad_norm);
+                optimizer.step();
+                optimizer.zero_grad();
+                scheduler.step();
+                auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now() - time_point).count();
+                std::printf("轮次：%" PRIu64 " 损失：%.6f 耗时：%" PRId64 "\n", epoch, loss_val / per_op_epoch, duration);
+                loss_val   = 0.0;
+                time_point = std::chrono::system_clock::now();
+            }
+            if(epoch % per_ck_epoch == 0) {
+                this->save("chobits." + std::to_string(epoch / per_ck_epoch % 10) + ".ckpt");
+                trainer_state.model->train();
             }
         }
     } catch(const std::exception& e) {
@@ -120,89 +122,63 @@ void chobits::model::Trainer::train() {
     }
 }
 
-void chobits::model::Trainer::train(const size_t epoch) {
-    static const int epoch_count = 10;
-    double loss_val = 0.0;
-    trainer_state.model->train();
-    const auto a = std::chrono::system_clock::now();
-    trainer_state.optimizer->zero_grad();
-    for (int i = 0; i < epoch_count && chobits::running; ++i) {
-        auto [success, audio, video, label] = chobits::media::get_data();
-        if(!success) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(100));
-            continue;
-        }
-        audio = audio.to(trainer_state.device);
-        video = video.to(trainer_state.device);
-        label = label.to(trainer_state.device);
-        auto pred = trainer_state.model->forward(audio, video);
-        torch::Tensor loss = torch::mse_loss(pred, label);
-        loss.backward();
-        loss_val += loss.template item<float>();
-        if(chobits::play_audio) {
-            torch::NoGradGuard no_grad_guard;
-            chobits::media::set_data(pred.squeeze().cpu());
-        }
+void chobits::model::Trainer::train(float& loss_val) {
+    auto [success, audio, video, label] = chobits::media::get_data();
+    if(!success) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        return;
     }
-    torch::nn::utils::clip_grad_norm_(trainer_state.model->parameters(), trainer_state.clip_grad_norm);
-    trainer_state.optimizer->step();
-    const auto z = std::chrono::system_clock::now();
-    const auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(z - a).count();
-    std::printf("训练轮次：%" PRIu64 " 预测损失：%f 耗时：%" PRIu64 "\n", epoch, loss_val / epoch_count, duration);
+    audio = audio.to(trainer_state.device);
+    video = video.to(trainer_state.device);
+    label = label.to(trainer_state.device);
+    auto pred = trainer_state.model->forward(audio, video);
+    auto loss = torch::mse_loss(pred, label);
+    loss.backward();
+    loss_val += loss.template item<float>();
+    if(chobits::play_audio) {
+        torch::NoGradGuard no_grad_guard;
+        chobits::media::set_data(pred.squeeze().cpu());
+    }
 }
 
-void chobits::model::Trainer::eval(const bool save_file) {
-    trainer_state.model->eval();
-    torch::NoGradGuard no_grad_guard;
-    std::ofstream stream;
-    if(save_file) {
-        stream.open("chobits.pcm", std::ios::binary);
-        if(stream.fail()) {
-            std::printf("无法创建音频文件\n");
-            return;
+void chobits::model::Trainer::eval(std::function<void(const std::vector<short>&)> callback) {
+    try {
+        trainer_state.model->eval();
+        torch::NoGradGuard no_grad_guard;
+        while(chobits::running) {
+            auto [success, audio, video, label] = chobits::media::get_data(false);
+            if(!success) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                continue;
+            }
+            audio = audio.to(trainer_state.device);
+            video = video.to(trainer_state.device);
+            auto pred = trainer_state.model->forward(audio, video);
+            auto data = chobits::media::set_data(pred.squeeze().cpu());
+            if(callback) {
+                callback(data);
+            }
         }
-    }
-    while(chobits::running) {
-        auto [success, audio, video, label] = chobits::media::get_data(false);
-        if(!success) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(100));
-            continue;
-        }
-        audio = audio.to(trainer_state.device);
-        video = video.to(trainer_state.device);
-        auto pred = trainer_state.model->forward(audio, video);
-        auto data = chobits::media::set_data(pred.squeeze().cpu());
-        if(save_file) {
-            stream.write(reinterpret_cast<const char*>(data.data()), data.size() * sizeof(short));
-            std::printf("写入音频数据：%" PRIu64 "\n", data.size());
-        }
-    }
-    if(save_file) {
-        stream.close();
+    } catch(const std::exception& e) {
+        std::printf("预测异常：%s\n", e.what());
+    } catch(...) {
+        std::printf("预测异常\n");
     }
 }
 
 void chobits::model::Trainer::info() {
     int64_t total_numel = 0;
-    for(const auto& buffer : trainer_state.model->named_buffers()) {
-        int64_t numel = buffer.value().numel();
-        total_numel += numel;
-        std::printf("缓存参数数量：%s = %" PRIu64 "\n", buffer.key().c_str(), numel);
-    }
-    std::printf("缓存参数总量：%" PRIu64 "\n", total_numel);
-    total_numel = 0;
     for(const auto& parameter : trainer_state.model->named_parameters()) {
-        int64_t numel = parameter.value().numel();
-        total_numel += numel;
-        std::printf("模型参数数量：%s = %" PRIu64 "\n", parameter.key().c_str(), numel);
+        total_numel += parameter.value().numel();
+        std::printf("模型参数数量：%s = %" PRId64 "\n", parameter.key().c_str(), parameter.value().numel());
     }
-    std::printf("模型参数总量：%" PRIu64 "\n", total_numel);
+    std::printf("模型参数总量：%" PRId64 "\n", total_numel);
 }
 
-bool chobits::model::open_model(int argc, char const *argv[]) {
+bool chobits::model::open_model() {
     chobits::model::Trainer trainer;
     trainer.load();
-    if(argc >= 2 && std::strcmp("eval", argv[1]) == 0) {
+    if(chobits::mode_eval) {
         trainer.eval();
     } else {
         trainer.train();

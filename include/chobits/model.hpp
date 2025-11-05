@@ -16,8 +16,10 @@
 #define CHOBITS_MODEL_HPP
 
 #include <string>
+#include <vector>
 #include <cstdint>
 #include <cstdlib>
+#include <functional>
 
 namespace chobits::model {
 
@@ -30,12 +32,12 @@ public:
     bool save(const std::string& path = "chobits.pt");
     bool load(const std::string& path = "chobits.pt");
     void train();
-    void train(const size_t epoch);
-    void eval(const bool save_file = false);
+    void train(float& loss_val);
+    void eval(std::function<void(const std::vector<short>&)> callback = nullptr);
     
 };
 
-extern bool open_model(int argc, char const *argv[]);
+extern bool open_model();
 extern void stop_all();
 
 } // END OF chobits::model
