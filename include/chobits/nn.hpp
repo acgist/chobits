@@ -17,6 +17,8 @@
 
 #include "torch/nn.h"
 
+#include "chobits.hpp"
+
 namespace chobits::nn {
 
 /**
@@ -30,7 +32,7 @@ private:
 
 public:
     GRUBlockImpl(
-        const int in         = 256,
+        const int in         = 128,
         const int out        = 128,
         const int num_layers = 1
     ) {
@@ -263,6 +265,80 @@ public:
 TORCH_MODULE(VideoHeadBlock);
 
 /**
+ * 音频合并
+ */
+class AudioMixBlockImpl : public torch::nn::Module {
+
+private:
+    torch::nn::Sequential video{ nullptr };
+    torch::nn::Sequential mixer{ nullptr };
+
+public:
+    AudioMixBlockImpl(
+        const int in      = 128,
+        const int channel = 800
+    ) {
+        this->video = this->register_module("video", torch::nn::Sequential(
+            chobits::nn::AttentionBlock(channel, in)
+        ));
+        this->mixer = this->register_module("mixer", torch::nn::Sequential(
+            chobits::nn::ResNetBlock(channel, channel),
+            chobits::nn::AttentionBlock(channel, in),
+            torch::nn::SiLU()
+        ));
+    }
+    ~AudioMixBlockImpl() {
+        this->unregister_module("video");
+        this->unregister_module("mixer");
+    }
+    
+public:
+    torch::Tensor forward(const torch::Tensor& audio, const torch::Tensor& video) {
+        return this->mixer->forward(audio + this->video->forward(video));
+    }
+
+};
+
+TORCH_MODULE(AudioMixBlock);
+
+/**
+ * 视频合并
+ */
+class VideoMixBlockImpl : public torch::nn::Module {
+
+private:
+    torch::nn::Sequential audio{ nullptr };
+    torch::nn::Sequential mixer{ nullptr };
+
+public:
+    VideoMixBlockImpl(
+        const int in      = 128,
+        const int channel = 800
+    ) {
+        this->audio = this->register_module("audio", torch::nn::Sequential(
+            chobits::nn::AttentionBlock(channel, in)
+        ));
+        this->mixer = this->register_module("mixer", torch::nn::Sequential(
+            chobits::nn::ResNetBlock(channel, channel),
+            chobits::nn::AttentionBlock(channel, in),
+            torch::nn::SiLU()
+        ));
+    }
+    ~VideoMixBlockImpl() {
+        this->unregister_module("audio");
+        this->unregister_module("mixer");
+    }
+    
+public:
+    torch::Tensor forward(const torch::Tensor& audio, const torch::Tensor& video) {
+        return this->mixer->forward(video + this->audio->forward(audio));
+    }
+
+};
+
+TORCH_MODULE(VideoMixBlock);
+
+/**
  * 媒体混合
  */
 class MediaMixBlockImpl : public torch::nn::Module {
@@ -271,7 +347,8 @@ private:
     torch::nn::Sequential audio{ nullptr };
     torch::nn::Sequential video{ nullptr };
     torch::nn::Sequential mixer{ nullptr };
-    torch::nn::Sequential prob { nullptr };
+    AudioMixBlock audio_mix{ nullptr };
+    VideoMixBlock video_mix{ nullptr };
 
 public:
     MediaMixBlockImpl(
@@ -285,32 +362,30 @@ public:
             chobits::nn::AttentionBlock(channel, in)
         ));
         this->mixer = this->register_module("mixer", torch::nn::Sequential(
-            chobits::nn::ResNetBlock(channel, channel),
             chobits::nn::AttentionBlock(channel, in * 2),
+            chobits::nn::ResNetBlock(channel, channel),
             chobits::nn::GRUBlock(in * 2, in),
             chobits::nn::ResNetBlock(channel, channel),
             chobits::nn::AttentionBlock(channel, in)
         ));
-        this->prob = this->register_module("prob", torch::nn::Sequential(
-            chobits::nn::ResNetBlock(channel, channel),
-            chobits::nn::AttentionBlock(channel, in),
-            torch::nn::Linear(torch::nn::LinearOptions(in, 1)),
-            torch::nn::Sigmoid()
-        ));
+        this->audio_mix = this->register_module("audio_mix", AudioMixBlock());
+        this->video_mix = this->register_module("video_mix", VideoMixBlock());
     }
     ~MediaMixBlockImpl() {
         this->unregister_module("audio");
         this->unregister_module("video");
         this->unregister_module("mixer");
-        this->unregister_module("prob");
+        this->unregister_module("audio_mix");
+        this->unregister_module("video_mix");
     }
     
 public:
     torch::Tensor forward(const torch::Tensor& audio, const torch::Tensor& video) {
         auto audio_out = this->audio->forward(audio);
         auto video_out = this->video->forward(video);
-        auto media_mix = this->mixer->forward(torch::concat({ audio_out, video_out }, -1));
-        return media_mix * this->prob->forward(media_mix);
+        auto audio_mix = this->audio_mix->forward(audio_out, video_out);
+        auto video_mix = this->video_mix->forward(audio_out, video_out);
+        return this->mixer->forward(torch::concat({ audio_out + audio_mix, video_out + video_mix }, -1));
     }
 
 };
@@ -333,8 +408,7 @@ public:
         this->tail = this->register_module("tail", torch::nn::Sequential(
             torch::nn::Linear(torch::nn::LinearOptions(in, in)),
             torch::nn::SiLU(),
-            torch::nn::Linear(torch::nn::LinearOptions(in, out)),
-            torch::nn::Tanh()
+            torch::nn::Linear(torch::nn::LinearOptions(in, out))
         ));
     }
     ~AudioTailBlockImpl() {
@@ -343,7 +417,13 @@ public:
 
 public:
     torch::Tensor forward(const torch::Tensor& input) {
+        #if CHOBITS_NORM == 0
+        return torch::sigmoid(this->tail->forward(input));
+        #elif CHOBITS_NORM == 1
+        return torch::tanh(this->tail->forward(input));
+        #else
         return this->tail->forward(input);
+        #endif
     }
 
 };

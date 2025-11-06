@@ -13,14 +13,11 @@ jobs:
         run: |
           mkdir deps
           cd    deps
-          sudo  apt -y install gcc g++ zip unzip cmake ffmpeg libsdl2-dev libavutil-dev libavcodec-dev libswscale-dev libavdevice-dev libavformat-dev libswresample-dev
+          sudo  apt -y install gcc g++ wget cmake unzip ffmpeg libsdl2-dev libavutil-dev libavcodec-dev libswscale-dev libavdevice-dev libavformat-dev libswresample-dev
           wget  https://download.pytorch.org/libtorch/cpu/libtorch-shared-with-deps-2.8.0%2Bcpu.zip > /dev/null 2>&1
           unzip libtorch-shared-with-deps-2.8.0+cpu.zip > /dev/null 2>&1
       - name: Deploy chobits
         run: |
-          gcc -v
-          g++ -v
-          cmake -version
           mkdir build
           cd    build
           cmake .. -DCMAKE_BUILD_TYPE=Release

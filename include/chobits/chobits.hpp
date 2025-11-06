@@ -15,6 +15,13 @@
 #ifndef CHOBITS_HPP
 #define CHOBITS_HPP
 
+// 0-归一化：[ 0~1]
+// 1-中心化：[-1~1]
+// 2-对数化：[?]
+#ifndef CHOBITS_NORM
+#define CHOBITS_NORM 1
+#endif
+
 #include <string>
 
 namespace chobits {

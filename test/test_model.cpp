@@ -17,8 +17,8 @@ static void info(std::shared_ptr<torch::nn::Module> layer) {
 }
 
 [[maybe_unused]] static void test_gru() {
-    chobits::nn::GRUBlock layer;
-    auto output = layer->forward(torch::randn({ 1, 800, 256 }));
+    chobits::nn::GRUBlock layer(128 * 2, 128);
+    auto output = layer->forward(torch::randn({ 1, 800, 128 * 2 }));
     std::cout << output.sizes() << std::endl;
     info(layer.ptr());
 }
@@ -133,10 +133,10 @@ int main() {
     // test_attention();
     // test_audio_head();
     // test_video_head();
-    // test_media_mix();
+    test_media_mix();
     // test_audio_tail();
     // test_load_save();
-    test_model_eval();
+    // test_model_eval();
     // test_model_train();
     return 0;
 }

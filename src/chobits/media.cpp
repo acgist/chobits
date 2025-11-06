@@ -25,6 +25,7 @@ extern "C" {
 }
 
 const static float audio_normalization = 32768.0;
+const static float video_normalization = 256.0;
 
 const static AVPixelFormat video_pix_format = AV_PIX_FMT_RGB24;
 
@@ -440,8 +441,13 @@ std::tuple<bool, at::Tensor, at::Tensor, at::Tensor> chobits::media::get_data(bo
 }
 
 std::vector<short> chobits::media::set_data(const torch::Tensor& tensor) {
+    #if CHOBITS_NORM == 0
+    auto pcm_tensor = tensor.mul(2.0).sub(1.0).mul(audio_normalization).to(torch::kShort);
+    #elif CHOBITS_NORM == 1
     auto pcm_tensor = tensor.mul(audio_normalization).to(torch::kShort);
-//  auto pcm_tensor = torch::pow(10, tensor).sub(audio_normalization + 1).to(torch::kShort);
+    #else
+    auto pcm_tensor = torch::pow(10, tensor).sub(audio_normalization + 1).to(torch::kShort);
+    #endif
     auto pcm_size   = pcm_tensor.sizes()[0];
     auto pcm_data   = reinterpret_cast<short*>(pcm_tensor.data_ptr());
     std::vector<short> pcm;
@@ -575,8 +581,14 @@ static bool audio_to_tensor(std::vector<torch::Tensor>& audio, SwrContext* swr, 
         if(insert) {
             auto pcm_data = reinterpret_cast<short*>(audio_buffer.data());
             auto pcm_size = int(dataset.audio_size / sizeof(short));
-            auto tensor   = torch::from_blob(pcm_data, { pcm_size, 1 }, torch::kShort).to(torch::kFloat32).div(audio_normalization);
-//          auto tensor   = torch::from_blob(pcm_data, { pcm_size, 1 }, torch::kShort).to(torch::kFloat32).add(audio_normalization + 1).log10();
+            auto tensor   = torch::from_blob(pcm_data, { pcm_size, 1 }, torch::kShort).to(torch::kFloat32)
+            #if CHOBITS_NORM == 0
+            .div(audio_normalization).add(1.0).div(2.0);
+            #elif CHOBITS_NORM == 1
+            .div(audio_normalization);
+            #else
+            .add(audio_normalization + 1).log10();
+            #endif
             audio.push_back(std::move(tensor));
         }
         dataset.condition.notify_all();
@@ -621,8 +633,16 @@ static bool video_to_tensor(std::vector<torch::Tensor>& audio, std::vector<torch
                     buffer,
                     { chobits::video_height, chobits::video_width, 3 },
                     torch::kUInt8
-                ).to(torch::kFloat32).div(255.0).mul(2.0).sub(1.0).permute({ 2, 0, 1 }).contiguous();
-                video.push_back(tensor);
+                ).to(torch::kFloat32)
+                #if CHOBITS_NORM == 0
+                .div(video_normalization)
+                #elif CHOBITS_NORM == 1
+                .div(video_normalization).mul(2.0).sub(1.0)
+                #else
+                .add(1).log10()
+                #endif
+                .permute({ 2, 0, 1 }).contiguous();
+                video.push_back(std::move(tensor));
             }
             dataset.condition.notify_all();
         }
