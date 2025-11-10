@@ -89,6 +89,7 @@ public:
         }
         this->conv_2 = this->register_module("conv_2", torch::nn::Sequential(
             torch::nn::Conv1d(torch::nn::Conv1dOptions(out_channel, out_channel, kernel).padding(padding).bias(false)),
+            torch::nn::GroupNorm(torch::nn::GroupNormOptions(num_groups, out_channel)),
             torch::nn::SiLU(),
             torch::nn::Conv1d(torch::nn::Conv1dOptions(out_channel, out_channel, kernel).padding(padding).bias(false)),
             torch::nn::GroupNorm(torch::nn::GroupNormOptions(num_groups, out_channel)),
@@ -125,8 +126,7 @@ public:
     AttentionBlockImpl(
         const int   seq_len    = 800,
         const int   emb_dim    = 128,
-        const int   num_heads  = 4,
-        const float dropout    = 0.1,
+        const int   num_heads  = 8,
         const int   kernel     = 1,
         const int   padding    = 0,
         const int   num_groups = 16
@@ -137,7 +137,7 @@ public:
             torch::nn::SiLU()
         ));
         this->attn = this->register_module("attn", torch::nn::MultiheadAttention(
-            torch::nn::MultiheadAttentionOptions(emb_dim, num_heads).bias(false).dropout(dropout)
+            torch::nn::MultiheadAttentionOptions(emb_dim, num_heads).bias(false)
         ));
         this->proj = this->register_module("proj", torch::nn::Sequential(
             torch::nn::Conv1d(torch::nn::Conv1dOptions(seq_len, seq_len, kernel).padding(padding).bias(false)),
@@ -147,8 +147,8 @@ public:
     }
     ~AttentionBlockImpl() {
         this->unregister_module("qkv");
-        this->unregister_module("proj");
         this->unregister_module("attn");
+        this->unregister_module("proj");
     }
 
 public:
@@ -181,18 +181,18 @@ public:
         const int in         = 1,
         const int out        = 128,
         const int channel    = 800,
-        const int num_groups = 16,
-        const float dropout  = 0.1
+        const int num_groups = 16
     ) {
         this->embedding = this->register_module("embedding", torch::nn::Sequential(
             torch::nn::Linear(torch::nn::LinearOptions(in, out).bias(false)),
             torch::nn::GroupNorm(torch::nn::GroupNormOptions(num_groups, channel)),
             torch::nn::SiLU(),
+            // -
             chobits::nn::ResNetBlock(channel, channel),
+            // -
             torch::nn::Linear(torch::nn::LinearOptions(out, out).bias(false)),
             torch::nn::GroupNorm(torch::nn::GroupNormOptions(num_groups, channel)),
-            torch::nn::SiLU(),
-            torch::nn::Dropout(torch::nn::DropoutOptions(dropout))
+            torch::nn::SiLU()
         ));
     }
     ~AudioHeadBlockImpl() {
@@ -214,50 +214,49 @@ TORCH_MODULE(AudioHeadBlock);
 class VideoHeadBlockImpl : public torch::nn::Module {
 
 private:
-    torch::nn::Sequential conv     { nullptr };
     torch::nn::Sequential embedding{ nullptr };
 
 public:
     VideoHeadBlockImpl(
-        std::vector<int> channel,
-        std::vector<int> pool,
-        const int in         = 128,
-        const int kernel     = 3,
-        const int padding    = 1,
-        const int num_groups = 10,
-        const float dropout  = 0.1
+        std::vector<int> channel = std::vector<int>{ 1, 10, 100, 800  },
+        std::vector<int> pool    = std::vector<int>{ 5, 5, 3, 4, 3, 2 },
+        const int in             = 128,
+        const int kernel         = 3,
+        const int padding        = 1,
+        const int num_groups     = 10
     ) {
-        this->conv = this->register_module("conv", torch::nn::Sequential(
+        this->embedding = this->register_module("embedding", torch::nn::Sequential(
             torch::nn::Conv2d(torch::nn::Conv2dOptions(channel[0], channel[1], kernel).padding(padding).bias(false)),
-            torch::nn::GroupNorm(torch::nn::GroupNormOptions(num_groups, channel[1])),
+            torch::nn::BatchNorm2d(torch::nn::BatchNorm2dOptions(channel[1])),
             torch::nn::SiLU(),
             torch::nn::MaxPool2d(torch::nn::MaxPool2dOptions({ pool[0], pool[1] })),
+            // -
             torch::nn::Conv2d(torch::nn::Conv2dOptions(channel[1], channel[2], kernel).padding(padding).bias(false)),
             torch::nn::GroupNorm(torch::nn::GroupNormOptions(num_groups, channel[2])),
             torch::nn::SiLU(),
             torch::nn::MaxPool2d(torch::nn::MaxPool2dOptions({ pool[2], pool[3] })),
+            // -
             torch::nn::Conv2d(torch::nn::Conv2dOptions(channel[2], channel[3], kernel).padding(padding).bias(false)),
             torch::nn::GroupNorm(torch::nn::GroupNormOptions(num_groups, channel[3])),
             torch::nn::SiLU(),
-            torch::nn::MaxPool2d(torch::nn::MaxPool2dOptions({ pool[4], pool[5] }))
-        ));
-        this->embedding = this->register_module("embedding", torch::nn::Sequential(
+            torch::nn::MaxPool2d(torch::nn::MaxPool2dOptions({ pool[4], pool[5] })),
+            // -
+            torch::nn::Flatten(torch::nn::FlattenOptions().start_dim(2)),
+            // -
             chobits::nn::ResNetBlock(channel[3], channel[3]),
+            // -
             torch::nn::Linear(torch::nn::LinearOptions(in, in).bias(false)),
             torch::nn::GroupNorm(torch::nn::GroupNormOptions(num_groups, channel[3])),
-            torch::nn::SiLU(),
-            torch::nn::Dropout(torch::nn::DropoutOptions(dropout))
+            torch::nn::SiLU()
         ));
     }
     ~VideoHeadBlockImpl() {
-        this->unregister_module("conv");
         this->unregister_module("embedding");
     }
 
 public:
     torch::Tensor forward(const torch::Tensor& input) {
-        auto output = this->conv->forward(input);
-        return this->embedding->forward(output.flatten(2));
+        return this->embedding->forward(input);
     }
 
 };
@@ -265,78 +264,58 @@ public:
 TORCH_MODULE(VideoHeadBlock);
 
 /**
- * 音频合并
+ * 媒体混合
  */
-class AudioMixBlockImpl : public torch::nn::Module {
+class MediaProbBlockImpl : public torch::nn::Module {
 
 private:
-    torch::nn::Sequential video{ nullptr };
-    torch::nn::Sequential mixer{ nullptr };
+    torch::nn::Sequential media_1{ nullptr };
+    torch::nn::Sequential media_2{ nullptr };
+    torch::nn::Sequential mixer  { nullptr };
+    torch::nn::Sequential mprob  { nullptr };
 
 public:
-    AudioMixBlockImpl(
+    MediaProbBlockImpl(
         const int in      = 128,
         const int channel = 800
     ) {
-        this->video = this->register_module("video", torch::nn::Sequential(
-            chobits::nn::AttentionBlock(channel, in)
+        this->media_1 = this->register_module("media_1", torch::nn::Sequential(
+            chobits::nn::ResNetBlock(channel, channel)
+        ));
+        this->media_2 = this->register_module("media_2", torch::nn::Sequential(
+            chobits::nn::ResNetBlock(channel, channel),
+            torch::nn::Linear(torch::nn::LinearOptions(in, 1))
         ));
         this->mixer = this->register_module("mixer", torch::nn::Sequential(
-            chobits::nn::ResNetBlock(channel, channel),
             chobits::nn::AttentionBlock(channel, in),
-            torch::nn::SiLU()
+            chobits::nn::ResNetBlock(channel, channel)
+        ));
+        this->mprob = this->register_module("mprob", torch::nn::Sequential(
+            chobits::nn::AttentionBlock(channel, in),
+            torch::nn::Linear(torch::nn::LinearOptions(in, 1)),
+            torch::nn::Sigmoid()
         ));
     }
-    ~AudioMixBlockImpl() {
-        this->unregister_module("video");
+    ~MediaProbBlockImpl() {
+        this->unregister_module("media_1");
+        this->unregister_module("media_2");
         this->unregister_module("mixer");
+        this->unregister_module("mprob");
     }
     
 public:
-    torch::Tensor forward(const torch::Tensor& audio, const torch::Tensor& video) {
-        return this->mixer->forward(audio + this->video->forward(video));
+    torch::Tensor forward(const torch::Tensor& media_1, const torch::Tensor& media_2) {
+        auto media_1_out = this->media_1->forward(media_1);
+        auto media_2_out = this->media_2->forward(media_2);
+        auto media_mix   = media_1_out + media_2_out;
+             media_mix   = this->mixer->forward(media_mix);
+             media_mix   = media_mix * this->mprob->forward(media_mix);
+        return media_mix;
     }
 
 };
 
-TORCH_MODULE(AudioMixBlock);
-
-/**
- * 视频合并
- */
-class VideoMixBlockImpl : public torch::nn::Module {
-
-private:
-    torch::nn::Sequential audio{ nullptr };
-    torch::nn::Sequential mixer{ nullptr };
-
-public:
-    VideoMixBlockImpl(
-        const int in      = 128,
-        const int channel = 800
-    ) {
-        this->audio = this->register_module("audio", torch::nn::Sequential(
-            chobits::nn::AttentionBlock(channel, in)
-        ));
-        this->mixer = this->register_module("mixer", torch::nn::Sequential(
-            chobits::nn::ResNetBlock(channel, channel),
-            chobits::nn::AttentionBlock(channel, in),
-            torch::nn::SiLU()
-        ));
-    }
-    ~VideoMixBlockImpl() {
-        this->unregister_module("audio");
-        this->unregister_module("mixer");
-    }
-    
-public:
-    torch::Tensor forward(const torch::Tensor& audio, const torch::Tensor& video) {
-        return this->mixer->forward(video + this->audio->forward(audio));
-    }
-
-};
-
-TORCH_MODULE(VideoMixBlock);
+TORCH_MODULE(MediaProbBlock);
 
 /**
  * 媒体混合
@@ -344,11 +323,11 @@ TORCH_MODULE(VideoMixBlock);
 class MediaMixBlockImpl : public torch::nn::Module {
 
 private:
-    torch::nn::Sequential audio{ nullptr };
-    torch::nn::Sequential video{ nullptr };
-    torch::nn::Sequential mixer{ nullptr };
-    AudioMixBlock audio_mix{ nullptr };
-    VideoMixBlock video_mix{ nullptr };
+    torch::nn::Sequential       audio{ nullptr };
+    torch::nn::Sequential       video{ nullptr };
+    chobits::nn::MediaProbBlock aprob{ nullptr };
+    chobits::nn::MediaProbBlock vprob{ nullptr };
+    torch::nn::Sequential       mixer{ nullptr };
 
 public:
     MediaMixBlockImpl(
@@ -356,36 +335,37 @@ public:
         const int channel = 800
     ) {
         this->audio = this->register_module("audio", torch::nn::Sequential(
-            chobits::nn::AttentionBlock(channel, in)
+            chobits::nn::GRUBlock(in, in)
         ));
         this->video = this->register_module("video", torch::nn::Sequential(
-            chobits::nn::AttentionBlock(channel, in)
+            chobits::nn::GRUBlock(in, in)
         ));
+        this->aprob = this->register_module("aprob", chobits::nn::MediaProbBlock());
+        this->vprob = this->register_module("vprob", chobits::nn::MediaProbBlock());
         this->mixer = this->register_module("mixer", torch::nn::Sequential(
-            chobits::nn::AttentionBlock(channel, in * 2),
+            chobits::nn::AttentionBlock(channel, in),
             chobits::nn::ResNetBlock(channel, channel),
-            chobits::nn::GRUBlock(in * 2, in),
+            chobits::nn::GRUBlock(in, in),
             chobits::nn::ResNetBlock(channel, channel),
             chobits::nn::AttentionBlock(channel, in)
         ));
-        this->audio_mix = this->register_module("audio_mix", AudioMixBlock());
-        this->video_mix = this->register_module("video_mix", VideoMixBlock());
     }
     ~MediaMixBlockImpl() {
         this->unregister_module("audio");
         this->unregister_module("video");
+        this->unregister_module("aprob");
+        this->unregister_module("vprob");
         this->unregister_module("mixer");
-        this->unregister_module("audio_mix");
-        this->unregister_module("video_mix");
     }
     
 public:
     torch::Tensor forward(const torch::Tensor& audio, const torch::Tensor& video) {
         auto audio_out = this->audio->forward(audio);
         auto video_out = this->video->forward(video);
-        auto audio_mix = this->audio_mix->forward(audio_out, video_out);
-        auto video_mix = this->video_mix->forward(audio_out, video_out);
-        return this->mixer->forward(torch::concat({ audio_out + audio_mix, video_out + video_mix }, -1));
+        auto audio_mix = this->aprob->forward(audio_out, video_out);
+        auto video_mix = this->vprob->forward(video_out, audio_out);
+        auto media_mix = audio_mix + video_mix;
+        return this->mixer->forward(media_mix);
     }
 
 };

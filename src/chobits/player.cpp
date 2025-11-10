@@ -1,16 +1,16 @@
 #include "chobits/player.hpp"
 #include "chobits/chobits.hpp"
 
-#include <string>
-
 #include "SDL2/SDL.h"
 
 struct PlayerState {
-    SDL_Window  * window   = nullptr;
-    SDL_Renderer* renderer = nullptr;
-    SDL_Texture * texture  = nullptr;
-    SDL_mutex   * mutex    = nullptr;
-    SDL_GLContext context  = nullptr;
+    bool audio_running = false;
+    bool video_running = false;
+    SDL_mutex   *     mutex      = nullptr;
+    SDL_Window  *     window     = nullptr;
+    SDL_Renderer*     renderer   = nullptr;
+    SDL_Texture *     texture    = nullptr;
+    SDL_GLContext     context    = nullptr;
     SDL_AudioDeviceID audio_id   = 0;
     SDL_AudioSpec     audio_spec = {
         .freq     = chobits::audio_sample_rate,
@@ -35,7 +35,7 @@ static void stop_video_player();
 bool chobits::player::open_player() {
     int ret = SDL_Init(SDL_INIT_AUDIO | SDL_INIT_VIDEO);
     if(ret != 0) {
-        std::printf("打开播放器失败：%s\n", SDL_GetError());
+        std::printf("加载播放器失败：%s\n", SDL_GetError());
         return false;
     }
     if(init_audio_player() && init_video_player()) {
@@ -71,7 +71,7 @@ void chobits::player::stop_player() {
 }
 
 bool chobits::player::play_audio(const void* data, int len) {
-    if(chobits::running && player_state.audio_id != 0) {
+    if(chobits::running && player_state.audio_running != 0) {
         int ret = SDL_QueueAudio(player_state.audio_id, data, len);
         if(ret != 0) {
             std::printf("音频播放失败：%s\n", SDL_GetError());
@@ -83,7 +83,7 @@ bool chobits::player::play_audio(const void* data, int len) {
 }
 
 bool chobits::player::play_video(const void* data, int len) {
-    if(chobits::running && player_state.renderer && player_state.texture) {
+    if(chobits::running && player_state.video_running) {
         int ret = SDL_LockMutex(player_state.mutex);
         if(ret != 0) {
             std::printf("视频加锁失败：%s\n", SDL_GetError());
@@ -112,8 +112,8 @@ bool chobits::player::play_video(const void* data, int len) {
         SDL_RenderPresent(player_state.renderer);
         ret = SDL_UnlockMutex(player_state.mutex);
         if(ret != 0) {
-            return false;
             std::printf("视频解锁失败：%s\n", SDL_GetError());
+            return false;
         }
         return true;
     }
@@ -121,16 +121,30 @@ bool chobits::player::play_video(const void* data, int len) {
 }
 
 static bool init_audio_player() {
+    if(player_state.audio_running) {
+        std::printf("音频已经打开\n");
+        return true;
+    }
     player_state.audio_id = SDL_OpenAudioDevice(nullptr, 0, &player_state.audio_spec, nullptr, SDL_AUDIO_ALLOW_FREQUENCY_CHANGE);
     if(player_state.audio_id == 0) {
         std::printf("打开音频失败：%s\n", SDL_GetError());
         return false;
     }
     SDL_PauseAudioDevice(player_state.audio_id, 0);
+    player_state.audio_running = true;
     return true;
 }
 
 static bool init_video_player() {
+    if(player_state.video_running) {
+        std::printf("视频已经打开\n");
+        return true;
+    }
+    player_state.mutex = SDL_CreateMutex();
+    if(!player_state.mutex) {
+        std::printf("打开互斥失败：%s\n", SDL_GetError());
+        return false;
+    }
     player_state.window = SDL_CreateWindow("Chobits", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, chobits::video_width, chobits::video_height, SDL_WINDOW_OPENGL);
     if(!player_state.window) {
         std::printf("打开窗口失败：%s\n", SDL_GetError());
@@ -146,21 +160,18 @@ static bool init_video_player() {
         std::printf("打开纹理失败：%s\n", SDL_GetError());
         return false;
     }
-    player_state.mutex = SDL_CreateMutex();
-    if(!player_state.mutex) {
-        std::printf("打开互斥失败：%s\n", SDL_GetError());
-        return false;
-    }
     player_state.context = SDL_GL_CreateContext(player_state.window);
     if(!player_state.context) {
         std::printf("打开OpenGL失败：%s\n", SDL_GetError());
         return false;
     }
+    player_state.video_running = true;
     return true;
 }
 
 static void stop_audio_player() {
     std::printf("关闭音频播放器\n");
+    player_state.audio_running = false;
     if(player_state.audio_id != 0) {
         SDL_CloseAudioDevice(player_state.audio_id);
         player_state.audio_id = 0;
@@ -169,6 +180,11 @@ static void stop_audio_player() {
 
 static void stop_video_player() {
     std::printf("关闭视频播放器\n");
+    player_state.video_running = false;
+    if(player_state.context) {
+        SDL_GL_DeleteContext(player_state.context);
+        player_state.context = nullptr;
+    }
     if(player_state.texture) {
         SDL_DestroyTexture(player_state.texture);
         player_state.texture = nullptr;
@@ -184,9 +200,5 @@ static void stop_video_player() {
     if(player_state.mutex) {
         SDL_DestroyMutex(player_state.mutex);
         player_state.mutex = nullptr;
-    }
-    if(player_state.context) {
-        SDL_GL_DeleteContext(player_state.context);
-        player_state.context = nullptr;
     }
 }

@@ -19,6 +19,7 @@ namespace chobits::player {
 
 extern bool open_player();
 extern void stop_player();
+
 extern bool play_audio(const void* data, int len);
 extern bool play_video(const void* data, int len);
 

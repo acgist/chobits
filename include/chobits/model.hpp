@@ -17,27 +17,30 @@
 
 #include <string>
 #include <vector>
-#include <cstdint>
-#include <cstdlib>
 #include <functional>
 
 namespace chobits::model {
 
+/**
+ * 模型训练
+ */
 class Trainer {
 
 private:
     void info();
 
 public:
-    bool save(const std::string& path = "chobits.pt");
-    bool load(const std::string& path = "chobits.pt");
+    bool save(const std::string& path = "chobits.pt", bool train = false);
+    bool load(const std::string& path = "chobits.pt", bool train = false);
     void train();
     void train(float& loss_val);
     void eval(std::function<void(const std::vector<short>&)> callback = nullptr);
+    void close();
     
 };
 
 extern bool open_model();
+
 extern void stop_all();
 
 } // END OF chobits::model

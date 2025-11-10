@@ -44,11 +44,11 @@ BEGIN
             VALUE "FileDescription",  "人形电脑天使心"
             VALUE "FileVersion",      "1.0.0.0"
             VALUE "InternalName",     "人形电脑天使心"
-            VALUE "LegalCopyright",   "Copyright © 2013-2025 ACGIST.COM. All Rights Reserved."
+            VALUE "LegalCopyright",   "Copyright(c) 2024-present acgist. All Rights Reserved."
             VALUE "LegalTrademarks",  "chobits"
             VALUE "OriginalFilename", "chobits.exe"
             VALUE "ProductName",      "人形电脑天使心"
-            VALUE "ProductVersion",   "1.0.0"
+            VALUE "ProductVersion",   "1.0.0.0"
         END
     END
     BLOCK "VarFileInfo"

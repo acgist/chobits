@@ -30,6 +30,7 @@ namespace chobits::media {
 extern bool open_media();
 extern bool open_file(const std::string& file);
 extern bool open_device();
+
 extern void stop_all();
 
 extern std::tuple<bool, at::Tensor, at::Tensor, at::Tensor> get_data(bool train = true);

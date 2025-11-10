@@ -32,7 +32,7 @@ public:
 public:
     void define() {
         this->audio_head = this->register_module("audio_head", chobits::nn::AudioHeadBlock());
-        this->video_head = this->register_module("video_head", chobits::nn::VideoHeadBlock(std::vector<int>{ 3, 100, 400, 800 }, std::vector<int>{ 5, 5, 3, 4, 3, 2 }));
+        this->video_head = this->register_module("video_head", chobits::nn::VideoHeadBlock());
         this->media_mix  = this->register_module("media_mix",  chobits::nn::MediaMixBlock());
         this->audio_tail = this->register_module("audio_tail", chobits::nn::AudioTailBlock());
     }
@@ -47,18 +47,16 @@ public:
 
 TORCH_MODULE(Chobits);
 
-using AdamWOptimizer = std::shared_ptr<torch::optim::AdamW>;
-
 struct TrainerState {
-    float learning_rate         = 0.0001;
-    float clip_grad_norm        = 10.0;
-    Chobits              model  = nullptr;
-    torch::DeviceType    device = torch::cuda::is_available() ? torch::DeviceType::CUDA : torch::DeviceType::CPU;
+    float learning_rate  = 0.0001;
+    float clip_grad_norm = 10.0;
+    Chobits           model  = nullptr;
+    torch::DeviceType device = torch::cuda::is_available() ? torch::DeviceType::CUDA : torch::DeviceType::CPU;
 };
 
 static TrainerState trainer_state{};
 
-bool chobits::model::Trainer::save(const std::string& path) {
+bool chobits::model::Trainer::save(const std::string& path, bool train) {
     if(!trainer_state.model) {
         return false;
     }
@@ -69,10 +67,13 @@ bool chobits::model::Trainer::save(const std::string& path) {
     torch::save(trainer_state.model, save_path);
     std::filesystem::rename(save_path, path);
     trainer_state.model->to(trainer_state.device);
+    if(train) {
+        trainer_state.model->train();
+    }
     return true;
 }
 
-bool chobits::model::Trainer::load(const std::string& path) {
+bool chobits::model::Trainer::load(const std::string& path, bool train) {
     trainer_state.model = Chobits();
     trainer_state.model->define();
     if(std::filesystem::exists(path)) {
@@ -84,7 +85,11 @@ bool chobits::model::Trainer::load(const std::string& path) {
         }
     }
     trainer_state.model->to(trainer_state.device);
-    trainer_state.model->eval();
+    if(train) {
+        trainer_state.model->train();
+    } else {
+        trainer_state.model->eval();
+    }
     this->info();
     return true;
 }
@@ -111,8 +116,7 @@ void chobits::model::Trainer::train() {
                 time_point = std::chrono::system_clock::now();
             }
             if(epoch % per_ck_epoch == 0) {
-                this->save("chobits." + std::to_string(epoch / per_ck_epoch % 10) + ".ckpt");
-                trainer_state.model->train();
+                this->save("chobits." + std::to_string(epoch / per_ck_epoch % 10) + ".ckpt", true);
             }
         }
     } catch(const std::exception& e) {
@@ -135,7 +139,7 @@ void chobits::model::Trainer::train(float& loss_val) {
     auto loss = torch::mse_loss(pred, label);
     loss.backward();
     loss_val += loss.template item<float>();
-    if(chobits::play_audio) {
+    if(chobits::mode_play) {
         torch::NoGradGuard no_grad_guard;
         chobits::media::set_data(pred.squeeze().cpu());
     }
@@ -166,12 +170,21 @@ void chobits::model::Trainer::eval(std::function<void(const std::vector<short>&)
     }
 }
 
+void chobits::model::Trainer::close() {
+    if(trainer_state.model) {
+        trainer_state.model = nullptr;
+    }
+}
+
 void chobits::model::Trainer::info() {
+    int     layer_size  = 0;
     int64_t total_numel = 0;
     for(const auto& parameter : trainer_state.model->named_parameters()) {
+        ++layer_size;
         total_numel += parameter.value().numel();
-        std::printf("模型参数数量：%s = %" PRId64 "\n", parameter.key().c_str(), parameter.value().numel());
+        std::printf("模型参数数量：%64s = %" PRId64 "\n", parameter.key().c_str(), parameter.value().numel());
     }
+    std::printf("模型层数总量：%d\n", layer_size);
     std::printf("模型参数总量：%" PRId64 "\n", total_numel);
 }
 
@@ -184,6 +197,7 @@ bool chobits::model::open_model() {
         trainer.train();
         trainer.save();
     }
+    trainer.close();
     return true;
 }
 

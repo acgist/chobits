@@ -25,7 +25,7 @@ extern "C" {
 }
 
 const static float audio_normalization = 32768.0;
-const static float video_normalization = 256.0;
+const static float video_normalization = 8388608.0; // 256 * 256 * 256 / 2
 
 const static AVPixelFormat video_pix_format = AV_PIX_FMT_RGB24;
 
@@ -59,16 +59,16 @@ static bool video_to_tensor(std::vector<torch::Tensor>& audio, std::vector<torch
 bool chobits::media::open_media() {
     if(chobits::mode_file) {
         std::vector<std::string> files;
-        if(std::filesystem::is_directory(chobits::train_path)) {
-            const auto iterator = std::filesystem::directory_iterator(chobits::train_path);
+        if(std::filesystem::is_directory(chobits::train_dataset)) {
+            const auto iterator = std::filesystem::directory_iterator(chobits::train_dataset);
             for(const auto& entry : iterator) {
                 const auto& file_path = entry.path().string();
                 if(std::filesystem::is_regular_file(file_path)) {
                     files.push_back(file_path);
                 }
             }
-        } else if(std::filesystem::is_regular_file(chobits::train_path)) {
-            files.push_back(chobits::train_path);
+        } else if(std::filesystem::is_regular_file(chobits::train_dataset)) {
+            files.push_back(chobits::train_dataset);
         } else {
             // -
         }
@@ -446,7 +446,8 @@ std::vector<short> chobits::media::set_data(const torch::Tensor& tensor) {
     #elif CHOBITS_NORM == 1
     auto pcm_tensor = tensor.mul(audio_normalization).to(torch::kShort);
     #else
-    auto pcm_tensor = torch::pow(10, tensor).sub(audio_normalization + 1).to(torch::kShort);
+//  torch::pow(10, tensor)
+    auto pcm_tensor = torch::exp(tensor).sub(audio_normalization + 1).to(torch::kShort);
     #endif
     auto pcm_size   = pcm_tensor.sizes()[0];
     auto pcm_data   = reinterpret_cast<short*>(pcm_tensor.data_ptr());
@@ -560,14 +561,14 @@ static bool audio_to_tensor(std::vector<torch::Tensor>& audio, SwrContext* swr, 
     }
     const size_t size = chobits::audio_nb_channels * audio_bytes_per_sample * out_samples;
     remain += size;
-//  if(dataset_index == 0) {
-//      chobits::player::play_audio(buffer, size);
-//  }
+    if(dataset_index == 0 && !chobits::mode_play) {
+        chobits::player::play_audio(buffer, size);
+    }
     while(remain >= dataset.audio_size) {
         bool insert = false;
         std::unique_lock<std::mutex> lock(dataset.mutex);
         if(audio.size() > dataset.cache_size) {
-            if(chobits::drop_busy) {
+            if(chobits::mode_drop) {
                 std::printf("丢弃音频数据：%" PRIu64 "\n", audio.size());
             } else {
                 dataset.condition.wait(lock, [&audio]() {
@@ -587,7 +588,7 @@ static bool audio_to_tensor(std::vector<torch::Tensor>& audio, SwrContext* swr, 
             #elif CHOBITS_NORM == 1
             .div(audio_normalization);
             #else
-            .add(audio_normalization + 1).log10();
+            .add(audio_normalization + 1).log();
             #endif
             audio.push_back(std::move(tensor));
         }
@@ -617,7 +618,7 @@ static bool video_to_tensor(std::vector<torch::Tensor>& audio, std::vector<torch
         std::unique_lock<std::mutex> lock(dataset.mutex);
         if(audio.size() >= video.size()) {
             if(video.size() > dataset.cache_size) {
-                if(chobits::drop_busy) {
+                if(chobits::mode_drop) {
                     std::printf("丢弃视频数据：%" PRIu64 "\n", video.size());
                 } else {
                     dataset.condition.wait(lock, [&video]() {
@@ -634,12 +635,14 @@ static bool video_to_tensor(std::vector<torch::Tensor>& audio, std::vector<torch
                     { chobits::video_height, chobits::video_width, 3 },
                     torch::kUInt8
                 ).to(torch::kFloat32)
+                // 合并通道
+                .mul(torch::tensor(std::vector<int>({ 256 * 256, 256, 1}))).sum(2, true).sub(video_normalization)
                 #if CHOBITS_NORM == 0
-                .div(video_normalization)
+                .div(video_normalization).add(1.0).div(2.0)
                 #elif CHOBITS_NORM == 1
-                .div(video_normalization).mul(2.0).sub(1.0)
+                .div(video_normalization)
                 #else
-                .add(1).log10()
+                .add(video_normalization + 1).log()
                 #endif
                 .permute({ 2, 0, 1 }).contiguous();
                 video.push_back(std::move(tensor));

@@ -25,9 +25,9 @@ int main() {
         chobits::mode_file   = true;
         chobits::train_epoch = 1;
         #if _WIN32
-        chobits::train_path = "D:/tmp/video.mp4";
+        chobits::train_dataset = "D:/tmp/video.mp4";
         #else
-        chobits::train_path = "video/32429377729-1-192.mp4";
+        chobits::train_dataset = "video/32429377729-1-192.mp4";
         #endif
         chobits::media::open_media();
     });
