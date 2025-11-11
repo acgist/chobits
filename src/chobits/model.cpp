@@ -103,7 +103,7 @@ void chobits::model::Trainer::train() {
         auto time_point = std::chrono::system_clock::now();
         static const int per_op_epoch = 10;
         static const int per_ck_epoch = 1000;
-        for (size_t epoch = 1; epoch <= 100'000'000ULL && chobits::running; ++epoch) {
+        for (size_t epoch = 1; epoch <= 31'536'000'000ULL && chobits::running; ++epoch) {
             this->train(loss_val);
             if(epoch % per_op_epoch == 0) {
                 torch::nn::utils::clip_grad_norm_(trainer_state.model->parameters(), trainer_state.clip_grad_norm);
