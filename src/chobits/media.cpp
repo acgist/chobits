@@ -25,7 +25,7 @@ extern "C" {
 }
 
 const static float audio_normalization = 32768.0;
-const static float video_normalization = 8388608.0; // 256 * 256 * 256 / 2
+const static float video_normalization = 256.0;
 
 const static AVPixelFormat video_pix_format = AV_PIX_FMT_RGB24;
 
@@ -74,7 +74,7 @@ bool chobits::media::open_media() {
         }
         std::printf("训练文件数量：%" PRIu64 "\n", files.size());
         std::vector<std::thread> threads;
-        for(int index = 0; index < chobits::batch_size; ++index) {
+        for(int index = 0; index < chobits::batch_size && chobits::running; ++index) {
             threads.push_back(std::thread([index, files]() mutable {
                 dataset_index = index;
                 std::random_device device;
@@ -82,12 +82,15 @@ bool chobits::media::open_media() {
                 std::shuffle(files.begin(), files.end(), rand);
                 for(int epoch = 0; epoch < chobits::train_epoch && chobits::running; ++epoch) {
                     std::printf("训练轮次：%d = %d\n", index, epoch);
-                    for(const auto& file_path : files) {
-                        std::printf("训练文件：%d = %d = %s\n", index, epoch, file_path.c_str());
-                        if(chobits::media::open_file(file_path)) {
-                            std::printf("文件训练完成：%d = %s\n", index, file_path.c_str());
+                    for(const auto& file : files) {
+                        if(!chobits::running) {
+                            break;
+                        }
+                        std::printf("训练文件：%d = %d = %s\n", index, epoch, file.c_str());
+                        if(chobits::media::open_file(file)) {
+                            std::printf("文件训练完成：%d = %s\n", index, file.c_str());
                         } else {
-                            std::printf("文件训练失败：%d = %s\n", index, file_path.c_str());
+                            std::printf("文件训练失败：%d = %s\n", index, file.c_str());
                         }
                     }
                 }
@@ -635,14 +638,12 @@ static bool video_to_tensor(std::vector<torch::Tensor>& audio, std::vector<torch
                     { chobits::video_height, chobits::video_width, 3 },
                     torch::kUInt8
                 ).to(torch::kFloat32)
-                // 合并通道
-                .mul(torch::tensor(std::vector<int>({ 256 * 256, 256, 1}))).sum(2, true).sub(video_normalization)
                 #if CHOBITS_NORM == 0
-                .div(video_normalization).add(1.0).div(2.0)
-                #elif CHOBITS_NORM == 1
                 .div(video_normalization)
+                #elif CHOBITS_NORM == 1
+                .div(video_normalization).mul(2.0).sub(1.0)
                 #else
-                .add(video_normalization + 1).log()
+                .add(1).log()
                 #endif
                 .permute({ 2, 0, 1 }).contiguous();
                 video.push_back(std::move(tensor));

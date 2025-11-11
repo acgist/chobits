@@ -35,7 +35,7 @@ int main(int argc, char const *argv[]) {
 }
 
 static bool init(int argc, char const *argv[]) {
-    // 帮助：chobits[.exe] [?|help]
+    // 帮助：chobits[.exe] [?|-h|help|--help]
     // 视频文件训练：chobits[.exe] file [训练次数] [训练批次]
     // 媒体设备评估：chobits[.exe] eval
     // 媒体设备训练：chobits[.exe]
@@ -57,7 +57,7 @@ static bool init(int argc, char const *argv[]) {
             chobits::mode_eval = true;
             chobits::mode_file = false;
             chobits::mode_play = true;
-        } else if(std::strcmp("file", argv[1]) == 0) {
+        } else {
             chobits::mode_drop     = false;
             chobits::mode_eval     = false;
             chobits::mode_file     = true;
@@ -65,15 +65,13 @@ static bool init(int argc, char const *argv[]) {
             chobits::batch_size    = argc >= 4 ? std::atoi(argv[3]) : 10;
             chobits::train_epoch   = argc >= 3 ? std::atoi(argv[2]) : 10;
             chobits::train_dataset = argv[1];
-        } else {
-            return false;
         }
     }
     return true;
 }
 
 static void help() {
-    std::printf(R"(帮助：chobits[.exe] [?|help]
+    std::printf(R"(帮助：chobits[.exe] [?|-h|help|--help]
 视频文件训练：chobits[.exe] file [训练次数] [训练批次]
 媒体设备评估：chobits[.exe] eval
 媒体设备训练：chobits[.exe]

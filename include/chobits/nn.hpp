@@ -21,6 +21,9 @@
 
 namespace chobits::nn {
 
+using act = torch::nn::GELU; // torch::nn::SiLU
+using shp = std::vector<int64_t>;
+
 /**
  * GRU
  */
@@ -32,8 +35,8 @@ private:
 
 public:
     GRUBlockImpl(
-        const int in         = 128,
-        const int out        = 128,
+        const int in,
+        const int out,
         const int num_layers = 1
     ) {
         this->gru = this->register_module("gru", torch::nn::GRU(
@@ -43,7 +46,7 @@ public:
     ~GRUBlockImpl() {
         this->unregister_module("gru");
     }
-    
+
 public:
     torch::Tensor forward(const torch::Tensor& input) {
         if(!this->h0.defined()) {
@@ -74,9 +77,9 @@ public:
     ResNetBlockImpl(
         const int in_channel,
         const int out_channel,
-        const int kernel     = 3,
-        const int padding    = 1,
-        const int num_groups = 16
+        const shp shape,
+        const int kernel  = 3,
+        const int padding = 1
     ) {
         if(in_channel == out_channel) {
             this->conv_1 = this->register_module("conv_1", torch::nn::Sequential(
@@ -88,12 +91,12 @@ public:
             ));
         }
         this->conv_2 = this->register_module("conv_2", torch::nn::Sequential(
+            torch::nn::LayerNorm(torch::nn::LayerNormOptions(shape)),
             torch::nn::Conv1d(torch::nn::Conv1dOptions(out_channel, out_channel, kernel).padding(padding).bias(false)),
-            torch::nn::GroupNorm(torch::nn::GroupNormOptions(num_groups, out_channel)),
-            torch::nn::SiLU(),
+            act(),
+            torch::nn::LayerNorm(torch::nn::LayerNormOptions(shape)),
             torch::nn::Conv1d(torch::nn::Conv1dOptions(out_channel, out_channel, kernel).padding(padding).bias(false)),
-            torch::nn::GroupNorm(torch::nn::GroupNormOptions(num_groups, out_channel)),
-            torch::nn::SiLU()
+            act()
         ));
     }
     ~ResNetBlockImpl() {
@@ -124,25 +127,24 @@ private:
 
 public:
     AttentionBlockImpl(
-        const int   seq_len    = 800,
-        const int   emb_dim    = 128,
-        const int   num_heads  = 8,
-        const int   kernel     = 1,
-        const int   padding    = 0,
-        const int   num_groups = 16
+        const int seq_len,
+        const int emb_dim,
+        const int num_heads = 8,
+        const int kernel    = 1,
+        const int padding   = 0
     ) {
         this->qkv = this->register_module("qkv", torch::nn::Sequential(
+            torch::nn::LayerNorm(torch::nn::LayerNormOptions(std::vector<int64_t>{ emb_dim })),
             torch::nn::Conv1d(torch::nn::Conv1dOptions(seq_len, seq_len * 3, kernel).padding(padding).bias(false)),
-            torch::nn::GroupNorm(torch::nn::GroupNormOptions(num_groups, seq_len * 3)),
-            torch::nn::SiLU()
+            act()
         ));
         this->attn = this->register_module("attn", torch::nn::MultiheadAttention(
             torch::nn::MultiheadAttentionOptions(emb_dim, num_heads).bias(false)
         ));
         this->proj = this->register_module("proj", torch::nn::Sequential(
+            torch::nn::LayerNorm(torch::nn::LayerNormOptions(std::vector<int64_t>{ emb_dim })),
             torch::nn::Conv1d(torch::nn::Conv1dOptions(seq_len, seq_len, kernel).padding(padding).bias(false)),
-            torch::nn::GroupNorm(torch::nn::GroupNormOptions(num_groups, seq_len)),
-            torch::nn::SiLU()
+            act()
         ));
     }
     ~AttentionBlockImpl() {
@@ -178,21 +180,17 @@ private:
 
 public:
     AudioHeadBlockImpl(
-        const int in         = 1,
-        const int out        = 128,
-        const int channel    = 800,
-        const int num_groups = 16
+        const int in      = 1,
+        const int out     = 128,
+        const int channel = 800
     ) {
         this->embedding = this->register_module("embedding", torch::nn::Sequential(
             torch::nn::Linear(torch::nn::LinearOptions(in, out).bias(false)),
-            torch::nn::GroupNorm(torch::nn::GroupNormOptions(num_groups, channel)),
-            torch::nn::SiLU(),
             // -
-            chobits::nn::ResNetBlock(channel, channel),
-            // -
+            chobits::nn::ResNetBlock(channel, channel, std::vector<int64_t>{ out }),
+            torch::nn::LayerNorm(torch::nn::LayerNormOptions(std::vector<int64_t>{ out })),
             torch::nn::Linear(torch::nn::LinearOptions(out, out).bias(false)),
-            torch::nn::GroupNorm(torch::nn::GroupNormOptions(num_groups, channel)),
-            torch::nn::SiLU()
+            act()
         ));
     }
     ~AudioHeadBlockImpl() {
@@ -218,36 +216,34 @@ private:
 
 public:
     VideoHeadBlockImpl(
-        std::vector<int> channel = std::vector<int>{ 1, 10, 100, 800  },
-        std::vector<int> pool    = std::vector<int>{ 5, 5, 3, 4, 3, 2 },
-        const int in             = 128,
-        const int kernel         = 3,
-        const int padding        = 1,
-        const int num_groups     = 10
+        const shp channel = std::vector<int64_t>{ 3, 100, 400, 800 },
+        const shp pool    = std::vector<int64_t>{ 5, 5, 4, 4, 2, 2 },
+        const int kernel  = 3,
+        const int padding = 1,
+        const int height  = 360,
+        const int width   = 640
     ) {
+        const int64_t in = height * width / std::accumulate(pool.begin(), pool.end(), 1, std::multiplies<int64_t>());
         this->embedding = this->register_module("embedding", torch::nn::Sequential(
             torch::nn::Conv2d(torch::nn::Conv2dOptions(channel[0], channel[1], kernel).padding(padding).bias(false)),
-            torch::nn::BatchNorm2d(torch::nn::BatchNorm2dOptions(channel[1])),
-            torch::nn::SiLU(),
-            torch::nn::MaxPool2d(torch::nn::MaxPool2dOptions({ pool[0], pool[1] })),
+            torch::nn::AvgPool2d(torch::nn::AvgPool2dOptions({ pool[0], pool[1] })),
             // -
+            torch::nn::LayerNorm(torch::nn::LayerNormOptions(std::vector<int64_t>{ channel[1], height / pool[0], width / pool[1] })),
             torch::nn::Conv2d(torch::nn::Conv2dOptions(channel[1], channel[2], kernel).padding(padding).bias(false)),
-            torch::nn::GroupNorm(torch::nn::GroupNormOptions(num_groups, channel[2])),
-            torch::nn::SiLU(),
-            torch::nn::MaxPool2d(torch::nn::MaxPool2dOptions({ pool[2], pool[3] })),
+            act(),
+            torch::nn::AvgPool2d(torch::nn::AvgPool2dOptions({ pool[2], pool[3] })),
             // -
+            torch::nn::LayerNorm(torch::nn::LayerNormOptions(std::vector<int64_t>{ channel[2], height / pool[0] / pool[2], width / pool[1] / pool[3] })),
             torch::nn::Conv2d(torch::nn::Conv2dOptions(channel[2], channel[3], kernel).padding(padding).bias(false)),
-            torch::nn::GroupNorm(torch::nn::GroupNormOptions(num_groups, channel[3])),
-            torch::nn::SiLU(),
-            torch::nn::MaxPool2d(torch::nn::MaxPool2dOptions({ pool[4], pool[5] })),
+            act(),
+            torch::nn::AvgPool2d(torch::nn::AvgPool2dOptions({ pool[4], pool[5] })),
             // -
             torch::nn::Flatten(torch::nn::FlattenOptions().start_dim(2)),
             // -
-            chobits::nn::ResNetBlock(channel[3], channel[3]),
-            // -
+            chobits::nn::ResNetBlock(channel[3], channel[3], std::vector<int64_t>{ in }),
+            torch::nn::LayerNorm(torch::nn::LayerNormOptions(std::vector<int64_t>{ in })),
             torch::nn::Linear(torch::nn::LinearOptions(in, in).bias(false)),
-            torch::nn::GroupNorm(torch::nn::GroupNormOptions(num_groups, channel[3])),
-            torch::nn::SiLU()
+            act()
         ));
     }
     ~VideoHeadBlockImpl() {
@@ -276,23 +272,27 @@ private:
 
 public:
     MediaProbBlockImpl(
-        const int in      = 128,
+        const int media_1_in,
+        const int media_2_in,
         const int channel = 800
     ) {
         this->media_1 = this->register_module("media_1", torch::nn::Sequential(
-            chobits::nn::ResNetBlock(channel, channel)
+            chobits::nn::ResNetBlock(channel, channel, std::vector<int64_t>{ media_1_in })
         ));
         this->media_2 = this->register_module("media_2", torch::nn::Sequential(
-            chobits::nn::ResNetBlock(channel, channel),
-            torch::nn::Linear(torch::nn::LinearOptions(in, 1))
+            chobits::nn::ResNetBlock(channel, channel, std::vector<int64_t>{ media_2_in }),
+            torch::nn::LayerNorm(torch::nn::LayerNormOptions(std::vector<int64_t>{ media_2_in })),
+            torch::nn::Linear(torch::nn::LinearOptions(media_2_in, 1)),
+            act()
         ));
         this->mixer = this->register_module("mixer", torch::nn::Sequential(
-            chobits::nn::AttentionBlock(channel, in),
-            chobits::nn::ResNetBlock(channel, channel)
+            chobits::nn::AttentionBlock(channel, media_1_in)
         ));
         this->mprob = this->register_module("mprob", torch::nn::Sequential(
-            chobits::nn::AttentionBlock(channel, in),
-            torch::nn::Linear(torch::nn::LinearOptions(in, 1)),
+            chobits::nn::ResNetBlock(channel, channel, std::vector<int64_t>{ media_1_in }),
+            chobits::nn::AttentionBlock(channel, media_1_in),
+            torch::nn::LayerNorm(torch::nn::LayerNormOptions(std::vector<int64_t>{ media_1_in })),
+            torch::nn::Linear(torch::nn::LinearOptions(media_1_in, 1)),
             torch::nn::Sigmoid()
         ));
     }
@@ -331,23 +331,24 @@ private:
 
 public:
     MediaMixBlockImpl(
-        const int in      = 128,
-        const int channel = 800
+        const int audio_in = 128,
+        const int video_in = 144,
+        const int channel  = 800
     ) {
         this->audio = this->register_module("audio", torch::nn::Sequential(
-            chobits::nn::GRUBlock(in, in)
+            chobits::nn::GRUBlock(audio_in, audio_in)
         ));
         this->video = this->register_module("video", torch::nn::Sequential(
-            chobits::nn::GRUBlock(in, in)
+            chobits::nn::GRUBlock(video_in, video_in)
         ));
-        this->aprob = this->register_module("aprob", chobits::nn::MediaProbBlock());
-        this->vprob = this->register_module("vprob", chobits::nn::MediaProbBlock());
+        this->aprob = this->register_module("aprob", chobits::nn::MediaProbBlock(audio_in, video_in));
+        this->vprob = this->register_module("vprob", chobits::nn::MediaProbBlock(video_in, audio_in));
         this->mixer = this->register_module("mixer", torch::nn::Sequential(
-            chobits::nn::AttentionBlock(channel, in),
-            chobits::nn::ResNetBlock(channel, channel),
-            chobits::nn::GRUBlock(in, in),
-            chobits::nn::ResNetBlock(channel, channel),
-            chobits::nn::AttentionBlock(channel, in)
+            chobits::nn::AttentionBlock(channel, audio_in + video_in),
+            chobits::nn::ResNetBlock(channel, channel, std::vector<int64_t>{ audio_in + video_in }),
+            chobits::nn::GRUBlock(audio_in + video_in, audio_in),
+            chobits::nn::ResNetBlock(channel, channel, std::vector<int64_t>{ audio_in }),
+            chobits::nn::AttentionBlock(channel, audio_in)
         ));
     }
     ~MediaMixBlockImpl() {
@@ -364,7 +365,7 @@ public:
         auto video_out = this->video->forward(video);
         auto audio_mix = this->aprob->forward(audio_out, video_out);
         auto video_mix = this->vprob->forward(video_out, audio_out);
-        auto media_mix = audio_mix + video_mix;
+        auto media_mix = torch::concat({ audio_mix, video_mix }, -1);
         return this->mixer->forward(media_mix);
     }
 
@@ -387,7 +388,7 @@ public:
     ) {
         this->tail = this->register_module("tail", torch::nn::Sequential(
             torch::nn::Linear(torch::nn::LinearOptions(in, in)),
-            torch::nn::SiLU(),
+            act(),
             torch::nn::Linear(torch::nn::LinearOptions(in, out))
         ));
     }

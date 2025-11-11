@@ -12,7 +12,7 @@ static void info(std::shared_ptr<torch::nn::Module> layer) {
     int64_t total_numel = 0;
     for(const auto& parameter : layer->named_parameters()) {
         ++layer_size;
-        std::printf("参数数量：%64s = %" PRId64 "\n", parameter.key().c_str(), parameter.value().numel());
+        std::printf("参数数量：%48s = %" PRId64 "\n", parameter.key().c_str(), parameter.value().numel());
         total_numel += parameter.value().numel();
     }
     std::printf("层数总量：%d\n", layer_size);
@@ -27,14 +27,14 @@ static void info(std::shared_ptr<torch::nn::Module> layer) {
 }
 
 [[maybe_unused]] static void test_res_net() {
-    chobits::nn::ResNetBlock layer(800, 800);
+    chobits::nn::ResNetBlock layer(800, 800, std::vector<int64_t>{ 128 });
     auto output = layer->forward(torch::randn({ 1, 800, 128 }));
     info(layer.ptr());
     std::cout << output.sizes() << std::endl;
 }
 
 [[maybe_unused]] static void test_attention() {
-    chobits::nn::AttentionBlock layer;
+    chobits::nn::AttentionBlock layer(800, 128);
     auto output = layer->forward(torch::randn({ 1, 800, 128 }));
     info(layer.ptr());
     std::cout << output.sizes() << std::endl;
@@ -48,8 +48,18 @@ static void info(std::shared_ptr<torch::nn::Module> layer) {
 }
 
 [[maybe_unused]] static void test_video_head() {
-    chobits::nn::VideoHeadBlock layer(std::vector<int>{ 1, 10, 100, 800 }, std::vector<int>{ 5, 5, 3, 4, 3, 2 });
-    auto output = layer->forward(torch::randn({ 1, 1, 360, 640 }));
+    chobits::nn::VideoHeadBlock layer;
+    auto output = layer->forward(torch::randn({ 1, 3, 360, 640 }));
+    info(layer.ptr());
+    std::cout << output.sizes() << std::endl;
+}
+
+[[maybe_unused]] static void test_media_prob() {
+    chobits::nn::MediaProbBlock layer(128, 144);
+    auto output = layer->forward(
+        torch::randn({ 1, 800, 128 }),
+        torch::randn({ 1, 800, 144 })
+    );
     info(layer.ptr());
     std::cout << output.sizes() << std::endl;
 }
@@ -58,7 +68,7 @@ static void info(std::shared_ptr<torch::nn::Module> layer) {
     chobits::nn::MediaMixBlock layer;
     auto output = layer->forward(
         torch::randn({ 1, 800, 128 }),
-        torch::randn({ 1, 800, 128 })
+        torch::randn({ 1, 800, 144 })
     );
     info(layer.ptr());
     std::cout << output.sizes() << std::endl;
@@ -81,7 +91,6 @@ static void info(std::shared_ptr<torch::nn::Module> layer) {
 
 [[maybe_unused]] static void test_model_eval() {
     chobits::batch_size = 1;
-    
     std::thread media_thread([]() {
         #if _WIN32
         chobits::media::open_file("D:/tmp/video.mp4");
@@ -93,9 +102,12 @@ static void info(std::shared_ptr<torch::nn::Module> layer) {
     stream.open("chobits.pcm", std::ios::binary);
     chobits::model::Trainer trainer;
     trainer.load();
-    trainer.eval([&stream](const std::vector<short>& data) {
+    auto time_point = std::chrono::system_clock::now();
+    trainer.eval([&stream, &time_point](const std::vector<short>& data) {
         stream.write(reinterpret_cast<const char*>(data.data()), data.size() * sizeof(short));
-        std::printf("写入音频数据：%" PRIu64 "\n", data.size());
+        auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now() - time_point).count();
+        std::printf("写入音频数据：%" PRIu64 " = %" PRId64 "\n", data.size(), duration);
+        time_point = std::chrono::system_clock::now();
     });
     media_thread.join();
     stream.close();
@@ -136,10 +148,11 @@ int main() {
     // test_attention();
     // test_audio_head();
     // test_video_head();
+    // test_media_prob();
     // test_media_mix();
     // test_audio_tail();
-    test_model();
-    // test_model_eval();
+    // test_model();
+    test_model_eval();
     // test_model_train();
     return 0;
 }
