@@ -22,8 +22,7 @@ int main() {
         // chobits::media::open_file("video/32429377729-1-192.mp4");
         // #endif
         // open_media
-        chobits::mode_file   = true;
-        chobits::train_epoch = 1;
+        chobits::mode_file = true;
         #if _WIN32
         chobits::train_dataset = "D:/tmp/video.mp4";
         #else
@@ -43,7 +42,6 @@ int main() {
         }
     }
     media_thread.join();
-    chobits::player::stop_player();
     player_thread.join();
     return 0;
 }

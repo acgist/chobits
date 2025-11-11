@@ -1,5 +1,6 @@
 #include "chobits/media.hpp"
 #include "chobits/model.hpp"
+#include "chobits/player.hpp"
 #include "chobits/chobits.hpp"
 
 bool        chobits::running       = true;
@@ -20,6 +21,7 @@ int  chobits::video_height      = 360;
 void chobits::stop_all() {
     std::printf("等待系统关闭...\n");
     chobits::running = false;
+    chobits::player::stop_player();
     chobits::media::stop_all();
     chobits::model::stop_all();
 }
