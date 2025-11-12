@@ -56,13 +56,61 @@ public:
                 this->gru->options.hidden_size()
             }).to(input.device());
         }
-        auto [ output, hn ] = this->gru->forward(input, this->h0);
+        auto [ output, _ ] = this->gru->forward(input, this->h0);
         return output;
     }
 
 };
 
 TORCH_MODULE(GRUBlock);
+
+/**
+ * LSTM
+ */
+class LSTMBlockImpl : public torch::nn::Module {
+
+private:
+    torch::Tensor   h0  { nullptr };
+    torch::Tensor   c0  { nullptr };
+    torch::nn::LSTM lstm{ nullptr };
+
+public:
+    LSTMBlockImpl(
+        const int in,
+        const int out,
+        const int num_layers = 1
+    ) {
+        this->lstm = this->register_module("lstm", torch::nn::LSTM(
+            torch::nn::LSTMOptions(in, out).num_layers(num_layers).bias(false).batch_first(true).bidirectional(false)
+        ));
+    }
+    ~LSTMBlockImpl() {
+        this->unregister_module("lstm");
+    }
+
+public:
+    torch::Tensor forward(const torch::Tensor& input) {
+        if(!this->h0.defined()) {
+            this->h0 = torch::zeros({
+                this->lstm->options.num_layers(),
+                input.size(0),
+                this->lstm->options.hidden_size()
+            }).to(input.device());
+        }
+        if(!this->c0.defined()) {
+            this->c0 = torch::zeros({
+                this->lstm->options.num_layers(),
+                input.size(0),
+                this->lstm->options.hidden_size()
+            }).to(input.device());
+        }
+        auto [ output, _ ] = this->lstm->forward(input, std::make_tuple(this->h0, this->c0));
+        return output;
+    }
+
+};
+
+TORCH_MODULE(LSTMBlock);
 
 /**
  * 残差网络
@@ -346,7 +394,7 @@ public:
         this->mixer = this->register_module("mixer", torch::nn::Sequential(
             chobits::nn::AttentionBlock(channel, audio_in + video_in),
             chobits::nn::ResNetBlock(channel, channel, std::vector<int64_t>{ audio_in + video_in }),
-            chobits::nn::GRUBlock(audio_in + video_in, audio_in),
+            chobits::nn::LSTMBlock(audio_in + video_in, audio_in),
             chobits::nn::ResNetBlock(channel, channel, std::vector<int64_t>{ audio_in }),
             chobits::nn::AttentionBlock(channel, audio_in)
         ));
