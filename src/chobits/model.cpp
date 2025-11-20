@@ -141,7 +141,7 @@ void chobits::model::Trainer::train(float& loss_val) {
     loss_val += loss.template item<float>();
     if(chobits::mode_play) {
         torch::NoGradGuard no_grad_guard;
-        chobits::media::set_data(pred.squeeze().cpu());
+        chobits::media::set_data(pred.cpu());
     }
 }
 
@@ -158,7 +158,7 @@ void chobits::model::Trainer::eval(std::function<void(const std::vector<short>&)
             audio = audio.to(trainer_state.device);
             video = video.to(trainer_state.device);
             auto pred = trainer_state.model->forward(audio, video);
-            auto data = chobits::media::set_data(pred.squeeze().cpu());
+            auto data = chobits::media::set_data(pred.cpu());
             if(callback) {
                 callback(data);
             }

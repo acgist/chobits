@@ -442,10 +442,9 @@ std::vector<short> chobits::media::set_data(const torch::Tensor& tensor) {
     #elif CHOBITS_NORM == 1
     auto pcm_tensor = tensor.mul(audio_normalization).to(torch::kShort);
     #else
-//  torch::pow(10, tensor)
     auto pcm_tensor = torch::exp(tensor).sub(audio_normalization + 1).to(torch::kShort);
     #endif
-    auto pcm_size = pcm_tensor.sizes()[0];
+    auto pcm_size = pcm_tensor.size(1);
     auto pcm_data = reinterpret_cast<short*>(pcm_tensor.data_ptr());
     std::vector<short> pcm;
     pcm.resize(pcm_size);
@@ -579,7 +578,7 @@ static bool audio_to_tensor(std::vector<torch::Tensor>& audio, SwrContext* swr, 
             if(insert) {
                 auto pcm_data = reinterpret_cast<short*>(audio_buffer.data());
                 auto pcm_size = int(dataset.audio_size / sizeof(short));
-                auto tensor   = torch::from_blob(pcm_data, { pcm_size, 1 }, torch::kShort).to(torch::kFloat32)
+                auto tensor   = torch::from_blob(pcm_data, { pcm_size }, torch::kShort).to(torch::kFloat32)
                 #if CHOBITS_NORM == 0
                 .div(audio_normalization).add(1.0).div(2.0);
                 #elif CHOBITS_NORM == 1

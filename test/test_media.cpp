@@ -3,11 +3,42 @@
 #include "chobits/chobits.hpp"
 
 #include <thread>
+#include <fstream>
 
-#include "ATen/Tensor.h"
+#include "torch/fft.h"
 
-int main() {
-    chobits::batch_size = 1;
+[[maybe_unused]] static void test_sftf() {
+    std::ifstream stream_in ("D:/tmp/dzht.pcm",  std::ios::binary);
+    std::ofstream stream_out("D:/tmp/dzht_.pcm", std::ios::binary);
+    int size = 800;
+    std::vector<short> pcm(size);
+    const int n_fft    = 128;
+    const int hop_size = 32;
+    const int win_size = 128;
+    auto wind = torch::hann_window(win_size);
+    while(stream_in.read((char*) pcm.data(), sizeof(short) * size)) {
+        auto tensor = torch::from_blob(pcm.data(), { 1, size }, torch::kShort).to(torch::kFloat32).div(32768.0);
+        auto com = torch::stft(tensor.squeeze(-1), n_fft, hop_size, win_size, wind, true, "reflect", false, std::nullopt, true);
+        // 分解幅度和相位
+        auto mag = torch::abs(com);
+        auto pha = torch::angle(com);
+        std::cout << tensor.sizes() << std::endl;
+        std::cout << com.sizes() << std::endl;
+        std::cout << mag.sizes() << std::endl;
+        std::cout << pha.sizes() << std::endl;
+        // 合成幅度和相位
+        // auto real = mag * torch::cos(pha);
+        // auto imag = mag * torch::sin(pha);
+        //      com  = torch::complex(real, imag);
+             com = torch::polar(mag, pha);
+        auto out = torch::istft(com, n_fft, hop_size, win_size, wind, true).unsqueeze(-1).mul(32768.0).to(torch::kShort);
+        stream_out.write((char*) out.data_ptr(), sizeof(short) * size);
+    }
+    stream_in.close();
+    stream_out.close();
+}
+
+[[maybe_unused]] static void test_media() {
     std::thread player_thread([]() {
         chobits::player::open_player();
     });
@@ -43,5 +74,9 @@ int main() {
     }
     media_thread.join();
     player_thread.join();
+}
+
+int main() {
+    test_media();
     return 0;
 }
