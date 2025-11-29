@@ -17,7 +17,6 @@
 
 // 0 - 归一化：[ 0~1]
 // 1 - 中心化：[-1~1]
-// 2 - 对数化：[ 0~?]
 #ifndef CHOBITS_NORM
 #define CHOBITS_NORM 1
 #endif
@@ -34,6 +33,7 @@ extern bool        mode_eval;     // 验证模式
 extern bool        mode_file;     // 文件模式
 extern bool        mode_play;     // 播放模式
 extern int         batch_size;    // 训练批次
+extern int         batch_length;  // 批次长度
 extern int         train_epoch;   // 训练轮次
 extern std::string train_dataset; // 训练数据集
 

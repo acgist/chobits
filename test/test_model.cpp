@@ -12,7 +12,7 @@ static void info(std::shared_ptr<torch::nn::Module> layer) {
     int64_t total_numel = 0;
     for(const auto& parameter : layer->named_parameters()) {
         ++layer_size;
-        std::printf("参数数量：%48s = %" PRId64 "\n", parameter.key().c_str(), parameter.value().numel());
+        std::printf("参数数量：%64s = %" PRId64 "\n", parameter.key().c_str(), parameter.value().numel());
         total_numel += parameter.value().numel();
     }
     std::printf("层数总量：%d\n", layer_size);
@@ -20,62 +20,64 @@ static void info(std::shared_ptr<torch::nn::Module> layer) {
 }
 
 [[maybe_unused]] static void test_gru() {
-    chobits::nn::GRUBlock layer(576, 576);
-    auto output = layer->forward(torch::randn({ 1, 400, 576 }));
+    chobits::nn::GRUBlock layer(432, 432);
+    auto output = layer->forward(torch::randn({ 10, 400, 432 }));
     info(layer.ptr());
     std::cout << output.sizes() << std::endl;
 }
 
 [[maybe_unused]] static void test_lstm() {
-    chobits::nn::LSTMBlock layer(576, 576);
-    auto output = layer->forward(torch::randn({ 1, 400, 576 }));
+    torch::set_num_threads(1);
+    chobits::nn::LSTMBlock layer(432, 432);
+    auto output = layer->forward(torch::randn({ 10, 400, 432 }));
     info(layer.ptr());
     std::cout << output.sizes() << std::endl;
 }
 
 [[maybe_unused]] static void test_res_net() {
-    chobits::nn::ResNetBlock layer(400, 400, std::vector<int64_t>{ 576 });
-    auto output = layer->forward(torch::randn({ 1, 400, 576 }));
+    chobits::nn::ResNetBlock layer(400, 800, std::vector<int64_t>{ 24 });
+    auto output = layer->forward(torch::randn({ 10, 400, 24 }));
     info(layer.ptr());
     std::cout << output.sizes() << std::endl;
 }
 
 [[maybe_unused]] static void test_attention() {
-    chobits::nn::AttentionBlock layer(400, 576);
-    auto output = layer->forward(torch::randn({ 1, 400, 576 }));
+    chobits::nn::AttentionBlock layer(432);
+    auto output = layer->forward(torch::randn({ 10, 400, 432 }));
     info(layer.ptr());
     std::cout << output.sizes() << std::endl;
 }
 
 [[maybe_unused]] static void test_audio_head() {
     chobits::nn::AudioHeadBlock layer;
-    auto output = layer->forward(torch::randn({ 10, 800 }));
+    auto output = layer->forward(torch::randn({ 10, 10, 17, 101 }));
     info(layer.ptr());
     std::cout << output.sizes() << std::endl;
+    
 }
 
 [[maybe_unused]] static void test_video_head() {
     chobits::nn::VideoHeadBlock layer;
-    auto output = layer->forward(torch::randn({ 1, 3, 360, 640 }));
+    auto output = layer->forward(torch::randn({ 10, 10, 3, 360, 640 }));
     info(layer.ptr());
     std::cout << output.sizes() << std::endl;
 }
 
-[[maybe_unused]] static void test_media_prob() {
-    chobits::nn::MediaProbBlock layer(64, 576);
+[[maybe_unused]] static void test_media_muxer() {
+    chobits::nn::MediaMuxerBlock layer(432, 24);
     auto output = layer->forward(
-        torch::randn({ 1, 400, 64  }),
-        torch::randn({ 1, 400, 576 })
+        torch::randn({ 1, 400, 432 }),
+        torch::randn({ 1, 400,  24 })
     );
     info(layer.ptr());
     std::cout << output.sizes() << std::endl;
 }
 
-[[maybe_unused]] static void test_media_mix() {
-    chobits::nn::MediaMixBlock layer;
+[[maybe_unused]] static void test_media_mixer() {
+    chobits::nn::MediaMixerBlock layer;
     auto output = layer->forward(
-        torch::randn({ 1, 400, 64  }),
-        torch::randn({ 1, 400, 576 })
+        torch::randn({ 1, 400,  24 }),
+        torch::randn({ 1, 400, 432 })
     );
     info(layer.ptr());
     std::cout << output.sizes() << std::endl;
@@ -83,7 +85,7 @@ static void info(std::shared_ptr<torch::nn::Module> layer) {
 
 [[maybe_unused]] static void test_audio_tail() {
     chobits::nn::AudioTailBlock layer;
-    auto output = layer->forward(torch::randn({ 1, 800, 64 }));
+    auto output = layer->forward(torch::randn({ 1, 400, 24 }));
     info(layer.ptr());
     std::cout << output.sizes() << std::endl;
 }
@@ -148,17 +150,21 @@ static void info(std::shared_ptr<torch::nn::Module> layer) {
 }
 
 int main() {
-    // test_gru();
-    // test_lstm();
-    // test_res_net();
-    // test_attention();
-    // test_audio_head();
-    // test_video_head();
-    // test_media_prob();
-    // test_media_mix();
-    test_audio_tail();
-    // test_model();
-    // test_model_eval();
-    // test_model_train();
+    try {
+        // test_gru();
+        // test_lstm();
+        // test_res_net();
+        // test_attention();
+        // test_audio_head();
+        // test_video_head();
+        // test_media_muxer();
+        // test_media_mixer();
+        test_audio_tail();
+        // test_model();
+        // test_model_eval();
+        // test_model_train();
+    } catch(const std::exception& e) {
+        std::printf("异常内容：%s", e.what());
+    }
     return 0;
 }

@@ -52,8 +52,6 @@ class STFTAudio:
     def compute_mask(self, stft_mix):
         """基于频谱掩码简单分离"""
         mag_mix, pha_mix = self.mag_pha_decomposition(stft_mix)
-        # self.visualize(mag_mix)
-        # self.visualize(pha_mix)
         # -
         mask = torch.zeros([2, 201, 1]).float()
         mask[:,10:,:] = 1.0
@@ -68,9 +66,10 @@ class STFTAudio:
     def visualize(self, stft, title = "Spectrogram"):
         """可视化频谱图"""
         mag = torch.abs(stft).squeeze()
+#       pha = torch.angle(stft).squeeze()
         plt.figure(figsize = (12, 6))
         plt.imshow(
-            (10 * torch.log10(mag + 1e-8)).numpy()[0],
+            (20 * torch.log10(mag + 1e-8)).numpy()[0],
             origin = "lower",
             aspect = "auto",
             cmap   = "viridis"
@@ -85,11 +84,11 @@ class STFTAudio:
 def main():
     audio = STFTAudio(n_fft = 400, hop_length = 80, win_length = 400)
     waveform, sample_rate = audio.load_audio("D:/tmp/dzht.wav")
-    print(f"音频数据：{waveform.shape} {sample_rate} {torch.max(waveform)} {torch.min(waveform)}")
+    print(f"音频数据：{waveform.shape} {sample_rate} {waveform.max()} {waveform.min()}")
     stft_mix = audio.compute_stft(waveform)
-    # audio.visualize(stft_mix, "Audio Spectrogram")
+    audio.visualize(stft_mix, "Audio Spectrogram")
     stft_mix = audio.compute_mask(stft_mix)
-    # audio.visualize(stft_mix, "Audio Spectrogram")
+    audio.visualize(stft_mix, "Audio Spectrogram")
     waveform = audio.compute_istft(stft_mix)
     print(f"音频数据：{waveform.shape} {sample_rate}")
     torchaudio.save("D:/tmp/dzht_.wav", waveform, sample_rate)

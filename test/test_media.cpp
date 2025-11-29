@@ -12,9 +12,9 @@
     std::ofstream stream_out("D:/tmp/dzht_.pcm", std::ios::binary);
     int size = 800;
     std::vector<short> pcm(size);
-    const int n_fft    = 128;
-    const int hop_size = 32;
-    const int win_size = 128;
+    const int n_fft    = 200;
+    const int hop_size = 50;
+    const int win_size = 200;
     auto wind = torch::hann_window(win_size);
     while(stream_in.read((char*) pcm.data(), sizeof(short) * size)) {
         auto tensor = torch::from_blob(pcm.data(), { 1, size }, torch::kShort).to(torch::kFloat32).div(32768.0);
@@ -62,12 +62,13 @@
         chobits::media::open_media();
     });
     while(chobits::running) {
-        auto [success, audio, video, pred] = chobits::media::get_data(false);
+        auto [success, stft, audio, video, label] = chobits::media::get_data();
+        std::cout << stft .sizes() << std::endl;
         std::cout << audio.sizes() << std::endl;
         std::cout << video.sizes() << std::endl;
-        std::cout << pred .sizes() << std::endl;
+        std::cout << label.sizes() << std::endl;
         if(success) {
-            chobits::media::set_data(audio.squeeze().cpu());
+            chobits::media::set_data(audio.cpu());
         } else {
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
         }
@@ -77,6 +78,7 @@
 }
 
 int main() {
+    // test_sftf();
     test_media();
     return 0;
 }
