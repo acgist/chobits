@@ -50,7 +50,7 @@ static void info(std::shared_ptr<torch::nn::Module> layer) {
 
 [[maybe_unused]] static void test_audio_head() {
     chobits::nn::AudioHeadBlock layer;
-    auto output = layer->forward(torch::randn({ 10, 10, 17, 101 }));
+    auto output = layer->forward(torch::randn({ 10, 10, 26, 65 }));
     info(layer.ptr());
     std::cout << output.sizes() << std::endl;
     
@@ -159,9 +159,9 @@ int main() {
         // test_video_head();
         // test_media_muxer();
         // test_media_mixer();
-        test_audio_tail();
+        // test_audio_tail();
         // test_model();
-        // test_model_eval();
+        test_model_eval();
         // test_model_train();
     } catch(const std::exception& e) {
         std::printf("异常内容：%s", e.what());

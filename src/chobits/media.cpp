@@ -671,11 +671,15 @@ static torch::Tensor audio_stft(const torch::Tensor& audio) {
     const int n_fft    = 200;
     const int hop_size = 50;
     const int win_size = 200;
+    // 800 / 50 + 1 = 17
+    // 200 / 2  + 1 = 101
+    // 800 / 32 + 1 = 26
+    // 128 / 2  + 1 = 65
     static auto wind = torch::hann_window(win_size).to(audio.device());
     auto com = torch::stft(audio, n_fft, hop_size, win_size, wind, true, "reflect", false, std::nullopt, true);
 //  auto rel = torch::view_as_real(com);
     auto mag = torch::abs(com);
-    auto pha = torch::angle(com);
+//  auto pha = torch::angle(com);
          mag = 20 * torch::log10(mag + 1e-8);
 //       pha = pha / PI;
 //  return torch::stack({ mag, pha }, 0).permute({ 0, 2, 1 });

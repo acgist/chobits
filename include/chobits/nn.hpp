@@ -15,14 +15,15 @@
 #ifndef CHOBITS_NN_HPP
 #define CHOBITS_NN_HPP
 
-#include "torch/nn.h"
-
 #include "chobits.hpp"
 
-namespace chobits::nn {
+#include "torch/nn.h"
 
-using act = torch::nn::Tanh; // ELU GELU ReLU SiLU Tanh
+using act = torch::nn::GELU; // ELU GELU ReLU SiLU Tanh
+
 using shp = std::vector<int64_t>;
+
+namespace chobits::nn {
 
 /**
  * GRU
@@ -236,8 +237,8 @@ public:
         const shp kernel   = std::vector<int64_t>{ 3, 3 },
         const shp padding  = std::vector<int64_t>{ 1, 1 },
         const shp dilation = std::vector<int64_t>{ 1, 1 },
-        const int height   = 17,
-        const int width    = 101
+        const int height   = 26,
+        const int width    = 65
     ) {
         int64_t out = (height / pool[0] / pool[2] / pool[4]) * (width / pool[1] / pool[3] / pool[5]);
         this->head = this->register_module("head", torch::nn::Sequential(
@@ -246,21 +247,21 @@ public:
             act(),
             torch::nn::Conv2d(torch::nn::Conv2dOptions(channel[1], channel[1], kernel).dilation(dilation).padding(padding).bias(false)),
             act(),
-            torch::nn::AvgPool2d(torch::nn::AvgPool2dOptions({ pool[0], pool[1] })),
+            torch::nn::MaxPool2d(torch::nn::MaxPool2dOptions({ pool[0], pool[1] })),
             // -
             torch::nn::BatchNorm2d(torch::nn::BatchNorm2dOptions(channel[1])),
             torch::nn::Conv2d(torch::nn::Conv2dOptions(channel[1], channel[2], kernel).dilation(dilation).padding(padding).bias(false)),
             act(),
             torch::nn::Conv2d(torch::nn::Conv2dOptions(channel[2], channel[2], kernel).dilation(dilation).padding(padding).bias(false)),
             act(),
-            torch::nn::AvgPool2d(torch::nn::AvgPool2dOptions({ pool[2], pool[3] })),
+            torch::nn::MaxPool2d(torch::nn::MaxPool2dOptions({ pool[2], pool[3] })),
             // -
             torch::nn::BatchNorm2d(torch::nn::BatchNorm2dOptions(channel[2])),
             torch::nn::Conv2d(torch::nn::Conv2dOptions(channel[2], channel[3], kernel).dilation(dilation).padding(padding).bias(false)),
             act(),
             torch::nn::Conv2d(torch::nn::Conv2dOptions(channel[3], channel[3], kernel).dilation(dilation).padding(padding).bias(false)),
             act(),
-            torch::nn::AvgPool2d(torch::nn::AvgPool2dOptions({ pool[4], pool[5] })),
+            torch::nn::MaxPool2d(torch::nn::MaxPool2dOptions({ pool[4], pool[5] })),
             // -
             torch::nn::Flatten(torch::nn::FlattenOptions().start_dim(2)),
             // -
@@ -311,28 +312,28 @@ public:
             act(),
             torch::nn::Conv3d(torch::nn::Conv3dOptions(channel[1], channel[1], kernel).dilation(dilation).padding(padding).bias(false)),
             act(),
-            torch::nn::AvgPool3d(torch::nn::AvgPool3dOptions({ pool[0], pool[1], pool[2] })),
+            torch::nn::MaxPool3d(torch::nn::MaxPool3dOptions({ pool[0], pool[1], pool[2] })),
             // -
             torch::nn::BatchNorm3d(torch::nn::BatchNorm3dOptions(channel[1])),
             torch::nn::Conv3d(torch::nn::Conv3dOptions(channel[1], channel[2], kernel).dilation(dilation).padding(padding).bias(false)),
             act(),
             torch::nn::Conv3d(torch::nn::Conv3dOptions(channel[2], channel[2], kernel).dilation(dilation).padding(padding).bias(false)),
             act(),
-            torch::nn::AvgPool3d(torch::nn::AvgPool3dOptions({ pool[3], pool[4], pool[5] })),
+            torch::nn::MaxPool3d(torch::nn::MaxPool3dOptions({ pool[3], pool[4], pool[5] })),
             // -
             torch::nn::BatchNorm3d(torch::nn::BatchNorm3dOptions(channel[2])),
             torch::nn::Conv3d(torch::nn::Conv3dOptions(channel[2], channel[3], kernel).dilation(dilation).padding(padding).bias(false)),
             act(),
             torch::nn::Conv3d(torch::nn::Conv3dOptions(channel[3], channel[3], kernel).dilation(dilation).padding(padding).bias(false)),
             act(),
-            torch::nn::AvgPool3d(torch::nn::AvgPool3dOptions({ pool[6], pool[7], pool[8] })),
+            torch::nn::MaxPool3d(torch::nn::MaxPool3dOptions({ pool[6], pool[7], pool[8] })),
             // -
             torch::nn::BatchNorm3d(torch::nn::BatchNorm3dOptions(channel[3])),
             torch::nn::Conv3d(torch::nn::Conv3dOptions(channel[3], channel[4], kernel).dilation(dilation).padding(padding).bias(false)),
             act(),
             torch::nn::Conv3d(torch::nn::Conv3dOptions(channel[4], channel[4], kernel).dilation(dilation).padding(padding).bias(false)),
             act(),
-            torch::nn::AvgPool3d(torch::nn::AvgPool3dOptions({ pool[9], pool[10], pool[11] })),
+            torch::nn::MaxPool3d(torch::nn::MaxPool3dOptions({ pool[9], pool[10], pool[11] })),
             // -
             torch::nn::Flatten(torch::nn::FlattenOptions().start_dim(2)),
             // -
@@ -395,8 +396,7 @@ public:
     
 public:
     torch::Tensor forward(const torch::Tensor& media_1, const torch::Tensor& media_2) {
-        return this->muxer->forward(media_1 + this->embedding->forward(media_2));
-        // return this->muxer->forward(media_1 + this->embedding->forward(media_2)) + media_1;
+        return this->muxer->forward(media_1 + this->embedding->forward(media_2)) + media_1;
     }
 
 };
@@ -453,8 +453,8 @@ public:
     
 public:
     torch::Tensor forward(const torch::Tensor& audio, const torch::Tensor& video) {
-        torch::Tensor audio_in  = audio;
-        torch::Tensor video_in  = video;
+        torch::Tensor audio_in = audio;
+        torch::Tensor video_in = video;
         auto audios = this->audio->items();
         auto videos = this->video->items();
         for (
