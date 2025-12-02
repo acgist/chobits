@@ -370,7 +370,8 @@ private:
 public:
     MediaMuxerBlockImpl(
         const int media_1_in,
-        const int media_2_in
+        const int media_2_in,
+        const int channel = 400
     ) {
         this->embedding = this->register_module("embedding", torch::nn::Sequential(
             torch::nn::LayerNorm(torch::nn::LayerNormOptions(std::vector<int64_t>{ media_2_in })),
@@ -382,11 +383,14 @@ public:
         ));
         this->muxer = this->register_module("muxer", torch::nn::Sequential(
             torch::nn::LayerNorm(torch::nn::LayerNormOptions(std::vector<int64_t>{ media_1_in })),
-            chobits::nn::AttentionBlock(media_1_in),
+            chobits::nn::ResNetBlock(channel, channel, std::vector<int64_t>{ media_1_in }),
             act(),
             torch::nn::LayerNorm(torch::nn::LayerNormOptions(std::vector<int64_t>{ media_1_in })),
-            chobits::nn::GRUBlock(media_1_in, media_1_in),
+            chobits::nn::AttentionBlock(media_1_in),
             act()
+            // torch::nn::LayerNorm(torch::nn::LayerNormOptions(std::vector<int64_t>{ media_1_in })),
+            // chobits::nn::GRUBlock(media_1_in, media_1_in),
+            // act()
         ));
     }
     ~MediaMuxerBlockImpl() {
@@ -396,7 +400,7 @@ public:
     
 public:
     torch::Tensor forward(const torch::Tensor& media_1, const torch::Tensor& media_2) {
-        return this->muxer->forward(media_1 + this->embedding->forward(media_2)) + media_1;
+        return this->muxer->forward(media_1 + this->embedding->forward(media_2));
     }
 
 };
@@ -416,9 +420,11 @@ private:
 
 public:
     MediaMixerBlockImpl(
-        const int audio_in   = 24,
-        const int video_in   = 432,
-        const int num_layers = 5
+        const int audio_in    = 24,
+        const int video_in    = 432,
+        const int num_layers  = 3,
+        const int in_channel  = 400,
+        const int out_channel = 800
     ) {
         torch::OrderedDict<std::string, std::shared_ptr<Module>> audio;
         torch::OrderedDict<std::string, std::shared_ptr<Module>> video;
@@ -436,6 +442,9 @@ public:
         this->video = this->register_module("video", torch::nn::ModuleDict(video));
         this->muxer = this->register_module("muxer", chobits::nn::MediaMuxerBlock(audio_in, video_in));
         this->mixer = this->register_module("mixer", torch::nn::Sequential(
+            torch::nn::LayerNorm(torch::nn::LayerNormOptions(std::vector<int64_t>{ audio_in })),
+            chobits::nn::ResNetBlock(in_channel, out_channel, std::vector<int64_t>{ audio_in }),
+            act(),
             torch::nn::LayerNorm(torch::nn::LayerNormOptions(std::vector<int64_t>{ audio_in })),
             chobits::nn::AttentionBlock(audio_in),
             act(),
@@ -486,21 +495,11 @@ private:
 
 public:
     AudioTailBlockImpl(
-        const int in          = 24,
-        const int out         = 1,
-        const int in_channel  = 400,
-        const int out_channel = 800
+        const int in  = 24,
+        const int out = 1
     ) {
         this->tail = this->register_module("tail", torch::nn::Sequential(
-            torch::nn::LayerNorm(torch::nn::LayerNormOptions(std::vector<int64_t>{ in })),
-            chobits::nn::ResNetBlock(in_channel, out_channel, std::vector<int64_t>{ in }),
-            act(),
-            torch::nn::LayerNorm(torch::nn::LayerNormOptions(std::vector<int64_t>{ in })),
-            chobits::nn::AttentionBlock(in),
-            act(),
-            torch::nn::LayerNorm(torch::nn::LayerNormOptions(std::vector<int64_t>{ in })),
-            chobits::nn::GRUBlock(in, in),
-            act(),
+            // -
             torch::nn::Linear(torch::nn::LinearOptions(in, out).bias(false)),
             // -
             torch::nn::Flatten(torch::nn::FlattenOptions().start_dim(1))
