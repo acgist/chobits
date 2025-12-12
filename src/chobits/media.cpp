@@ -381,6 +381,7 @@ bool chobits::media::open_device() {
 void chobits::media::stop_all() {
     std::printf("关闭媒体\n");
     std::unique_lock<std::mutex> lock(dataset.mutex);
+    dataset.stft .clear();
     dataset.audio.clear();
     dataset.video.clear();
     dataset.condition.notify_all();
@@ -668,11 +669,9 @@ static std::vector<std::string> list_train_dataset() {
 }
 
 static torch::Tensor audio_stft(const torch::Tensor& audio) {
-    const int n_fft    = 200;
-    const int hop_size = 50;
-    const int win_size = 200;
-    // 800 / 50 + 1 = 17
-    // 200 / 2  + 1 = 101
+    const int n_fft    = 128;
+    const int hop_size = 32;
+    const int win_size = 128;
     // 800 / 32 + 1 = 26
     // 128 / 2  + 1 = 65
     static auto wind = torch::hann_window(win_size).to(audio.device());
