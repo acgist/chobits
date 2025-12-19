@@ -137,7 +137,7 @@ void chobits::model::Trainer::train(float& loss_val) {
     video = video.to(trainer_state.device);
     label = label.to(trainer_state.device);
     auto pred = trainer_state.model->forward(stft, video);
-    auto loss = torch::mse_loss(pred, label);
+    auto loss = torch::l1_loss(pred, label);
     loss.backward();
     loss_val += loss.template item<float>();
     if(chobits::mode_play) {

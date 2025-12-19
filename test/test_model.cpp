@@ -108,7 +108,7 @@ static void info(std::shared_ptr<torch::nn::Module> layer) {
         #if _WIN32
         chobits::media::open_file("D:/tmp/video.mp4");
         #else
-        chobits::media::open_file("video/32429377729-1-192.mp4");
+        chobits::media::open_file("video.mp4");
         #endif
     });
     std::ofstream stream;
@@ -161,11 +161,11 @@ int main() {
         // test_res_net();
         // test_res_net_2d();
         // test_res_net_3d();
-        test_audio_head();
-        test_video_head();
+        // test_audio_head();
+        // test_video_head();
         // test_media_muxer();
         test_media_mixer();
-        test_audio_tail();
+        // test_audio_tail();
         // test_model();
         // test_model_eval();
         // test_model_train();

@@ -25,7 +25,7 @@ struct PlayerState {
     };
 };
 
-static PlayerState player_state = {};
+static PlayerState player_state = { };
 
 static bool init_audio_player();
 static bool init_video_player();
