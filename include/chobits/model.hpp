@@ -21,9 +21,6 @@
 
 namespace chobits::model {
 
-/**
- * 模型训练
- */
 class Trainer {
 
 private:

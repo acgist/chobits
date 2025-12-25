@@ -38,7 +38,6 @@ struct Dataset {
     size_t audio_size = 2ULL * chobits::audio_sample_rate / chobits::per_wind_second; // 2ULL = 16bits
     std::mutex mutex;
     std::condition_variable condition;
-    std::vector<std::vector<torch::Tensor>> stft;
     std::vector<std::vector<torch::Tensor>> audio;
     std::vector<std::vector<torch::Tensor>> video;
 };
@@ -58,8 +57,6 @@ static bool audio_to_tensor(std::vector<torch::Tensor>& audio,                  
 static bool video_to_tensor(std::vector<torch::Tensor>& audio, std::vector<torch::Tensor>& video, SwsContext* sws, AVFrame* frame);
 
 static std::vector<std::string> list_train_dataset();
-
-static torch::Tensor audio_stft(const torch::Tensor& audio);
 
 bool chobits::media::open_media() {
     if(chobits::mode_file) {
@@ -381,14 +378,12 @@ bool chobits::media::open_device() {
 void chobits::media::stop_all() {
     std::printf("关闭媒体\n");
     std::unique_lock<std::mutex> lock(dataset.mutex);
-    dataset.stft .clear();
     dataset.audio.clear();
     dataset.video.clear();
     dataset.condition.notify_all();
 }
 
-std::tuple<bool, at::Tensor, at::Tensor, at::Tensor, at::Tensor> chobits::media::get_data() {
-    std::vector<torch::Tensor> stft;
+std::tuple<bool, at::Tensor, at::Tensor, at::Tensor> chobits::media::get_data() {
     std::vector<torch::Tensor> audio;
     std::vector<torch::Tensor> video;
     std::vector<torch::Tensor> label;
@@ -409,23 +404,14 @@ std::tuple<bool, at::Tensor, at::Tensor, at::Tensor, at::Tensor> chobits::media:
                 );
         });
         if(!chobits::running) {
-            return { false, {}, {}, {}, {} };
-        }
-        if(dataset.stft.empty()) {
-            dataset.stft.resize(chobits::batch_size);
+            return { false, {}, {}, {} };
         }
         for(int index = 0; index < chobits::batch_size; ++index) {
-            auto& dataset_stft  = dataset.stft [index];
             auto& dataset_audio = dataset.audio[index];
             auto& dataset_video = dataset.video[index];
-            for(int jndex = dataset_stft.size(); jndex < chobits::batch_length; ++jndex) {
-                dataset_stft.push_back(audio_stft(dataset_audio[jndex]));
-            }
-            stft .push_back(torch::stack(std::vector<torch::Tensor>(dataset_stft .begin(), dataset_stft .begin() + chobits::batch_length)));
             audio.push_back(torch::stack(std::vector<torch::Tensor>(dataset_audio.begin(), dataset_audio.begin() + chobits::batch_length)));
             video.push_back(torch::stack(std::vector<torch::Tensor>(dataset_video.begin(), dataset_video.begin() + chobits::batch_length)));
             label.push_back(dataset_audio[chobits::batch_length]);
-            dataset_stft .erase(dataset_stft .begin());
             dataset_audio.erase(dataset_audio.begin());
             dataset_video.erase(dataset_video.begin());
         }
@@ -433,7 +419,6 @@ std::tuple<bool, at::Tensor, at::Tensor, at::Tensor, at::Tensor> chobits::media:
     }
     return {
         true,
-        torch::stack(stft),
         torch::stack(audio),
         torch::stack(video),
         torch::stack(label)
@@ -441,11 +426,7 @@ std::tuple<bool, at::Tensor, at::Tensor, at::Tensor, at::Tensor> chobits::media:
 }
 
 std::vector<short> chobits::media::set_data(const torch::Tensor& tensor) {
-    #if CHOBITS_NORM == 0
-    auto pcm_tensor = tensor.mul(2.0).sub(1.0).mul(audio_normalization).to(torch::kShort);
-    #elif CHOBITS_NORM == 1
     auto pcm_tensor = tensor.mul(audio_normalization).to(torch::kShort);
-    #endif
     auto pcm_size = pcm_tensor.size(-1);
     auto pcm_data = reinterpret_cast<short*>(pcm_tensor.data_ptr());
     std::vector<short> pcm;
@@ -581,11 +562,7 @@ static bool audio_to_tensor(std::vector<torch::Tensor>& audio, SwrContext* swr, 
                 auto pcm_data = reinterpret_cast<short*>(audio_buffer.data());
                 auto pcm_size = int(dataset.audio_size / sizeof(short));
                 auto tensor   = torch::from_blob(pcm_data, { pcm_size }, torch::kShort).to(torch::kFloat32)
-                #if CHOBITS_NORM == 0
-                .div(audio_normalization).add(1.0).div(2.0);
-                #elif CHOBITS_NORM == 1
                 .div(audio_normalization);
-                #endif
                 audio.push_back(std::move(tensor));
             }
             remain -= dataset.audio_size;
@@ -634,11 +611,7 @@ static bool video_to_tensor(std::vector<torch::Tensor>& audio, std::vector<torch
                     { chobits::video_height, chobits::video_width, 3 },
                     torch::kUInt8
                 ).to(torch::kFloat32)
-                #if CHOBITS_NORM == 0
-                .div(video_normalization)
-                #elif CHOBITS_NORM == 1
                 .div(video_normalization).mul(2.0).sub(1.0)
-                #endif
                 .permute({ 2, 0, 1 }).contiguous();
                 video.push_back(std::move(tensor));
             }
@@ -666,21 +639,4 @@ static std::vector<std::string> list_train_dataset() {
         // -
     }
     return files;
-}
-
-static torch::Tensor audio_stft(const torch::Tensor& audio) {
-    const int n_fft    = 128;
-    const int hop_size = 32;
-    const int win_size = 128;
-    // 800 / 32 + 1 = 26
-    // 128 / 2  + 1 = 65
-    static auto wind = torch::hann_window(win_size).to(audio.device());
-    auto com = torch::stft(audio, n_fft, hop_size, win_size, wind, true, "reflect", false, std::nullopt, true);
-//  auto rel = torch::view_as_real(com);
-    auto mag = torch::abs(com);
-//  auto pha = torch::angle(com);
-         mag = 20 * torch::log10(mag + 1e-8);
-//       pha = pha / PI;
-//  return torch::stack({ mag, pha }, 0).permute({ 0, 2, 1 });
-    return mag.permute({ 1, 0 });
 }

@@ -20,29 +20,22 @@ static void info(std::shared_ptr<torch::nn::Module> layer) {
 }
 
 [[maybe_unused]] static void test_gru() {
-    chobits::nn::GRUBlock layer(144, 144);
-    auto output = layer->forward(torch::randn({ 10, 400, 144 }));
+    chobits::nn::GRUBlock layer(576, 576);
+    auto output = layer->forward(torch::randn({ 10, 256, 576 }));
     info(layer.ptr());
     std::cout << output.sizes() << std::endl;
 }
 
 [[maybe_unused]] static void test_attention() {
-    chobits::nn::AttentionBlock layer(144);
-    auto output = layer->forward(torch::randn({ 10, 400, 144 }));
+    chobits::nn::AttentionBlock layer(576, 576, 576, 576);
+    auto output = layer->forward(torch::randn({ 10, 256, 576 }), torch::randn({ 10, 256, 576 }), torch::randn({ 10, 256, 576 }));
     info(layer.ptr());
     std::cout << output.sizes() << std::endl;
 }
 
 [[maybe_unused]] static void test_res_net() {
-    chobits::nn::ResNetBlock layer(10, 100, 144);
-    auto output = layer->forward(torch::randn({ 10, 10, 144 }));
-    info(layer.ptr());
-    std::cout << output.sizes() << std::endl;
-}
-
-[[maybe_unused]] static void test_res_net_2d() {
-    chobits::nn::ResNet2dBlock layer(10, 100, 10, std::vector<int64_t>{ 2, 2 });
-    auto output = layer->forward(torch::randn({ 10, 10, 26, 65 }));
+    chobits::nn::ResNetBlock layer(10, 100, 576);
+    auto output = layer->forward(torch::randn({ 10, 10, 576 }));
     info(layer.ptr());
     std::cout << output.sizes() << std::endl;
 }
@@ -56,7 +49,7 @@ static void info(std::shared_ptr<torch::nn::Module> layer) {
 
 [[maybe_unused]] static void test_audio_head() {
     chobits::nn::AudioHeadBlock layer;
-    auto output = layer->forward(torch::randn({ 10, 10, 26, 65 }));
+    auto output = layer->forward(torch::randn({ 10, 10, 800 }));
     info(layer.ptr());
     std::cout << output.sizes() << std::endl;
 }
@@ -68,21 +61,11 @@ static void info(std::shared_ptr<torch::nn::Module> layer) {
     std::cout << output.sizes() << std::endl;
 }
 
-[[maybe_unused]] static void test_media_muxer() {
-    chobits::nn::MediaMuxerBlock layer(144, 96);
-    auto output = layer->forward(
-        torch::randn({ 10, 400, 144 }),
-        torch::randn({ 10, 400,  96 })
-    );
-    info(layer.ptr());
-    std::cout << output.sizes() << std::endl;
-}
-
 [[maybe_unused]] static void test_media_mixer() {
     chobits::nn::MediaMixerBlock layer;
     auto output = layer->forward(
-        torch::randn({ 10, 400,     96 }),
-        torch::randn({ 10, 400, 3, 144 })
+        torch::randn({ 10, 256,     416 }),
+        torch::randn({ 10, 256, 3 * 576 })
     );
     info(layer.ptr());
     std::cout << output.sizes() << std::endl;
@@ -90,7 +73,7 @@ static void info(std::shared_ptr<torch::nn::Module> layer) {
 
 [[maybe_unused]] static void test_audio_tail() {
     chobits::nn::AudioTailBlock layer;
-    auto output = layer->forward(torch::randn({ 10, 400, 96 }));
+    auto output = layer->forward(torch::randn({ 10, 256, 400 }));
     info(layer.ptr());
     std::cout << output.sizes() << std::endl;
 }
@@ -159,13 +142,11 @@ int main() {
         // test_gru();
         // test_attention();
         // test_res_net();
-        // test_res_net_2d();
         // test_res_net_3d();
         // test_audio_head();
         // test_video_head();
-        // test_media_muxer();
-        test_media_mixer();
-        // test_audio_tail();
+        // test_media_mixer();
+        test_audio_tail();
         // test_model();
         // test_model_eval();
         // test_model_train();

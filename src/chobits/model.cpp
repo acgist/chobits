@@ -127,16 +127,15 @@ void chobits::model::Trainer::train() {
 }
 
 void chobits::model::Trainer::train(float& loss_val) {
-    auto [success, stft, audio, video, label] = chobits::media::get_data();
+    auto [success, audio, video, label] = chobits::media::get_data();
     if(!success) {
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
         return;
     }
-    stft  = stft .to(trainer_state.device);
-//  audio = audio.to(trainer_state.device);
+    audio = audio.to(trainer_state.device);
     video = video.to(trainer_state.device);
     label = label.to(trainer_state.device);
-    auto pred = trainer_state.model->forward(stft, video);
+    auto pred = trainer_state.model->forward(audio, video);
     auto loss = torch::l1_loss(pred, label);
     loss.backward();
     loss_val += loss.template item<float>();
@@ -151,16 +150,15 @@ void chobits::model::Trainer::eval(std::function<void(const std::vector<short>&)
         trainer_state.model->eval();
         torch::NoGradGuard no_grad_guard;
         while(chobits::running) {
-            auto [success, stft, audio, video, label] = chobits::media::get_data();
+            auto [success, audio, video, label] = chobits::media::get_data();
             if(!success) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(100));
                 continue;
             }
-            stft  = stft .to(trainer_state.device);
-//          audio = audio.to(trainer_state.device);
+            audio = audio.to(trainer_state.device);
             video = video.to(trainer_state.device);
 //          label = label.to(trainer_state.device);
-            auto pred = trainer_state.model->forward(stft, video);
+            auto pred = trainer_state.model->forward(audio, video);
             auto data = chobits::media::set_data(pred.cpu());
             if(callback) {
                 callback(data);

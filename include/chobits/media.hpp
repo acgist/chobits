@@ -33,7 +33,7 @@ extern bool open_device();
 
 extern void stop_all();
 
-extern std::tuple<bool, at::Tensor, at::Tensor, at::Tensor, at::Tensor> get_data();
+extern std::tuple<bool, at::Tensor, at::Tensor, at::Tensor> get_data();
 extern std::vector<short> set_data(const at::Tensor& tensor);
 
 } // END OF chobits::media
