@@ -90,25 +90,14 @@ R"(
         }
     }
     std::printf(
-R"(
-丢弃模式：%d
-验证模式：%d
-文件模式：%d
-播放模式：%d
-训练批次大小：%d
-训练批次长度：%d
-训练批次轮数：%d
-训练数据集：%s
-每秒窗口：%d
-音频采样率：%d
-音频通道：%d
-视频宽度：%d
-视频高度：%d
-)",
-    chobits::mode_drop, chobits::mode_eval, chobits::mode_file, chobits::mode_play,
-    chobits::batch_size, chobits::batch_length, chobits::train_epoch, chobits::train_dataset.c_str(),
-    chobits::per_wind_second, chobits::audio_sample_rate, chobits::audio_nb_channels,
-    chobits::video_width, chobits::video_height
+        "丢弃模式：%d 验证模式：%d 文件模式：%d 播放模式：%d "
+        "训练批次大小：%d 训练批次长度：%d 训练批次轮数：%d 训练数据集：%s "
+        "音频每秒窗口：%d 音频采样率：%d 音频通道：%d "
+        "视频宽度：%d 视频高度：%d\n",
+        chobits::mode_drop, chobits::mode_eval, chobits::mode_file, chobits::mode_play,
+        chobits::batch_size, chobits::batch_length, chobits::train_epoch, chobits::train_dataset.c_str(),
+        chobits::per_wind_second, chobits::audio_sample_rate, chobits::audio_nb_channels,
+        chobits::video_width, chobits::video_height
     );
     return true;
 }

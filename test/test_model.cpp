@@ -12,69 +12,84 @@ static void info(std::shared_ptr<torch::nn::Module> layer) {
     int64_t total_numel = 0;
     for(const auto& parameter : layer->named_parameters()) {
         ++layer_size;
-        std::printf("参数数量：%64s = %" PRId64 "\n", parameter.key().c_str(), parameter.value().numel());
+        std::printf("参数数量：%32s = %" PRId64 "\n", parameter.key().c_str(), parameter.value().numel());
         total_numel += parameter.value().numel();
     }
     std::printf("层数总量：%d\n", layer_size);
     std::printf("参数总量：%" PRId64 "\n", total_numel);
 }
 
-[[maybe_unused]] static void test_gru() {
-    chobits::nn::GRUBlock layer(576, 576);
-    auto output = layer->forward(torch::randn({ 10, 256, 576 }));
+[[maybe_unused]] static void test_res_net_1d() {
+    torch::NoGradGuard no_grad_guard;
+    // chobits::nn::ResNetBlock1d layer(10, 64, 800);
+    chobits::nn::ResNetBlock1d layer(10, 64, 800, 2);
     info(layer.ptr());
+    auto output = layer->forward(torch::randn({ 10, 10, 800 }));
+    std::cout << output.sizes() << std::endl;
+}
+
+[[maybe_unused]] static void test_res_net_2d() {
+    torch::NoGradGuard no_grad_guard;
+    // chobits::nn::ResNet2dBlock layer(10, 64, std::vector<int64_t>{ 360, 640 });
+    chobits::nn::ResNet2dBlock layer(10, 64, std::vector<int64_t>{ 360, 640 }, std::vector<int64_t>{ 2, 2 });
+    info(layer.ptr());
+    auto output = layer->forward(torch::randn({ 10, 10, 360, 640 }));
+    std::cout << output.sizes() << std::endl;
+}
+
+[[maybe_unused]] static void test_gru() {
+    torch::NoGradGuard no_grad_guard;
+    chobits::nn::GRUBlock layer(880, 880);
+    info(layer.ptr());
+    auto output = layer->forward(torch::randn({ 10, 256, 880 }));
     std::cout << output.sizes() << std::endl;
 }
 
 [[maybe_unused]] static void test_attention() {
-    chobits::nn::AttentionBlock layer(576, 576, 576, 576);
-    auto output = layer->forward(torch::randn({ 10, 256, 576 }), torch::randn({ 10, 256, 576 }), torch::randn({ 10, 256, 576 }));
+    torch::NoGradGuard no_grad_guard;
+    chobits::nn::AttentionBlock layer(880, 880, 880, 880);
     info(layer.ptr());
-    std::cout << output.sizes() << std::endl;
-}
-
-[[maybe_unused]] static void test_res_net() {
-    chobits::nn::ResNetBlock layer(10, 100, 576);
-    auto output = layer->forward(torch::randn({ 10, 10, 576 }));
-    info(layer.ptr());
-    std::cout << output.sizes() << std::endl;
-}
-
-[[maybe_unused]] static void test_res_net_3d() {
-    chobits::nn::ResNet3dBlock layer(10, 100, 10, std::vector<int64_t>{ 1, 5, 5 });
-    auto output = layer->forward(torch::randn({ 10, 10, 3, 360, 640 }));
-    info(layer.ptr());
+    auto output = layer->forward(
+        torch::randn({ 10, 256, 880 }),
+        torch::randn({ 10, 256, 880 }),
+        torch::randn({ 10, 256, 880 })
+    );
     std::cout << output.sizes() << std::endl;
 }
 
 [[maybe_unused]] static void test_audio_head() {
+    torch::NoGradGuard no_grad_guard;
     chobits::nn::AudioHeadBlock layer;
-    auto output = layer->forward(torch::randn({ 10, 10, 800 }));
     info(layer.ptr());
+    auto output = layer->forward(torch::randn({ 10, 10, 800 }));
     std::cout << output.sizes() << std::endl;
 }
 
 [[maybe_unused]] static void test_video_head() {
-    chobits::nn::VideoHeadBlock layer;
-    auto output = layer->forward(torch::randn({ 10, 10, 3, 360, 640 }));
+    torch::NoGradGuard no_grad_guard;
+    chobits::nn::VideoHeadBlock layer(3);
     info(layer.ptr());
+    auto output = layer->forward(torch::randn({ 10, 3, 360, 640 }));
     std::cout << output.sizes() << std::endl;
 }
 
 [[maybe_unused]] static void test_media_mixer() {
+    torch::NoGradGuard no_grad_guard;
     chobits::nn::MediaMixerBlock layer;
-    auto output = layer->forward(
-        torch::randn({ 10, 256,     416 }),
-        torch::randn({ 10, 256, 3 * 576 })
-    );
     info(layer.ptr());
+    auto output = layer->forward(
+        torch::randn({ 10, 256, 400 }),
+        torch::randn({ 10, 256, 880 }),
+        torch::randn({ 10, 256, 880 })
+    );
     std::cout << output.sizes() << std::endl;
 }
 
 [[maybe_unused]] static void test_audio_tail() {
+    torch::NoGradGuard no_grad_guard;
     chobits::nn::AudioTailBlock layer;
-    auto output = layer->forward(torch::randn({ 10, 256, 400 }));
     info(layer.ptr());
+    auto output = layer->forward(torch::randn({ 10, 256, 400 }));
     std::cout << output.sizes() << std::endl;
 }
 
@@ -139,16 +154,16 @@ static void info(std::shared_ptr<torch::nn::Module> layer) {
 
 int main() {
     try {
+        // test_res_net_1d();
+        // test_res_net_2d();
         // test_gru();
         // test_attention();
-        // test_res_net();
-        // test_res_net_3d();
         // test_audio_head();
         // test_video_head();
         // test_media_mixer();
-        test_audio_tail();
+        // test_audio_tail();
         // test_model();
-        // test_model_eval();
+        test_model_eval();
         // test_model_train();
     } catch(const std::exception& e) {
         std::printf("异常内容：%s", e.what());

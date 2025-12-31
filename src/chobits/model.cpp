@@ -14,33 +14,37 @@ class ChobitsImpl : public torch::nn::Module {
 friend chobits::model::Trainer;
 
 private:
-    chobits::nn::AudioHeadBlock  audio_head { nullptr };
-    chobits::nn::VideoHeadBlock  video_head { nullptr };
-    chobits::nn::MediaMixerBlock media_mixer{ nullptr };
-    chobits::nn::AudioTailBlock  audio_tail { nullptr };
+    chobits::nn::AudioHeadBlock  audio{ nullptr };
+    chobits::nn::ImageHeadBlock  image{ nullptr };
+    chobits::nn::VideoHeadBlock  video{ nullptr };
+    chobits::nn::MediaMixerBlock mixer{ nullptr };
+    chobits::nn::AudioTailBlock  tail { nullptr };
 
 public:
     ChobitsImpl() {
     }
     ~ChobitsImpl() {
-        this->unregister_module("audio_head");
-        this->unregister_module("video_head");
-        this->unregister_module("media_mixer");
-        this->unregister_module("audio_tail");
+        this->unregister_module("audio");
+        this->unregister_module("image");
+        this->unregister_module("video");
+        this->unregister_module("mixer");
+        this->unregister_module("tail");
     }
 
 public:
     void define() {
-        this->audio_head  = this->register_module("audio_head",  chobits::nn::AudioHeadBlock());
-        this->video_head  = this->register_module("video_head",  chobits::nn::VideoHeadBlock());
-        this->media_mixer = this->register_module("media_mixer", chobits::nn::MediaMixerBlock());
-        this->audio_tail  = this->register_module("audio_tail",  chobits::nn::AudioTailBlock());
+        this->audio = this->register_module("audio", chobits::nn::AudioHeadBlock (  ));
+        this->image = this->register_module("image", chobits::nn::ImageHeadBlock ( 3));
+        this->video = this->register_module("video", chobits::nn::VideoHeadBlock (10));
+        this->mixer = this->register_module("mixer", chobits::nn::MediaMixerBlock(  ));
+        this->tail  = this->register_module("tail",  chobits::nn::AudioTailBlock (  ));
     }
     torch::Tensor forward(const torch::Tensor& audio, const torch::Tensor& video) {
-        auto audio_out = this->audio_head->forward(audio);
-        auto video_out = this->video_head->forward(video);
-        auto media_out = this->media_mixer->forward(audio_out, video_out);
-        return this->audio_tail->forward(media_out);
+        auto audio_out = this->audio->forward(audio);
+        auto image_out = this->image->forward(video.select(1, -1));
+        auto video_out = this->video->forward(video.select(2,  0));
+        auto mixer = this->mixer->forward(audio_out, image_out, video_out);
+        return this->tail->forward(mixer);
     }
 
 };
@@ -183,7 +187,7 @@ void chobits::model::Trainer::info() {
     for(const auto& parameter : trainer_state.model->named_parameters()) {
         ++layer_size;
         total_numel += parameter.value().numel();
-        std::printf("模型参数数量：%64s = %" PRId64 "\n", parameter.key().c_str(), parameter.value().numel());
+        std::printf("模型参数数量：%32s = %" PRId64 "\n", parameter.key().c_str(), parameter.value().numel());
     }
     std::printf("模型层数总量：%d\n", layer_size);
     std::printf("模型参数总量：%" PRId64 "\n", total_numel);

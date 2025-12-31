@@ -25,7 +25,7 @@ extern "C" {
 }
 
 const static float audio_normalization = 32768.0;
-const static float video_normalization = 256.0;
+const static float video_normalization = 128.0;
 
 const static AVPixelFormat video_pix_format = AV_PIX_FMT_RGB24;
 
@@ -427,8 +427,8 @@ std::tuple<bool, at::Tensor, at::Tensor, at::Tensor> chobits::media::get_data() 
 
 std::vector<short> chobits::media::set_data(const torch::Tensor& tensor) {
     auto pcm_tensor = tensor.mul(audio_normalization).to(torch::kShort);
-    auto pcm_size = pcm_tensor.size(-1);
-    auto pcm_data = reinterpret_cast<short*>(pcm_tensor.data_ptr());
+    auto pcm_size   = pcm_tensor.size(-1);
+    auto pcm_data   = reinterpret_cast<short*>(pcm_tensor.data_ptr());
     std::vector<short> pcm;
     pcm.resize(pcm_size);
     std::copy_n(pcm_data, pcm_size, pcm.data());
@@ -559,11 +559,10 @@ static bool audio_to_tensor(std::vector<torch::Tensor>& audio, SwrContext* swr, 
                 insert = true;
             }
             if(insert) {
-                auto pcm_data = reinterpret_cast<short*>(audio_buffer.data());
-                auto pcm_size = int(dataset.audio_size / sizeof(short));
-                auto tensor   = torch::from_blob(pcm_data, { pcm_size }, torch::kShort).to(torch::kFloat32)
-                .div(audio_normalization);
-                audio.push_back(std::move(tensor));
+                auto pcm_data   = reinterpret_cast<short*>(audio_buffer.data());
+                auto pcm_size   = int(dataset.audio_size / sizeof(short));
+                auto pmc_tensor = torch::from_blob(pcm_data, { pcm_size }, torch::kShort).to(torch::kFloat32).div(audio_normalization);
+                audio.push_back(std::move(pmc_tensor));
             }
             remain -= dataset.audio_size;
             if(remain != 0) {
@@ -611,7 +610,7 @@ static bool video_to_tensor(std::vector<torch::Tensor>& audio, std::vector<torch
                     { chobits::video_height, chobits::video_width, 3 },
                     torch::kUInt8
                 ).to(torch::kFloat32)
-                .div(video_normalization).mul(2.0).sub(1.0)
+                .sub(video_normalization).div(video_normalization)
                 .permute({ 2, 0, 1 }).contiguous();
                 video.push_back(std::move(tensor));
             }
