@@ -39,20 +39,20 @@ static void info(std::shared_ptr<torch::nn::Module> layer) {
 
 [[maybe_unused]] static void test_gru() {
     torch::NoGradGuard no_grad_guard;
-    chobits::nn::GRUBlock layer(880, 880);
+    chobits::nn::GRUBlock layer(920, 920);
     info(layer.ptr());
-    auto output = layer->forward(torch::randn({ 10, 256, 880 }));
+    auto output = layer->forward(torch::randn({ 10, 256, 920 }));
     std::cout << output.sizes() << std::endl;
 }
 
 [[maybe_unused]] static void test_attention() {
     torch::NoGradGuard no_grad_guard;
-    chobits::nn::AttentionBlock layer(880, 880, 880, 880);
+    chobits::nn::AttentionBlock layer(920, 920, 920, 920);
     info(layer.ptr());
     auto output = layer->forward(
-        torch::randn({ 10, 256, 880 }),
-        torch::randn({ 10, 256, 880 }),
-        torch::randn({ 10, 256, 880 })
+        torch::randn({ 10, 256, 920 }),
+        torch::randn({ 10, 256, 920 }),
+        torch::randn({ 10, 256, 920 })
     );
     std::cout << output.sizes() << std::endl;
 }
@@ -79,8 +79,8 @@ static void info(std::shared_ptr<torch::nn::Module> layer) {
     info(layer.ptr());
     auto output = layer->forward(
         torch::randn({ 10, 256, 400 }),
-        torch::randn({ 10, 256, 880 }),
-        torch::randn({ 10, 256, 880 })
+        torch::randn({ 10, 256, 920 }),
+        torch::randn({ 10, 256, 920 })
     );
     std::cout << output.sizes() << std::endl;
 }

@@ -11,38 +11,30 @@ class ResNetBlock1d(nn.Module):
         in_channels : int,
         out_channels: int,
         shape       : int,
-        pool        : int = 0,
+        stride      : int = 0,
         kernel      : int = 3,
         padding     : int = 1,
         dilation    : int = 1,
     ):
         super().__init__()
-        if in_channels == out_channels:
-            self.cv1 = nn.Sequential(
-                nn.LayerNorm([shape]),
-            )
-        else:
-            self.cv1 = nn.Sequential(
-                nn.LayerNorm([shape]),
-                nn.Conv1d(in_channels, out_channels, kernel, padding = padding, dilation = dilation, bias = False),
-                layer_act(),
-                nn.Conv1d(out_channels, out_channels, kernel, padding = padding, dilation = dilation),
-                layer_act(),
-            )
+        self.use_stride = stride > 0
+        self.cv1 = nn.Sequential(
+            nn.LayerNorm([shape]),
+            nn.Conv1d(in_channels, out_channels, kernel, padding = padding, dilation = dilation, bias = False),
+            layer_act(),
+        )
         self.cv2 = nn.Sequential(
             nn.Conv1d(out_channels, out_channels, kernel, padding = padding, dilation = dilation),
             layer_act(),
             nn.Conv1d(out_channels, out_channels, kernel, padding = padding, dilation = dilation),
             layer_act(),
         )
-        self.use_pool = pool > 0
-        if self.use_pool:
+        if self.use_stride:
             self.cv3 = nn.Sequential(
                 nn.Conv1d(out_channels, out_channels, kernel, padding = padding, dilation = dilation),
                 layer_act(),
-                nn.Conv1d(out_channels, out_channels, kernel, padding = padding, dilation = dilation),
+                nn.Conv1d(out_channels, out_channels, kernel, padding = padding, dilation = dilation, stride = stride),
                 layer_act(),
-                nn.MaxPool1d(pool),
             )
         else:
             self.cv3 = nn.Sequential(
@@ -53,7 +45,7 @@ class ResNetBlock1d(nn.Module):
             )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        if self.use_pool:
+        if self.use_stride:
             left = self.cv1(x)
             left = self.cv2(left) + left
             return self.cv3(left)
@@ -68,35 +60,27 @@ class ResNetBlock2d(nn.Module):
         in_channels : int,
         out_channels: int,
         shape       : List[int],
-        pool        : List[int] = None,
+        stride      : List[int] = None,
         kernel      : List[int] = [3, 3],
         padding     : List[int] = [2, 2],
         dilation    : List[int] = [2, 2],
     ):
         super().__init__()
-        self.use_pool = pool is not None and len(pool) > 0
-        if self.use_pool:
+        self.use_stride = stride is not None and len(stride) > 0
+        if self.use_stride:
             self.cv1 = nn.Sequential(
                 nn.LayerNorm(shape),
                 nn.Conv2d(in_channels, out_channels, kernel, padding = padding, dilation = dilation, bias = False),
                 layer_act(),
-                nn.Conv2d(out_channels, out_channels, kernel, padding = padding, dilation = dilation),
+                nn.Conv2d(out_channels, out_channels, kernel, padding = padding, dilation = dilation, stride = stride),
                 layer_act(),
-                nn.MaxPool2d(pool),
             )
         else:
-            if in_channels == out_channels:
-                self.cv1 = nn.Sequential(
-                    nn.LayerNorm(shape),
-                )
-            else:
-                self.cv1 = nn.Sequential(
-                    nn.LayerNorm(shape),
-                    nn.Conv2d(in_channels, out_channels, kernel, padding = padding, dilation = dilation, bias = False),
-                    layer_act(),
-                    nn.Conv2d(out_channels, out_channels, kernel, padding = padding, dilation = dilation),
-                    layer_act(),
-                )
+            self.cv1 = nn.Sequential(
+                nn.LayerNorm(shape),
+                nn.Conv2d(in_channels, out_channels, kernel, padding = padding, dilation = dilation, bias = False),
+                layer_act(),
+            )
         self.cv2 = nn.Sequential(
             nn.Conv2d(out_channels, out_channels, kernel, padding = padding, dilation = dilation),
             layer_act(),
@@ -111,7 +95,7 @@ class ResNetBlock2d(nn.Module):
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        if self.use_pool:
+        if self.use_stride:
             left = self.cv1(x)
             left = self.cv2(left) + left
             return self.cv3(left)
@@ -156,9 +140,9 @@ class AttentionBlock(nn.Module):
         self.out  = ResNetBlock1d(channel * 2, channel, o_dim)
 
     def forward(self, query: torch.Tensor, key: torch.Tensor, value: torch.Tensor) -> torch.Tensor:
-        q = self.q(query).permute(1, 0, 2)
-        k = self.k(key)  .permute(1, 0, 2)
-        v = self.v(value).permute(1, 0, 2)
+        q = self.q(query.permute(1, 0, 2))
+        k = self.k(key  .permute(1, 0, 2))
+        v = self.v(value.permute(1, 0, 2))
         o, _ = self.attn(q, k, v)
         o = o.permute(1, 0, 2)
         o = self.proj(o)
@@ -191,7 +175,7 @@ class VideoHeadBlock(nn.Module):
     def __init__(
         self,
         in_channels: int,
-        out_len    : int = 880,
+        out_len    : int = 920,
         height     : int = 360,
         width      : int = 640,
         channels   : List[int] = [32, 64, 128, 256],
@@ -205,12 +189,12 @@ class VideoHeadBlock(nn.Module):
     ):
         super().__init__()
         self.head = nn.Sequential(
-            ResNetBlock2d(in_channels, channels[0], [ height // pow(pool[0], 0), width // pow(pool[1], 0) ], pool, kernel,  padding,  dilation),
-            ResNetBlock2d(channels[0], channels[1], [ height // pow(pool[0], 1), width // pow(pool[1], 1) ], pool, kernel,  padding,  dilation),
-            ResNetBlock2d(channels[1], channels[2], [ height // pow(pool[0], 2), width // pow(pool[1], 2) ], pool, kernel_, padding_, dilation_),
-            ResNetBlock2d(channels[2], channels[3], [ height // pow(pool[0], 3), width // pow(pool[1], 3) ], pool, kernel_, padding_, dilation_),
-            ResNetBlock2d(channels[3], channels[3], [ height // pow(pool[0], 4), width // pow(pool[1], 4) ],   [], kernel_, padding_, dilation_),
-            ResNetBlock2d(channels[3], channels[3], [ height // pow(pool[0], 4), width // pow(pool[1], 4) ],   [], kernel_, padding_, dilation_),
+            ResNetBlock2d(in_channels, channels[0], [ height // pow(pool[0], 0) + 0, width // pow(pool[1], 0) ], pool, kernel,  padding,  dilation ),
+            ResNetBlock2d(channels[0], channels[1], [ height // pow(pool[0], 1) + 0, width // pow(pool[1], 1) ], pool, kernel,  padding,  dilation ),
+            ResNetBlock2d(channels[1], channels[2], [ height // pow(pool[0], 2) + 0, width // pow(pool[1], 2) ], pool, kernel_, padding_, dilation_),
+            ResNetBlock2d(channels[2], channels[3], [ height // pow(pool[0], 3) + 0, width // pow(pool[1], 3) ], pool, kernel_, padding_, dilation_),
+            ResNetBlock2d(channels[3], channels[3], [ height // pow(pool[0], 4) + 1, width // pow(pool[1], 4) ],   [], kernel_, padding_, dilation_),
+            ResNetBlock2d(channels[3], channels[3], [ height // pow(pool[0], 4) + 1, width // pow(pool[1], 4) ],   [], kernel_, padding_, dilation_),
             nn.Flatten(start_dim = 2),
             ResNetBlock1d(channels[3], channels[3], out_len),
             ResNetBlock1d(channels[3], channels[3], out_len),
@@ -225,8 +209,8 @@ class MediaMixerBlock(nn.Module):
     def __init__(
         self,
         audio_in: int = 400,
-        image_in: int = 880,
-        video_in: int = 880,
+        image_in: int = 920,
+        video_in: int = 920,
     ):
         super().__init__()
         self.audio   = GRUBlock(audio_in, audio_in)
@@ -263,10 +247,7 @@ class AudioTailBlock(nn.Module):
     ):
         super().__init__()
         self.tail = nn.Sequential(
-            nn.ConvTranspose1d(
-                channels[0], channels[0], kernel,
-                stride = stride, padding = padding, output_padding = padding, dilation = dilation
-            ),
+            nn.ConvTranspose1d(channels[0], channels[0], kernel, stride = stride, padding = padding, output_padding = padding, dilation = dilation),
             layer_act(),
             nn.Conv1d(channels[0], channels[1], 3, padding = 1),
             layer_act(),
@@ -291,14 +272,11 @@ class Chobits(nn.Module):
         self.tail  = AudioTailBlock (  )
 
     def forward(self, audio: torch.Tensor, video: torch.Tensor) -> torch.Tensor:
-        image_input = video.select(1, -1)
-        video_input = video.select(2,  0)
         audio_out = self.audio(audio)
-        image_out = self.image(image_input)
-        video_out = self.video(video_input)
+        image_out = self.image(video.select(1, -1))
+        video_out = self.video(video.select(2,  0))
         mixer_out = self.mixer(audio_out, image_out, video_out)
-        output    = self.tail(mixer_out)
-        return output
+        return self.tail(mixer_out)
 
 # model = ResNetBlock1d(10, 64, 800, 2)
 # input = torch.randn(10, 10, 800)
@@ -308,12 +286,12 @@ class Chobits(nn.Module):
 # input = torch.randn(10, 10, 360, 640)
 # print(model(input).shape)
 
-# model = GRUBlock(880, 880)
-# input = torch.randn(10, 256, 880)
-# print(model(torch.randn(10, 256, 880)).shape)
+# model = GRUBlock(920, 920)
+# input = torch.randn(10, 256, 920)
+# print(model(torch.randn(10, 256, 920)).shape)
 
-# model = AttentionBlock(880, 880, 880, 880)
-# input = (torch.randn(10, 256, 880), torch.randn(10, 256, 880), torch.randn(10, 256, 880))
+# model = AttentionBlock(920, 920, 920, 920)
+# input = (torch.randn(10, 256, 920), torch.randn(10, 256, 920), torch.randn(10, 256, 920))
 # print(model(*input).shape)
 
 # model = AudioHeadBlock()
@@ -325,7 +303,7 @@ class Chobits(nn.Module):
 # print(model(input).shape)
 
 # model = MediaMixerBlock()
-# input = (torch.randn(10, 256, 400), torch.randn(10, 256, 880), torch.randn(10, 256, 880))
+# input = (torch.randn(10, 256, 400), torch.randn(10, 256, 920), torch.randn(10, 256, 920))
 # print(model(*input).shape)
 
 # model = AudioTailBlock()

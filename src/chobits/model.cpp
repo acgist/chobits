@@ -43,8 +43,8 @@ public:
         auto audio_out = this->audio->forward(audio);
         auto image_out = this->image->forward(video.select(1, -1));
         auto video_out = this->video->forward(video.select(2,  0));
-        auto mixer = this->mixer->forward(audio_out, image_out, video_out);
-        return this->tail->forward(mixer);
+        auto mixer_out = this->mixer->forward(audio_out, image_out, video_out);
+        return this->tail->forward(mixer_out);
     }
 
 };

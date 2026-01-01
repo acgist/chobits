@@ -3,7 +3,6 @@
 #include "chobits/chobits.hpp"
 
 #include <thread>
-#include <fstream>
 
 #include "torch/torch.h"
 
@@ -35,7 +34,6 @@
         std::cout << audio.sizes() << std::endl;
         std::cout << video.sizes() << std::endl;
         std::cout << label.sizes() << std::endl;
-        std::cout << label.min().item<float>() << " = " << label.mean().item<float>() << " = " << label.max().item<float>() << std::endl;
         if(success) {
             chobits::media::set_data(audio.cpu());
         } else {
