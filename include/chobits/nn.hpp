@@ -379,12 +379,13 @@ using ImageHeadBlock = VideoHeadBlock;
 class MediaMixerBlockImpl : public torch::nn::Module {
 
 private:
-    torch::nn::Sequential       audio  { nullptr };
-    torch::nn::Sequential       video  { nullptr };
-    chobits::nn::AttentionBlock a_muxer{ nullptr };
-    chobits::nn::AttentionBlock v_muxer{ nullptr };
-    chobits::nn::AttentionBlock muxer  { nullptr };
-    chobits::nn::AttentionBlock mixer  { nullptr };
+    torch::nn::Sequential       audio_gru { nullptr };
+    torch::nn::Sequential       video_gru { nullptr };
+    chobits::nn::AttentionBlock audio_attn{ nullptr };
+    chobits::nn::AttentionBlock video_attn{ nullptr };
+    chobits::nn::AttentionBlock image_attn{ nullptr };
+    chobits::nn::AttentionBlock muxer_attn{ nullptr };
+    chobits::nn::AttentionBlock mixer_attn{ nullptr };
 
 public:
     MediaMixerBlockImpl(
@@ -392,37 +393,39 @@ public:
         const int image_in = 920,
         const int video_in = 920
     ) {
-        this->audio = this->register_module("audio", torch::nn::Sequential(
+        this->audio_gru = this->register_module("audio_gru", torch::nn::Sequential(
             chobits::nn::GRUBlock(audio_in, audio_in)
         ));
-        this->video = this->register_module("video", torch::nn::Sequential(
+        this->video_gru = this->register_module("video_gru", torch::nn::Sequential(
             chobits::nn::GRUBlock(video_in, video_in)
         ));
-        this->a_muxer = this->register_module("a_muxer", chobits::nn::AttentionBlock(audio_in, video_in, audio_in,                       audio_in));
-        this->v_muxer = this->register_module("v_muxer", chobits::nn::AttentionBlock(video_in, audio_in, video_in,                       video_in));
-        this->muxer   = this->register_module("muxer",   chobits::nn::AttentionBlock(audio_in, video_in, audio_in + video_in + image_in, audio_in));
-        this->mixer   = this->register_module("mixer",   chobits::nn::AttentionBlock(audio_in, audio_in, audio_in,                       audio_in));
+        const int muxer_in = audio_in + video_in;
+        this->audio_attn = this->register_module("audio_attn", chobits::nn::AttentionBlock(audio_in, video_in, video_in, audio_in));
+        this->video_attn = this->register_module("video_attn", chobits::nn::AttentionBlock(video_in, audio_in, audio_in, video_in));
+        this->image_attn = this->register_module("image_attn", chobits::nn::AttentionBlock(muxer_in, image_in, image_in, muxer_in));
+        this->muxer_attn = this->register_module("muxer_attn", chobits::nn::AttentionBlock(muxer_in, muxer_in, muxer_in, muxer_in));
+        this->mixer_attn = this->register_module("mixer_attn", chobits::nn::AttentionBlock(muxer_in, muxer_in, muxer_in, muxer_in));
     }
     ~MediaMixerBlockImpl() {
-        this->unregister_module("audio");
-        this->unregister_module("video");
-        this->unregister_module("a_muxer");
-        this->unregister_module("v_muxer");
-        this->unregister_module("muxer");
-        this->unregister_module("mixer");
+        this->unregister_module("audio_gru");
+        this->unregister_module("video_gru");
+        this->unregister_module("audio_attn");
+        this->unregister_module("video_attn");
+        this->unregister_module("image_attn");
+        this->unregister_module("muxer_attn");
+        this->unregister_module("mixer_attn");
     }
     
 public:
     torch::Tensor forward(const torch::Tensor& audio, const torch::Tensor& image, const torch::Tensor& video) {
-        auto audio_v = this->audio->forward(audio);
-        auto video_v = this->video->forward(video);
-        auto audio_o = this->a_muxer->forward(audio, video, audio_v);
-        auto video_o = this->v_muxer->forward(video, audio, video_v);
-        auto muxer_o = this->muxer->forward(audio_o, video_o, torch::concat({ audio_v, video_v, image }, -1));
-//      auto audio_o = this->a_muxer->forward(audio_v, video_v, audio_v);
-//      auto video_o = this->v_muxer->forward(video_v, audio_v, video_v);
-//      auto muxer_o = this->muxer->forward(audio_v, video_v, torch::concat({ audio_o, video_o, image }, -1));
-        return         this->mixer->forward(muxer_o, muxer_o, muxer_o);
+        auto audio_v = this->audio_gru->forward(audio);
+        auto video_v = this->video_gru->forward(video);
+        auto audio_o = this->audio_attn->forward(audio_v, video_v, video_v);
+        auto video_o = this->video_attn->forward(video_v, audio_v, audio_v);
+        auto muxer_o = torch::concat({ audio_o, video_o }, -1);
+        auto image_o = this->image_attn->forward(muxer_o, image, image);
+        auto mixer_o = this->muxer_attn->forward(muxer_o, image_o, image_o);
+        return         this->mixer_attn->forward(mixer_o, mixer_o, mixer_o);
     }
 
 };
@@ -439,18 +442,11 @@ private:
 
 public:
     AudioTailBlockImpl(
-        const int stride   = 2,
-        const int kernel   = 3,
-        const int padding  = 1,
-        const int dilation = 1,
-        const shp channel  = std::vector<int64_t>{ 256, 64, 16, 4, 1 }
+        const int in_features  = 1320,
+        const int out_features = 800,
+        const shp channel      = std::vector<int64_t>{ 256, 64, 16, 4, 1 }
     ) {
-        // torch::nn::Upsample
-        // torch::nn::ConvTranspose1d
-        // L_out = (L_in - 1) * stride - 2 * padding + dilation * (kernel - 1) + output_padding + 1
         this->tail = this->register_module("tail", torch::nn::Sequential(
-            torch::nn::ConvTranspose1d(torch::nn::ConvTranspose1dOptions(channel[0], channel[0], kernel).stride(stride).padding(padding).output_padding(padding).dilation(dilation)),
-            layer_act(),
             torch::nn::Conv1d(torch::nn::Conv1dOptions(channel[0], channel[1], 3).padding(1).dilation(1)),
             layer_act(),
             torch::nn::Conv1d(torch::nn::Conv1dOptions(channel[1], channel[2], 3).padding(1).dilation(1)),
@@ -458,7 +454,9 @@ public:
             torch::nn::Conv1d(torch::nn::Conv1dOptions(channel[2], channel[3], 3).padding(1).dilation(1)),
             layer_act(),
             torch::nn::Conv1d(torch::nn::Conv1dOptions(channel[3], channel[4], 3).padding(1).dilation(1)),
-            torch::nn::Flatten(torch::nn::FlattenOptions().start_dim(1))
+            torch::nn::Flatten(torch::nn::FlattenOptions().start_dim(1)),
+            layer_act(),
+            torch::nn::Linear(in_features, out_features)
         ));
     }
     ~AudioTailBlockImpl() {

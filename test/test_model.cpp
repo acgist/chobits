@@ -89,7 +89,7 @@ static void info(std::shared_ptr<torch::nn::Module> layer) {
     torch::NoGradGuard no_grad_guard;
     chobits::nn::AudioTailBlock layer;
     info(layer.ptr());
-    auto output = layer->forward(torch::randn({ 10, 256, 400 }));
+    auto output = layer->forward(torch::randn({ 10, 256, 1320 }));
     std::cout << output.sizes() << std::endl;
 }
 
@@ -159,11 +159,11 @@ int main() {
         // test_gru();
         // test_attention();
         // test_audio_head();
-        // test_video_head();
+        test_video_head();
         // test_media_mixer();
         // test_audio_tail();
         // test_model();
-        test_model_eval();
+        // test_model_eval();
         // test_model_train();
     } catch(const std::exception& e) {
         std::printf("异常内容：%s", e.what());

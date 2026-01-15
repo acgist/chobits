@@ -213,12 +213,14 @@ class MediaMixerBlock(nn.Module):
         video_in: int = 920,
     ):
         super().__init__()
-        self.audio   = GRUBlock(audio_in, audio_in)
-        self.video   = GRUBlock(video_in, video_in)
-        self.a_muxer = AttentionBlock(audio_in, video_in, audio_in, audio_in)
-        self.v_muxer = AttentionBlock(video_in, audio_in, video_in, video_in)
-        self.muxer   = AttentionBlock(audio_in, video_in, audio_in + video_in + image_in, audio_in)
-        self.mixer   = AttentionBlock(audio_in, audio_in, audio_in, audio_in)
+        muxer_in = audio_in + video_in
+        self.audio_gru  = GRUBlock(audio_in, audio_in)
+        self.video_gru  = GRUBlock(video_in, video_in)
+        self.audio_attn = AttentionBlock(audio_in, video_in, video_in, audio_in)
+        self.video_attn = AttentionBlock(video_in, audio_in, audio_in, video_in)
+        self.image_attn = AttentionBlock(muxer_in, image_in, image_in, muxer_in)
+        self.muxer_attn = AttentionBlock(muxer_in, muxer_in, muxer_in, muxer_in)
+        self.mixer_attn = AttentionBlock(muxer_in, muxer_in, muxer_in, muxer_in)
 
     def forward(
         self,
@@ -226,29 +228,24 @@ class MediaMixerBlock(nn.Module):
         image: torch.Tensor,
         video: torch.Tensor,
     ) -> torch.Tensor:
-        audio_v = self.audio(audio)
-        video_v = self.video(video)
-        audio_o = self.a_muxer(audio, video, audio_v)
-        video_o = self.v_muxer(video, audio, video_v)
-        muxer_o = self.muxer(audio_o, video_o, torch.cat([audio_v, video_v, image], dim = -1))
-#       audio_o = self.a_muxer(audio_v, video_v, audio_v)
-#       video_o = self.v_muxer(video_v, audio_v, video_v)
-#       muxer_o = self.muxer(audio_v, video_v, torch.cat([audio_o, video_o, image], dim = -1))
-        return self.mixer(muxer_o, muxer_o, muxer_o)
+        audio_v = self.audio_gru(audio)
+        video_v = self.video_gru(video)
+        audio_o = self.audio_attn(audio_v, video_v, video_v)
+        video_o = self.video_attn(video_v, audio_v, audio_v)
+        muxer_o = torch.cat([audio_o, video_o], dim = -1)
+        image_o = self.image_attn(muxer_o, image, image)
+        mixer_o = self.muxer_attn(muxer_o, image_o, image_o)
+        return    self.mixer_attn(mixer_o, mixer_o, mixer_o)
 
 class AudioTailBlock(nn.Module):
     def __init__(
         self,
-        stride  : int = 2,
-        kernel  : int = 3,
-        padding : int = 1,
-        dilation: int = 1,
-        channels: List[int] = [256, 64, 16, 4, 1],
+        in_features : int = 1320,
+        out_features: int = 800,
+        channels    : List[int] = [256, 64, 16, 4, 1],
     ):
         super().__init__()
         self.tail = nn.Sequential(
-            nn.ConvTranspose1d(channels[0], channels[0], kernel, stride = stride, padding = padding, output_padding = padding, dilation = dilation),
-            layer_act(),
             nn.Conv1d(channels[0], channels[1], 3, padding = 1),
             layer_act(),
             nn.Conv1d(channels[1], channels[2], 3, padding = 1),
@@ -257,6 +254,8 @@ class AudioTailBlock(nn.Module):
             layer_act(),
             nn.Conv1d(channels[3], channels[4], 3, padding = 1),
             nn.Flatten(start_dim = 1),
+            layer_act(),
+            nn.Linear(in_features, out_features),
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -311,9 +310,25 @@ class Chobits(nn.Module):
 # print(model(torch.randn(10, 256, 400)).shape)
 
 model = Chobits()
+model.eval();
 input = (torch.randn(10, 10, 800), torch.randn(10, 10, 3, 360, 640))
 print(model(*input).shape)
 
 # torch.save(model, "D:/download/chobits.pt")
 
 torch.jit.save(torch.jit.trace(model, input), "D:/download/chobits.pt")
+
+# batch = torch.export.Dim("batch", min = 1)
+# torch.onnx.export(
+#     model,
+#     (torch.randn(1, 10, 800), torch.randn(1, 10, 3, 360, 640)),
+#     "D:/download/chobits.onnx",
+#     dynamo         = True,
+#     opset_version  = 18,
+#     input_names    = [ "audio", "video" ],
+#     output_names   = [ "output" ],
+#     dynamic_shapes = (
+#         { 0: batch },
+#         { 0: batch },
+#     )
+# )
