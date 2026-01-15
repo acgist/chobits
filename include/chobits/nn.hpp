@@ -30,7 +30,32 @@ using shp = std::vector<int64_t>;
 namespace chobits::nn {
 
 /**
- * 残差网络
+ * Pad
+ */
+class PadBlockImpl : public torch::nn::Module {
+
+private:
+    std::vector<int64_t> pad;
+
+public:
+    PadBlockImpl(
+        const shp pad
+    ) : pad(pad) {
+    }
+    ~PadBlockImpl() {
+    }
+
+public:
+    torch::Tensor forward(const torch::Tensor& input) {
+        return torch::nn::functional::pad(input, torch::nn::functional::PadFuncOptions(this->pad).value(0.0F));
+    }
+
+};
+
+TORCH_MODULE(PadBlock);
+
+/**
+ * 1D残差网络
  */
 class ResNetBlock1dImpl : public torch::nn::Module {
 
@@ -296,18 +321,18 @@ public:
     AudioHeadBlockImpl(
         const int in_len   = 800,
         const shp channel  = std::vector<int64_t>{ 10, 64, 128, 256 },
-        const int pool     = 2,
+        const int stride   = 2,
         const int kernel   = 3,
         const int padding  = 1,
         const int dilation = 1
     ) {
         this->head = this->register_module("head", torch::nn::Sequential(
-            chobits::nn::ResNetBlock1d(channel[0], channel[1], in_len       , pool, kernel, padding, dilation),
-            chobits::nn::ResNetBlock1d(channel[1], channel[1], in_len / pool,    0, kernel, padding, dilation),
-            chobits::nn::ResNetBlock1d(channel[1], channel[2], in_len / pool,    0, kernel, padding, dilation),
-            chobits::nn::ResNetBlock1d(channel[2], channel[2], in_len / pool,    0, kernel, padding, dilation),
-            chobits::nn::ResNetBlock1d(channel[2], channel[3], in_len / pool,    0, kernel, padding, dilation),
-            chobits::nn::ResNetBlock1d(channel[3], channel[3], in_len / pool,    0, kernel, padding, dilation)
+            chobits::nn::ResNetBlock1d(channel[0], channel[1], in_len,                   stride, kernel, padding, dilation),
+            chobits::nn::ResNetBlock1d(channel[1], channel[1], in_len / stride,               0, kernel, padding, dilation),
+            chobits::nn::ResNetBlock1d(channel[1], channel[2], in_len / stride,          stride, kernel, padding, dilation),
+            chobits::nn::ResNetBlock1d(channel[2], channel[2], in_len / stride / stride,      0, kernel, padding, dilation),
+            chobits::nn::ResNetBlock1d(channel[2], channel[3], in_len / stride / stride,      0, kernel, padding, dilation),
+            chobits::nn::ResNetBlock1d(channel[3], channel[3], in_len / stride / stride,      0, kernel, padding, dilation)
         ));
     }
     ~AudioHeadBlockImpl() {
@@ -334,25 +359,26 @@ private:
 public:
     VideoHeadBlockImpl(
         const int in_channels,
-        const int out_len   = 920,
+        const int out_len   = 960,
         const int height    = 360,
         const int width     = 640,
         const shp channel   = std::vector<int64_t>{ 32, 64, 128, 256 },
-        const shp pool      = std::vector<int64_t>{ 2, 2 },
+        const shp stride    = std::vector<int64_t>{ 2, 2 },
         const shp kernel    = std::vector<int64_t>{ 3, 3 },
-        const shp padding   = std::vector<int64_t>{ 2, 2 },
-        const shp dilation  = std::vector<int64_t>{ 2, 2 },
+        const shp padding   = std::vector<int64_t>{ 1, 1 },
+        const shp dilation  = std::vector<int64_t>{ 1, 1 },
         const shp kernel_   = std::vector<int64_t>{ 3, 3 },
-        const shp padding_  = std::vector<int64_t>{ 1, 1 },
-        const shp dilation_ = std::vector<int64_t>{ 1, 1 }
+        const shp padding_  = std::vector<int64_t>{ 2, 2 },
+        const shp dilation_ = std::vector<int64_t>{ 2, 2 }
     ) {
         this->head = this->register_module("head", torch::nn::Sequential(
-            chobits::nn::ResNet2dBlock(in_channels, channel[0], std::vector<int64_t>{ int64_t(height / std::pow(pool[0], 0)) + 0, int64_t(width / std::pow(pool[0], 0)) }, pool,  kernel,  padding,  dilation ),
-            chobits::nn::ResNet2dBlock(channel[0],  channel[1], std::vector<int64_t>{ int64_t(height / std::pow(pool[0], 1)) + 0, int64_t(width / std::pow(pool[0], 1)) }, pool,  kernel,  padding,  dilation ),
-            chobits::nn::ResNet2dBlock(channel[1],  channel[2], std::vector<int64_t>{ int64_t(height / std::pow(pool[0], 2)) + 0, int64_t(width / std::pow(pool[0], 2)) }, pool,  kernel_, padding_, dilation_),
-            chobits::nn::ResNet2dBlock(channel[2],  channel[3], std::vector<int64_t>{ int64_t(height / std::pow(pool[0], 3)) + 0, int64_t(width / std::pow(pool[0], 3)) }, pool,  kernel_, padding_, dilation_),
-            chobits::nn::ResNet2dBlock(channel[3],  channel[3], std::vector<int64_t>{ int64_t(height / std::pow(pool[0], 4)) + 1, int64_t(width / std::pow(pool[0], 4)) }, shp{}, kernel_, padding_, dilation_),
-            chobits::nn::ResNet2dBlock(channel[3],  channel[3], std::vector<int64_t>{ int64_t(height / std::pow(pool[0], 4)) + 1, int64_t(width / std::pow(pool[0], 4)) }, shp{}, kernel_, padding_, dilation_),
+            chobits::nn::ResNet2dBlock(in_channels, channel[0], std::vector<int64_t>{ int64_t(height / std::pow(stride[0], 0)), int64_t(width / std::pow(stride[0], 0)) }, stride, kernel, padding, dilation),
+            chobits::nn::ResNet2dBlock(channel[0],  channel[1], std::vector<int64_t>{ int64_t(height / std::pow(stride[0], 1)), int64_t(width / std::pow(stride[0], 1)) }, stride, kernel, padding, dilation),
+            chobits::nn::ResNet2dBlock(channel[1],  channel[2], std::vector<int64_t>{ int64_t(height / std::pow(stride[0], 2)), int64_t(width / std::pow(stride[0], 2)) }, stride, kernel, padding, dilation),
+            chobits::nn::ResNet2dBlock(channel[2],  channel[3], std::vector<int64_t>{ int64_t(height / std::pow(stride[0], 3)), int64_t(width / std::pow(stride[0], 3)) }, stride, kernel, padding, dilation),
+            chobits::nn::PadBlock(std::vector<int64_t>{ 0, 0, 1, 0 }),
+            chobits::nn::ResNet2dBlock(channel[3], channel[3], std::vector<int64_t>{ int64_t(height / std::pow(stride[0], 4)) + 2, int64_t(width / std::pow(stride[0], 4)) }, shp{}, kernel_, padding_, dilation_),
+            chobits::nn::ResNet2dBlock(channel[3], channel[3], std::vector<int64_t>{ int64_t(height / std::pow(stride[0], 4)) + 2, int64_t(width / std::pow(stride[0], 4)) }, shp{}, kernel_, padding_, dilation_),
             torch::nn::Flatten(torch::nn::FlattenOptions().start_dim(2)),
             chobits::nn::ResNetBlock1d(channel[3], channel[3], out_len),
             chobits::nn::ResNetBlock1d(channel[3], channel[3], out_len)
@@ -389,9 +415,9 @@ private:
 
 public:
     MediaMixerBlockImpl(
-        const int audio_in = 400,
-        const int image_in = 920,
-        const int video_in = 920
+        const int audio_in = 200,
+        const int image_in = 960,
+        const int video_in = 960
     ) {
         this->audio_gru = this->register_module("audio_gru", torch::nn::Sequential(
             chobits::nn::GRUBlock(audio_in, audio_in)
@@ -442,7 +468,7 @@ private:
 
 public:
     AudioTailBlockImpl(
-        const int in_features  = 1320,
+        const int in_features  = 200 + 960,
         const int out_features = 800,
         const shp channel      = std::vector<int64_t>{ 256, 64, 16, 4, 1 }
     ) {

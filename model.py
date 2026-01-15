@@ -5,6 +5,16 @@ from typing import List
 
 layer_act = nn.SiLU
 
+class PadBlock(nn.Module):
+    def __init__(
+        self,
+        pad : List[int] = [],
+    ):
+        super().__init__()
+        self.pad = pad
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return torch.nn.functional.pad(x, pad = self.pad, value = 0.0)
+
 class ResNetBlock1d(nn.Module):
     def __init__(
         self,
@@ -153,19 +163,19 @@ class AudioHeadBlock(nn.Module):
         self,
         in_len  : int       = 800,
         channels: List[int] = [10, 64, 128, 256],
-        pool    : int       = 2,
+        stride  : int       = 2,
         kernel  : int       = 3,
         padding : int       = 1,
         dilation: int       = 1,
     ):
         super().__init__()
         self.head = nn.Sequential(
-            ResNetBlock1d(channels[0], channels[1], in_len,         pool, kernel, padding, dilation),
-            ResNetBlock1d(channels[1], channels[1], in_len // pool,    0, kernel, padding, dilation),
-            ResNetBlock1d(channels[1], channels[2], in_len // pool,    0, kernel, padding, dilation),
-            ResNetBlock1d(channels[2], channels[2], in_len // pool,    0, kernel, padding, dilation),
-            ResNetBlock1d(channels[2], channels[3], in_len // pool,    0, kernel, padding, dilation),
-            ResNetBlock1d(channels[3], channels[3], in_len // pool,    0, kernel, padding, dilation),
+            ResNetBlock1d(channels[0], channels[1], in_len,                     stride, kernel, padding, dilation),
+            ResNetBlock1d(channels[1], channels[1], in_len // stride,                0, kernel, padding, dilation),
+            ResNetBlock1d(channels[1], channels[2], in_len // stride,           stride, kernel, padding, dilation),
+            ResNetBlock1d(channels[2], channels[2], in_len // stride // stride,      0, kernel, padding, dilation),
+            ResNetBlock1d(channels[2], channels[3], in_len // stride // stride,      0, kernel, padding, dilation),
+            ResNetBlock1d(channels[3], channels[3], in_len // stride // stride,      0, kernel, padding, dilation),
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -175,26 +185,27 @@ class VideoHeadBlock(nn.Module):
     def __init__(
         self,
         in_channels: int,
-        out_len    : int = 920,
+        out_len    : int = 960,
         height     : int = 360,
         width      : int = 640,
         channels   : List[int] = [32, 64, 128, 256],
-        pool       : List[int] = [2, 2],
+        stride     : List[int] = [2, 2],
         kernel     : List[int] = [3, 3],
-        padding    : List[int] = [2, 2],
-        dilation   : List[int] = [2, 2],
+        padding    : List[int] = [1, 1],
+        dilation   : List[int] = [1, 1],
         kernel_    : List[int] = [3, 3],
-        padding_   : List[int] = [1, 1],
-        dilation_  : List[int] = [1, 1],
+        padding_   : List[int] = [2, 2],
+        dilation_  : List[int] = [2, 2],
     ):
         super().__init__()
         self.head = nn.Sequential(
-            ResNetBlock2d(in_channels, channels[0], [ height // pow(pool[0], 0) + 0, width // pow(pool[1], 0) ], pool, kernel,  padding,  dilation ),
-            ResNetBlock2d(channels[0], channels[1], [ height // pow(pool[0], 1) + 0, width // pow(pool[1], 1) ], pool, kernel,  padding,  dilation ),
-            ResNetBlock2d(channels[1], channels[2], [ height // pow(pool[0], 2) + 0, width // pow(pool[1], 2) ], pool, kernel_, padding_, dilation_),
-            ResNetBlock2d(channels[2], channels[3], [ height // pow(pool[0], 3) + 0, width // pow(pool[1], 3) ], pool, kernel_, padding_, dilation_),
-            ResNetBlock2d(channels[3], channels[3], [ height // pow(pool[0], 4) + 1, width // pow(pool[1], 4) ],   [], kernel_, padding_, dilation_),
-            ResNetBlock2d(channels[3], channels[3], [ height // pow(pool[0], 4) + 1, width // pow(pool[1], 4) ],   [], kernel_, padding_, dilation_),
+            ResNetBlock2d(in_channels, channels[0], [ height // pow(stride[0], 0), width // pow(stride[1], 0) ], stride, kernel, padding, dilation),
+            ResNetBlock2d(channels[0], channels[1], [ height // pow(stride[0], 1), width // pow(stride[1], 1) ], stride, kernel, padding, dilation),
+            ResNetBlock2d(channels[1], channels[2], [ height // pow(stride[0], 2), width // pow(stride[1], 2) ], stride, kernel, padding, dilation),
+            ResNetBlock2d(channels[2], channels[3], [ height // pow(stride[0], 3), width // pow(stride[1], 3) ], stride, kernel, padding, dilation),
+            PadBlock([0, 0, 1, 0]),
+            ResNetBlock2d(channels[3], channels[3], [ height // pow(stride[0], 4) + 2, width // pow(stride[1], 4) ], [], kernel_, padding_, dilation_),
+            ResNetBlock2d(channels[3], channels[3], [ height // pow(stride[0], 4) + 2, width // pow(stride[1], 4) ], [], kernel_, padding_, dilation_),
             nn.Flatten(start_dim = 2),
             ResNetBlock1d(channels[3], channels[3], out_len),
             ResNetBlock1d(channels[3], channels[3], out_len),
@@ -208,9 +219,9 @@ ImageHeadBlock = VideoHeadBlock
 class MediaMixerBlock(nn.Module):
     def __init__(
         self,
-        audio_in: int = 400,
-        image_in: int = 920,
-        video_in: int = 920,
+        audio_in: int = 200,
+        image_in: int = 960,
+        video_in: int = 960,
     ):
         super().__init__()
         muxer_in = audio_in + video_in
@@ -240,7 +251,7 @@ class MediaMixerBlock(nn.Module):
 class AudioTailBlock(nn.Module):
     def __init__(
         self,
-        in_features : int = 1320,
+        in_features : int = 200 + 960,
         out_features: int = 800,
         channels    : List[int] = [256, 64, 16, 4, 1],
     ):
@@ -285,12 +296,12 @@ class Chobits(nn.Module):
 # input = torch.randn(10, 10, 360, 640)
 # print(model(input).shape)
 
-# model = GRUBlock(920, 920)
-# input = torch.randn(10, 256, 920)
-# print(model(torch.randn(10, 256, 920)).shape)
+# model = GRUBlock(960, 960)
+# input = torch.randn(10, 256, 960)
+# print(model(torch.randn(10, 256, 960)).shape)
 
-# model = AttentionBlock(920, 920, 920, 920)
-# input = (torch.randn(10, 256, 920), torch.randn(10, 256, 920), torch.randn(10, 256, 920))
+# model = AttentionBlock(960, 960, 960, 960)
+# input = (torch.randn(10, 256, 960), torch.randn(10, 256, 960), torch.randn(10, 256, 960))
 # print(model(*input).shape)
 
 # model = AudioHeadBlock()
@@ -302,12 +313,12 @@ class Chobits(nn.Module):
 # print(model(input).shape)
 
 # model = MediaMixerBlock()
-# input = (torch.randn(10, 256, 400), torch.randn(10, 256, 920), torch.randn(10, 256, 920))
+# input = (torch.randn(10, 256, 200), torch.randn(10, 256, 960), torch.randn(10, 256, 960))
 # print(model(*input).shape)
 
 # model = AudioTailBlock()
-# input = torch.randn(10, 256, 400)
-# print(model(torch.randn(10, 256, 400)).shape)
+# input = torch.randn(10, 256, 1160)
+# print(model(input).shape)
 
 model = Chobits()
 model.eval();
