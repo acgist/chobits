@@ -391,7 +391,6 @@ private:
     chobits::nn::AttentionBlock audio_attn{ nullptr };
     chobits::nn::AttentionBlock video_attn{ nullptr };
     chobits::nn::AttentionBlock image_attn{ nullptr };
-    chobits::nn::AttentionBlock muxer_attn{ nullptr };
     chobits::nn::AttentionBlock mixer_attn{ nullptr };
 
 public:
@@ -400,12 +399,11 @@ public:
         const int video_in = 768,
         const int image_in = 960
     ) {
-        const int muxer_in = audio_in + video_in;
+        const int mixer_in = audio_in + video_in;
         this->audio_attn = this->register_module("audio_attn", chobits::nn::AttentionBlock(audio_in, video_in, video_in, audio_in));
         this->video_attn = this->register_module("video_attn", chobits::nn::AttentionBlock(video_in, audio_in, audio_in, video_in));
-        this->image_attn = this->register_module("image_attn", chobits::nn::AttentionBlock(muxer_in, image_in, image_in, muxer_in));
-        this->muxer_attn = this->register_module("muxer_attn", chobits::nn::AttentionBlock(muxer_in, muxer_in, muxer_in, muxer_in));
-        this->mixer_attn = this->register_module("mixer_attn", chobits::nn::AttentionBlock(muxer_in, muxer_in, muxer_in, muxer_in));
+        this->image_attn = this->register_module("image_attn", chobits::nn::AttentionBlock(mixer_in, image_in, image_in, mixer_in));
+        this->mixer_attn = this->register_module("mixer_attn", chobits::nn::AttentionBlock(mixer_in, mixer_in, mixer_in, mixer_in));
     }
     ~MediaMixerBlockImpl() {
     }
@@ -415,8 +413,7 @@ public:
         auto audio_o = this->audio_attn->forward(audio, video, video);
         auto video_o = this->video_attn->forward(video, audio, audio);
         auto muxer_o = torch::concat({ audio_o, video_o }, -1);
-        auto image_o = this->image_attn->forward(muxer_o, image, image);
-        auto mixer_o = this->muxer_attn->forward(muxer_o, image_o, image_o);
+        auto mixer_o = this->image_attn->forward(muxer_o, image, image);
         return         this->mixer_attn->forward(mixer_o, mixer_o, mixer_o);
     }
 

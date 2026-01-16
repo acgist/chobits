@@ -214,12 +214,11 @@ class MediaMixerBlock(nn.Module):
         image_in: int = 960,
     ):
         super().__init__()
-        muxer_in = audio_in + video_in
+        mixer_in = audio_in + video_in
         self.audio_attn = AttentionBlock(audio_in, video_in, video_in, audio_in)
         self.video_attn = AttentionBlock(video_in, audio_in, audio_in, video_in)
-        self.image_attn = AttentionBlock(muxer_in, image_in, image_in, muxer_in)
-        self.muxer_attn = AttentionBlock(muxer_in, muxer_in, muxer_in, muxer_in)
-        self.mixer_attn = AttentionBlock(muxer_in, muxer_in, muxer_in, muxer_in)
+        self.image_attn = AttentionBlock(mixer_in, image_in, image_in, mixer_in)
+        self.mixer_attn = AttentionBlock(mixer_in, mixer_in, mixer_in, mixer_in)
 
     def forward(
         self,
@@ -230,8 +229,7 @@ class MediaMixerBlock(nn.Module):
         audio_o = self.audio_attn(audio, video, video)
         video_o = self.video_attn(video, audio, audio)
         muxer_o = torch.cat([audio_o, video_o], dim = -1)
-        image_o = self.image_attn(muxer_o, image, image)
-        mixer_o = self.muxer_attn(muxer_o, image_o, image_o)
+        mixer_o = self.image_attn(muxer_o, image, image)
         return    self.mixer_attn(mixer_o, mixer_o, mixer_o)
 
 class AudioTailBlock(nn.Module):
