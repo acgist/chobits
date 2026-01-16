@@ -61,6 +61,7 @@ private:
     torch::nn::Sequential cv1{ nullptr };
     torch::nn::Sequential cv2{ nullptr };
     torch::nn::Sequential cv3{ nullptr };
+    torch::nn::Sequential cv4{ nullptr };
 
 public:
     ResNet1dBlockImpl(
@@ -89,6 +90,10 @@ public:
             torch::nn::Conv1d(torch::nn::Conv1dOptions(out_channels, out_channels, kernel).padding(padding).dilation(dilation)),
             layer_act()
         ));
+        this->cv4 = this->register_module("cv4", torch::nn::Sequential(
+            torch::nn::Conv1d(torch::nn::Conv1dOptions(out_channels * 2, out_channels, kernel).padding(padding).dilation(dilation)),
+            layer_act()
+        ));
     }
     ~ResNet1dBlockImpl() {
     }
@@ -96,8 +101,8 @@ public:
 public:
     torch::Tensor forward(const torch::Tensor& input) {
         auto left  = this->cv1->forward(input);
-        auto right = this->cv2->forward(left)  + left;
-        return       this->cv3->forward(right) + left;
+        auto right = this->cv2->forward(left) + left;
+        return       this->cv4->forward(torch::cat({this->cv3->forward(right), left}, 1));
     }
 
 };
@@ -113,6 +118,7 @@ private:
     torch::nn::Sequential cv1{ nullptr };
     torch::nn::Sequential cv2{ nullptr };
     torch::nn::Sequential cv3{ nullptr };
+    torch::nn::Sequential cv4{ nullptr };
 
 public:
     ResNet2dBlockImpl(
@@ -141,6 +147,10 @@ public:
             torch::nn::Conv2d(torch::nn::Conv2dOptions(out_channels, out_channels, kernel).padding(padding).dilation(dilation)),
             layer_act()
         ));
+        this->cv4 = this->register_module("cv4", torch::nn::Sequential(
+            torch::nn::Conv2d(torch::nn::Conv2dOptions(out_channels * 2, out_channels, kernel).padding(padding).dilation(dilation)),
+            layer_act()
+        ));
     }
     ~ResNet2dBlockImpl() {
     }
@@ -148,8 +158,8 @@ public:
 public:
     torch::Tensor forward(const torch::Tensor& input) {
         auto left  = this->cv1->forward(input);
-        auto right = this->cv2->forward(left)  + left;
-        return       this->cv3->forward(right) + left;
+        auto right = this->cv2->forward(left) + left;
+        return       this->cv4->forward(torch::cat({this->cv3->forward(right), left}, 1));
     }
 
 };
@@ -185,7 +195,7 @@ public:
 public:
     torch::Tensor forward(const torch::Tensor& input) {
         auto [ output, _ ] = this->gru->forward(input);
-        return this->out->forward(torch::concat({ input, output }, -1));
+        return this->out->forward(torch::cat({ input, output }, -1));
     }
 
 };
@@ -244,7 +254,7 @@ public:
         auto [ o, _ ] = this->attn->forward(q, k, v);
         o = o.permute({ 1, 0, 2 });
         o = this->proj->forward(o);
-        return this->out->forward(torch::concat({ query, o }, -1));
+        return this->out->forward(torch::cat({ query, o }, -1));
     }
 
 };
@@ -412,7 +422,7 @@ public:
     torch::Tensor forward(const torch::Tensor& audio, const torch::Tensor& video, const torch::Tensor& image) {
         auto audio_o = this->audio_attn->forward(audio, video, video);
         auto video_o = this->video_attn->forward(video, audio, audio);
-        auto muxer_o = torch::concat({ audio_o, video_o }, -1);
+        auto muxer_o = torch::cat({ audio_o, video_o }, -1);
         auto mixer_o = this->image_attn->forward(muxer_o, image, image);
         return         this->mixer_attn->forward(mixer_o, mixer_o, mixer_o);
     }

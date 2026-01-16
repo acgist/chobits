@@ -44,11 +44,15 @@ class ResNet1dBlock(nn.Module):
             nn.Conv1d(out_channels, out_channels, kernel, padding = padding, dilation = dilation),
             layer_act(),
         )
+        self.cv4 = nn.Sequential(
+            nn.Conv1d(out_channels * 2, out_channels, kernel, padding = padding, dilation = dilation),
+            layer_act(),
+        )
 
     def forward(self, input: torch.Tensor) -> torch.Tensor:
         left  = self.cv1(input)
-        right = self.cv2(left)  + left
-        return  self.cv3(right) + left
+        right = self.cv2(left) + left
+        return  self.cv4(torch.cat([self.cv3(right), left], dim = 1))
 
 class ResNet2dBlock(nn.Module):
     def __init__(
@@ -79,11 +83,15 @@ class ResNet2dBlock(nn.Module):
             nn.Conv2d(out_channels, out_channels, kernel, padding = padding, dilation = dilation),
             layer_act(),
         )
+        self.cv4 = nn.Sequential(
+            nn.Conv2d(out_channels * 2, out_channels, kernel, padding = padding, dilation = dilation),
+            layer_act(),
+        )
 
     def forward(self, input: torch.Tensor) -> torch.Tensor:
         left  = self.cv1(input)
-        right = self.cv2(left)  + left
-        return  self.cv3(right) + left
+        right = self.cv2(left) + left
+        return  self.cv4(torch.cat([self.cv3(right), left], dim = 1))
 
 class GRUBlock(nn.Module):
     def __init__(
