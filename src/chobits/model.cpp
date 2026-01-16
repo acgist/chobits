@@ -15,8 +15,8 @@ friend chobits::model::Trainer;
 
 private:
     chobits::nn::AudioHeadBlock  audio{ nullptr };
-    chobits::nn::ImageHeadBlock  image{ nullptr };
     chobits::nn::VideoHeadBlock  video{ nullptr };
+    chobits::nn::ImageHeadBlock  image{ nullptr };
     chobits::nn::MediaMixerBlock mixer{ nullptr };
     chobits::nn::AudioTailBlock  tail { nullptr };
 
@@ -24,26 +24,21 @@ public:
     ChobitsImpl() {
     }
     ~ChobitsImpl() {
-        this->unregister_module("audio");
-        this->unregister_module("image");
-        this->unregister_module("video");
-        this->unregister_module("mixer");
-        this->unregister_module("tail");
     }
 
 public:
     void define() {
-        this->audio = this->register_module("audio", chobits::nn::AudioHeadBlock (  ));
-        this->image = this->register_module("image", chobits::nn::ImageHeadBlock ( 3));
-        this->video = this->register_module("video", chobits::nn::VideoHeadBlock (10));
-        this->mixer = this->register_module("mixer", chobits::nn::MediaMixerBlock(  ));
-        this->tail  = this->register_module("tail",  chobits::nn::AudioTailBlock (  ));
+        this->audio = this->register_module("audio", chobits::nn::AudioHeadBlock ());
+        this->video = this->register_module("video", chobits::nn::VideoHeadBlock ());
+        this->image = this->register_module("image", chobits::nn::ImageHeadBlock ());
+        this->mixer = this->register_module("mixer", chobits::nn::MediaMixerBlock());
+        this->tail  = this->register_module("tail",  chobits::nn::AudioTailBlock ());
     }
     torch::Tensor forward(const torch::Tensor& audio, const torch::Tensor& video) {
         auto audio_out = this->audio->forward(audio);
-        auto image_out = this->image->forward(video.select(1, -1));
         auto video_out = this->video->forward(video.select(2,  0));
-        auto mixer_out = this->mixer->forward(audio_out, image_out, video_out);
+        auto image_out = this->image->forward(video.select(1, -1));
+        auto mixer_out = this->mixer->forward(audio_out, video_out, image_out);
         return this->tail->forward(mixer_out);
     }
 

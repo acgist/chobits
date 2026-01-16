@@ -12,25 +12,24 @@ class PadBlock(nn.Module):
     ):
         super().__init__()
         self.pad = pad
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return torch.nn.functional.pad(x, pad = self.pad, value = 0.0)
+    def forward(self, input: torch.Tensor) -> torch.Tensor:
+        return torch.nn.functional.pad(input, pad = self.pad, value = 0.0)
 
-class ResNetBlock1d(nn.Module):
+class ResNet1dBlock(nn.Module):
     def __init__(
         self,
         in_channels : int,
         out_channels: int,
-        shape       : int,
-        stride      : int = 0,
+        features    : int,
+        stride      : int = 1,
         kernel      : int = 3,
         padding     : int = 1,
         dilation    : int = 1,
     ):
         super().__init__()
-        self.use_stride = stride > 0
         self.cv1 = nn.Sequential(
-            nn.LayerNorm([shape]),
-            nn.Conv1d(in_channels, out_channels, kernel, padding = padding, dilation = dilation, bias = False),
+            nn.LayerNorm([features]),
+            nn.Conv1d(in_channels, out_channels, kernel, padding = padding, dilation = dilation, bias = False, stride = stride),
             layer_act(),
         )
         self.cv2 = nn.Sequential(
@@ -39,58 +38,35 @@ class ResNetBlock1d(nn.Module):
             nn.Conv1d(out_channels, out_channels, kernel, padding = padding, dilation = dilation),
             layer_act(),
         )
-        if self.use_stride:
-            self.cv3 = nn.Sequential(
-                nn.Conv1d(out_channels, out_channels, kernel, padding = padding, dilation = dilation),
-                layer_act(),
-                nn.Conv1d(out_channels, out_channels, kernel, padding = padding, dilation = dilation, stride = stride),
-                layer_act(),
-            )
-        else:
-            self.cv3 = nn.Sequential(
-                nn.Conv1d(out_channels, out_channels, kernel, padding = padding, dilation = dilation),
-                layer_act(),
-                nn.Conv1d(out_channels, out_channels, kernel, padding = padding, dilation = dilation),
-                layer_act(),
-            )
+        self.cv3 = nn.Sequential(
+            nn.Conv1d(out_channels, out_channels, kernel, padding = padding, dilation = dilation),
+            layer_act(),
+            nn.Conv1d(out_channels, out_channels, kernel, padding = padding, dilation = dilation),
+            layer_act(),
+        )
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        if self.use_stride:
-            left = self.cv1(x)
-            left = self.cv2(left) + left
-            return self.cv3(left)
-        else:
-            left  = self.cv1(x)
-            right = self.cv2(left)  + left
-            return  self.cv3(right) + left
+    def forward(self, input: torch.Tensor) -> torch.Tensor:
+        left  = self.cv1(input)
+        right = self.cv2(left)  + left
+        return  self.cv3(right) + left
 
-class ResNetBlock2d(nn.Module):
+class ResNet2dBlock(nn.Module):
     def __init__(
         self,
         in_channels : int,
         out_channels: int,
         shape       : List[int],
-        stride      : List[int] = None,
+        stride      : List[int] = [1, 1],
         kernel      : List[int] = [3, 3],
         padding     : List[int] = [2, 2],
         dilation    : List[int] = [2, 2],
     ):
         super().__init__()
-        self.use_stride = stride is not None and len(stride) > 0
-        if self.use_stride:
-            self.cv1 = nn.Sequential(
-                nn.LayerNorm(shape),
-                nn.Conv2d(in_channels, out_channels, kernel, padding = padding, dilation = dilation, bias = False),
-                layer_act(),
-                nn.Conv2d(out_channels, out_channels, kernel, padding = padding, dilation = dilation, stride = stride),
-                layer_act(),
-            )
-        else:
-            self.cv1 = nn.Sequential(
-                nn.LayerNorm(shape),
-                nn.Conv2d(in_channels, out_channels, kernel, padding = padding, dilation = dilation, bias = False),
-                layer_act(),
-            )
+        self.cv1 = nn.Sequential(
+            nn.LayerNorm(shape),
+            nn.Conv2d(in_channels, out_channels, kernel, padding = padding, dilation = dilation, bias = False, stride = stride),
+            layer_act(),
+        )
         self.cv2 = nn.Sequential(
             nn.Conv2d(out_channels, out_channels, kernel, padding = padding, dilation = dilation),
             layer_act(),
@@ -104,32 +80,26 @@ class ResNetBlock2d(nn.Module):
             layer_act(),
         )
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        if self.use_stride:
-            left = self.cv1(x)
-            left = self.cv2(left) + left
-            return self.cv3(left)
-        else:
-            left  = self.cv1(x)
-            right = self.cv2(left)  + left
-            return  self.cv3(right) + left
+    def forward(self, input: torch.Tensor) -> torch.Tensor:
+        left  = self.cv1(input)
+        right = self.cv2(left)  + left
+        return  self.cv3(right) + left
 
 class GRUBlock(nn.Module):
     def __init__(
         self,
         input_size : int,
         hidden_size: int,
-        channel    : int = 256,
+        time       : int = 10,
         num_layers : int = 1,
     ):
         super().__init__()
         self.gru = nn.GRU(input_size, hidden_size, num_layers = num_layers, batch_first = True, bias = False)
-        self.out = ResNetBlock1d(channel * 2, channel, hidden_size)
+        self.out = ResNet1dBlock(time, time, input_size + hidden_size, 2)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        h0         = torch.zeros(self.gru.num_layers, x.size(0), self.gru.hidden_size, device = x.device)
-        output, _  = self.gru(x, h0)
-        return self.out(torch.cat([x, output], dim = 1))
+    def forward(self, input: torch.Tensor) -> torch.Tensor:
+        output, _ = self.gru(input)
+        return self.out(torch.cat([input, output], dim = -1))
 
 class AttentionBlock(nn.Module):
     def __init__(
@@ -147,7 +117,7 @@ class AttentionBlock(nn.Module):
         self.v    = nn.Linear(v_dim, o_dim, bias = False)
         self.attn = nn.MultiheadAttention(o_dim, num_heads, bias = False, batch_first = False)
         self.proj = nn.Linear(o_dim, o_dim, bias = False)
-        self.out  = ResNetBlock1d(channel * 2, channel, o_dim)
+        self.out  = ResNet1dBlock(channel, channel, q_dim + o_dim, 2)
 
     def forward(self, query: torch.Tensor, key: torch.Tensor, value: torch.Tensor) -> torch.Tensor:
         q = self.q(query.permute(1, 0, 2))
@@ -156,77 +126,95 @@ class AttentionBlock(nn.Module):
         o, _ = self.attn(q, k, v)
         o = o.permute(1, 0, 2)
         o = self.proj(o)
-        return self.out(torch.cat([query, o], dim = 1))
+        return self.out(torch.cat([query, o], dim = -1))
 
 class AudioHeadBlock(nn.Module):
     def __init__(
         self,
-        in_len  : int       = 800,
-        channels: List[int] = [10, 64, 128, 256],
-        stride  : int       = 2,
-        kernel  : int       = 3,
-        padding : int       = 1,
-        dilation: int       = 1,
+        kernel  : int = 3,
+        padding : int = 1,
+        dilation: int = 1,
     ):
         super().__init__()
         self.head = nn.Sequential(
-            ResNetBlock1d(channels[0], channels[1], in_len,                     stride, kernel, padding, dilation),
-            ResNetBlock1d(channels[1], channels[1], in_len // stride,                0, kernel, padding, dilation),
-            ResNetBlock1d(channels[1], channels[2], in_len // stride,           stride, kernel, padding, dilation),
-            ResNetBlock1d(channels[2], channels[2], in_len // stride // stride,      0, kernel, padding, dilation),
-            ResNetBlock1d(channels[2], channels[3], in_len // stride // stride,      0, kernel, padding, dilation),
-            ResNetBlock1d(channels[3], channels[3], in_len // stride // stride,      0, kernel, padding, dilation),
+            ResNet1dBlock( 1,   4, 800, 4, kernel, padding, dilation),
+            ResNet1dBlock( 4,  16, 200, 4, kernel, padding, dilation),
+            ResNet1dBlock(16,  64,  50, 4, kernel, padding, dilation),
+            ResNet1dBlock(64, 256,  13, 4, kernel, padding, dilation),
+            nn.Flatten(start_dim = 1),
+        )
+        self.gru = GRUBlock(1024, 1024)
+        self.conv = nn.Sequential(
+            ResNet1dBlock( 10,  64, 1024, 2, kernel, padding, dilation),
+            ResNet1dBlock( 64, 256,  512, 2, kernel, padding, dilation),
+            ResNet1dBlock(256, 256,  256, 1, kernel, padding, dilation),
         )
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.head(x)
+    def forward(self, input: torch.Tensor) -> torch.Tensor:
+        out = self.head(input.view(-1, 1, input.size(-1)))
+        out = self.gru (out.view(input.size(0), input.size(1), -1))
+        out = self.conv(out)
+        return out
 
 class VideoHeadBlock(nn.Module):
     def __init__(
         self,
-        in_channels: int,
-        out_len    : int = 960,
-        height     : int = 360,
-        width      : int = 640,
-        channels   : List[int] = [32, 64, 128, 256],
-        stride     : List[int] = [2, 2],
-        kernel     : List[int] = [3, 3],
-        padding    : List[int] = [1, 1],
-        dilation   : List[int] = [1, 1],
-        kernel_    : List[int] = [3, 3],
-        padding_   : List[int] = [2, 2],
-        dilation_  : List[int] = [2, 2],
+        kernel  : List[int] = [3, 3],
+        padding : List[int] = [1, 1],
+        dilation: List[int] = [1, 1],
     ):
         super().__init__()
         self.head = nn.Sequential(
-            ResNetBlock2d(in_channels, channels[0], [ height // pow(stride[0], 0), width // pow(stride[1], 0) ], stride, kernel, padding, dilation),
-            ResNetBlock2d(channels[0], channels[1], [ height // pow(stride[0], 1), width // pow(stride[1], 1) ], stride, kernel, padding, dilation),
-            ResNetBlock2d(channels[1], channels[2], [ height // pow(stride[0], 2), width // pow(stride[1], 2) ], stride, kernel, padding, dilation),
-            ResNetBlock2d(channels[2], channels[3], [ height // pow(stride[0], 3), width // pow(stride[1], 3) ], stride, kernel, padding, dilation),
-            PadBlock([0, 0, 1, 0]),
-            ResNetBlock2d(channels[3], channels[3], [ height // pow(stride[0], 4) + 2, width // pow(stride[1], 4) ], [], kernel_, padding_, dilation_),
-            ResNetBlock2d(channels[3], channels[3], [ height // pow(stride[0], 4) + 2, width // pow(stride[1], 4) ], [], kernel_, padding_, dilation_),
-            nn.Flatten(start_dim = 2),
-            ResNetBlock1d(channels[3], channels[3], out_len),
-            ResNetBlock1d(channels[3], channels[3], out_len),
+            ResNet2dBlock( 1,   4, [360, 640], [4, 4], kernel, padding, dilation),
+            ResNet2dBlock( 4,  16, [ 90, 160], [4, 4], kernel, padding, dilation),
+            ResNet2dBlock(16,  64, [ 23,  40], [4, 4], kernel, padding, dilation),
+            ResNet2dBlock(64, 256, [  6,  10], [4, 4], kernel, padding, dilation),
+            nn.Flatten(start_dim = 1),
+        )
+        self.gru = GRUBlock(1536, 1536)
+        self.conv = nn.Sequential(
+            ResNet1dBlock( 10,  64, 1536, 2, kernel[0], padding[0], dilation[0]),
+            ResNet1dBlock( 64, 256,  768, 1, kernel[0], padding[0], dilation[0]),
+            ResNet1dBlock(256, 256,  768, 1, kernel[0], padding[0], dilation[0]),
         )
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.head(x)
+    def forward(self, input: torch.Tensor) -> torch.Tensor:
+        out = self.head(input.view(-1, 1, input.size(2), input.size(3)))
+        out = self.gru(out.view(input.size(0), input.size(1), -1))
+        out = self.conv(out)
+        return out
 
-ImageHeadBlock = VideoHeadBlock
+class ImageHeadBlock(nn.Module):
+    def __init__(
+        self,
+        kernel  : List[int] = [3, 3],
+        padding : List[int] = [1, 1],
+        dilation: List[int] = [1, 1],
+    ):
+        super().__init__()
+        self.head = nn.Sequential(
+            ResNet2dBlock(  3,  32, [ 360, 640 ], [2, 2], kernel, padding, dilation),
+            ResNet2dBlock( 32,  64, [ 180, 320 ], [2, 2], kernel, padding, dilation),
+            ResNet2dBlock( 64, 128, [  90, 160 ], [2, 2], kernel, padding, dilation),
+            ResNet2dBlock(128, 256, [  45,  80 ], [2, 2], kernel, padding, dilation),
+            PadBlock([0, 0, 1, 0]),
+            ResNet2dBlock(256, 256, [ 24, 40 ], [1, 1], kernel, padding, dilation),
+            nn.Flatten(start_dim = 2),
+            ResNet1dBlock(256, 256, 960),
+        )
+
+    def forward(self, input: torch.Tensor) -> torch.Tensor:
+        return self.head(input)
 
 class MediaMixerBlock(nn.Module):
     def __init__(
         self,
-        audio_in: int = 200,
+        audio_in: int = 256,
+        video_in: int = 768,
         image_in: int = 960,
-        video_in: int = 960,
     ):
         super().__init__()
         muxer_in = audio_in + video_in
-        self.audio_gru  = GRUBlock(audio_in, audio_in)
-        self.video_gru  = GRUBlock(video_in, video_in)
         self.audio_attn = AttentionBlock(audio_in, video_in, video_in, audio_in)
         self.video_attn = AttentionBlock(video_in, audio_in, audio_in, video_in)
         self.image_attn = AttentionBlock(muxer_in, image_in, image_in, muxer_in)
@@ -236,13 +224,11 @@ class MediaMixerBlock(nn.Module):
     def forward(
         self,
         audio: torch.Tensor,
-        image: torch.Tensor,
         video: torch.Tensor,
+        image: torch.Tensor,
     ) -> torch.Tensor:
-        audio_v = self.audio_gru(audio)
-        video_v = self.video_gru(video)
-        audio_o = self.audio_attn(audio_v, video_v, video_v)
-        video_o = self.video_attn(video_v, audio_v, audio_v)
+        audio_o = self.audio_attn(audio, video, video)
+        video_o = self.video_attn(video, audio, audio)
         muxer_o = torch.cat([audio_o, video_o], dim = -1)
         image_o = self.image_attn(muxer_o, image, image)
         mixer_o = self.muxer_attn(muxer_o, image_o, image_o)
@@ -251,73 +237,79 @@ class MediaMixerBlock(nn.Module):
 class AudioTailBlock(nn.Module):
     def __init__(
         self,
-        in_features : int = 200 + 960,
+        in_features : int = 1024,
         out_features: int = 800,
         channels    : List[int] = [256, 64, 16, 4, 1],
     ):
         super().__init__()
         self.tail = nn.Sequential(
-            nn.Conv1d(channels[0], channels[1], 3, padding = 1),
+            nn.Conv1d(channels[0], channels[1], 3),
             layer_act(),
-            nn.Conv1d(channels[1], channels[2], 3, padding = 1),
+            nn.Conv1d(channels[1], channels[2], 3),
             layer_act(),
-            nn.Conv1d(channels[2], channels[3], 3, padding = 1),
+            nn.Conv1d(channels[2], channels[3], 3),
             layer_act(),
-            nn.Conv1d(channels[3], channels[4], 3, padding = 1),
+            nn.Conv1d(channels[3], channels[4], 3),
             nn.Flatten(start_dim = 1),
             layer_act(),
-            nn.Linear(in_features, out_features),
+            nn.Linear(in_features - 2 * 4, out_features),
         )
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return torch.tanh(self.tail(x))
+    def forward(self, input: torch.Tensor) -> torch.Tensor:
+        return torch.tanh(self.tail(input))
     
 class Chobits(nn.Module):
     def __init__(self):
         super().__init__()
-        self.audio = AudioHeadBlock (  )
-        self.image = ImageHeadBlock ( 3)
-        self.video = VideoHeadBlock (10)
-        self.mixer = MediaMixerBlock(  )
-        self.tail  = AudioTailBlock (  )
+        self.audio = AudioHeadBlock ()
+        self.video = VideoHeadBlock ()
+        self.image = ImageHeadBlock ()
+        self.mixer = MediaMixerBlock()
+        self.tail  = AudioTailBlock ()
 
     def forward(self, audio: torch.Tensor, video: torch.Tensor) -> torch.Tensor:
         audio_out = self.audio(audio)
-        image_out = self.image(video.select(1, -1))
         video_out = self.video(video.select(2,  0))
-        mixer_out = self.mixer(audio_out, image_out, video_out)
+        image_out = self.image(video.select(1, -1))
+        mixer_out = self.mixer(audio_out, video_out, image_out)
         return self.tail(mixer_out)
 
-# model = ResNetBlock1d(10, 64, 800, 2)
+# # model = ResNet1dBlock(10, 64, 800)
+# model = ResNet1dBlock(10, 64, 800, 2)
 # input = torch.randn(10, 10, 800)
 # print(model(input).shape)
 
-# model = ResNetBlock2d(10, 64, [360, 640], [ 2, 2 ])
+# # model = ResNet2dBlock(10, 64, [360, 640])
+# model = ResNet2dBlock(10, 64, [360, 640], [ 2, 2 ])
 # input = torch.randn(10, 10, 360, 640)
 # print(model(input).shape)
 
-# model = GRUBlock(960, 960)
-# input = torch.randn(10, 256, 960)
-# print(model(torch.randn(10, 256, 960)).shape)
+# model = GRUBlock(768, 768)
+# input = torch.randn(10, 10, 768)
+# print(model(input).shape)
 
-# model = AttentionBlock(960, 960, 960, 960)
-# input = (torch.randn(10, 256, 960), torch.randn(10, 256, 960), torch.randn(10, 256, 960))
+# model = AttentionBlock(768, 960, 960, 768)
+# input = (torch.randn(10, 256, 768), torch.randn(10, 256, 960), torch.randn(10, 256, 960))
 # print(model(*input).shape)
 
 # model = AudioHeadBlock()
 # input = torch.randn(10, 10, 800)
 # print(model(input).shape)
 
-# model = VideoHeadBlock(3)
+# model = VideoHeadBlock()
+# input = torch.randn(10, 10, 360, 640)
+# print(model(input).shape)
+
+# model = ImageHeadBlock()
 # input = torch.randn(10, 3, 360, 640)
 # print(model(input).shape)
 
 # model = MediaMixerBlock()
-# input = (torch.randn(10, 256, 200), torch.randn(10, 256, 960), torch.randn(10, 256, 960))
+# input = (torch.randn(10, 256, 256), torch.randn(10, 256, 768), torch.randn(10, 256, 960))
 # print(model(*input).shape)
 
 # model = AudioTailBlock()
-# input = torch.randn(10, 256, 1160)
+# input = torch.randn(10, 256, 1024)
 # print(model(input).shape)
 
 model = Chobits()
@@ -325,10 +317,13 @@ model.eval();
 input = (torch.randn(10, 10, 800), torch.randn(10, 10, 3, 360, 640))
 print(model(*input).shape)
 
+# 直接保存
 # torch.save(model, "D:/download/chobits.pt")
 
+# JIT保存
 torch.jit.save(torch.jit.trace(model, input), "D:/download/chobits.pt")
 
+# ONNX保存
 # batch = torch.export.Dim("batch", min = 1)
 # torch.onnx.export(
 #     model,
