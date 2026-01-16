@@ -34,7 +34,7 @@ const static AVChannelLayout audio_layout           = AV_CHANNEL_LAYOUT_MONO;
 const static int             audio_bytes_per_sample = av_get_bytes_per_sample(audio_format);
 
 struct Dataset {
-    size_t cache_size = 120;  // 120 * 1000 / per_wind_second = 12000ms = 12s
+    size_t cache_size = 150; // 150 * 1000 / per_wind_second = 15000ms = 15s
     size_t audio_size = 2ULL * chobits::audio_sample_rate / chobits::per_wind_second; // 2ULL = 16bits
     std::mutex mutex;
     std::condition_variable condition;
@@ -60,8 +60,7 @@ static std::vector<std::string> list_train_dataset();
 
 bool chobits::media::open_media() {
     if(chobits::mode_file) {
-        std::random_device device;
-        std::mt19937 rand(device());
+        std::mt19937 rand(std::random_device{}());
         std::vector<std::thread> threads;
         std::vector<std::string> files = list_train_dataset();
         std::printf("训练文件数量：%" PRIu64 "\n", files.size());
@@ -69,8 +68,8 @@ bool chobits::media::open_media() {
             threads.push_back(std::thread([&rand, index, files]() mutable {
                 dataset_index = index;
                 std::shuffle(files.begin(), files.end(), rand);
+                std::printf("开始训练：%d\n", dataset_index);
                 for(int epoch = 0; epoch < chobits::train_epoch && chobits::running; ++epoch) {
-                    std::printf("训练轮次：%d = %d\n", dataset_index, epoch);
                     for(const auto& file : files) {
                         if(!chobits::running) {
                             break;
@@ -90,16 +89,15 @@ bool chobits::media::open_media() {
             thread.join();
         }
         chobits::stop_all();
-        return true;
     } else {
         std::thread player_thread([]() {
             chobits::player::open_player();
         });
-        bool ret = chobits::media::open_device();
-        player_thread.join();
+        chobits::media::open_device();
         chobits::stop_all();
-        return ret;
+        player_thread.join();
     }
+    return true;
 }
 
 bool chobits::media::open_file(const std::string& file) {
@@ -377,9 +375,11 @@ bool chobits::media::open_device() {
 
 void chobits::media::stop_all() {
     std::printf("关闭媒体\n");
-    std::unique_lock<std::mutex> lock(dataset.mutex);
-    dataset.audio.clear();
-    dataset.video.clear();
+    {
+        std::unique_lock<std::mutex> lock(dataset.mutex);
+        dataset.audio.clear();
+        dataset.video.clear();
+    }
     dataset.condition.notify_all();
 }
 
@@ -415,8 +415,8 @@ std::tuple<bool, at::Tensor, at::Tensor, at::Tensor> chobits::media::get_data() 
             dataset_audio.erase(dataset_audio.begin());
             dataset_video.erase(dataset_video.begin());
         }
-        dataset.condition.notify_all();
     }
+    dataset.condition.notify_all();
     return {
         true,
         torch::stack(audio),
@@ -542,8 +542,8 @@ static bool audio_to_tensor(std::vector<torch::Tensor>& audio, SwrContext* swr, 
     // if(dataset_index == 0) {
     //     chobits::player::play_audio(buffer, size);
     // }
+    bool insert = false;
     if(remain >= dataset.audio_size) {
-        bool insert = false;
         std::unique_lock<std::mutex> lock(dataset.mutex);
         while(remain >= dataset.audio_size) {
             if(audio.size() > dataset.cache_size) {
@@ -569,9 +569,9 @@ static bool audio_to_tensor(std::vector<torch::Tensor>& audio, SwrContext* swr, 
                 std::memcpy(audio_buffer.data(), audio_buffer.data() + dataset.audio_size, remain);
             }
         }
-        if(insert) {
-            dataset.condition.notify_all();
-        }
+    }
+    if(insert) {
+        dataset.condition.notify_all();
     }
     return true;
 }
@@ -588,8 +588,8 @@ static bool video_to_tensor(std::vector<torch::Tensor>& audio, std::vector<torch
     if(dataset_index == 0) {
         chobits::player::play_video(buffer, width);
     }
+    bool insert = false;
     {
-        bool insert = false;
         std::unique_lock<std::mutex> lock(dataset.mutex);
         if(audio.size() >= video.size()) {
             if(video.size() > dataset.cache_size) {
@@ -615,9 +615,9 @@ static bool video_to_tensor(std::vector<torch::Tensor>& audio, std::vector<torch
                 video.push_back(std::move(tensor));
             }
         }
-        if(insert) {
-            dataset.condition.notify_all();
-        }
+    }
+    if(insert) {
+        dataset.condition.notify_all();
     }
     return true;
 }
