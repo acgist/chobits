@@ -39,7 +39,7 @@ static void info(std::shared_ptr<torch::nn::Module> layer) {
 
 [[maybe_unused]] static void test_gru() {
     torch::NoGradGuard no_grad_guard;
-    chobits::nn::GRUBlock layer(768, 768);
+    chobits::nn::GRUBlock layer(768, 768, 10);
     info(layer.ptr());
     auto output = layer->forward(torch::randn({ 10, 10, 768 }));
     std::cout << output.sizes() << std::endl;

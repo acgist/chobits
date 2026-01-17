@@ -98,7 +98,7 @@ class GRUBlock(nn.Module):
         self,
         input_size : int,
         hidden_size: int,
-        time       : int = 10,
+        time,
         num_layers : int = 1,
     ):
         super().__init__()
@@ -139,27 +139,38 @@ class AttentionBlock(nn.Module):
 class AudioHeadBlock(nn.Module):
     def __init__(
         self,
-        kernel  : int = 3,
-        padding : int = 1,
-        dilation: int = 1,
+        kernel   : int = 5,
+        padding  : int = 2,
+        dilation : int = 1,
+        kernel_  : int = 3,
+        padding_ : int = 1,
+        dilation_: int = 1,
     ):
         super().__init__()
-        self.head = nn.Sequential(
-            ResNet1dBlock( 1,   4, 800, 4, kernel, padding, dilation),
-            ResNet1dBlock( 4,  16, 200, 4, kernel, padding, dilation),
-            ResNet1dBlock(16,  64,  50, 4, kernel, padding, dilation),
-            ResNet1dBlock(64, 256,  13, 4, kernel, padding, dilation),
+        self.embed = nn.Sequential(
+            nn.Linear(1, 4),
+            GRUBlock(4, 4, 800),
             nn.Flatten(start_dim = 1),
         )
-        self.gru = GRUBlock(1024, 1024)
+        # TODO: 试试空洞卷积
+        self.head = nn.Sequential(
+            ResNet1dBlock(  1,   4, 3200, 4, kernel, padding, dilation),
+            ResNet1dBlock(  4,  16,  800, 4, kernel, padding, dilation),
+            ResNet1dBlock( 16,  64,  200, 4, kernel, padding, dilation),
+            ResNet1dBlock( 64, 256,   50, 4, kernel, padding, dilation),
+            ResNet1dBlock(256, 256,   13, 4, kernel, padding, dilation),
+            nn.Flatten(start_dim = 1),
+        )
+        self.gru = GRUBlock(1024, 1024, 10)
         self.conv = nn.Sequential(
-            ResNet1dBlock( 10,  64, 1024, 2, kernel, padding, dilation),
-            ResNet1dBlock( 64, 256,  512, 2, kernel, padding, dilation),
-            ResNet1dBlock(256, 256,  256, 1, kernel, padding, dilation),
+            ResNet1dBlock( 10,  64, 1024, 2, kernel_, padding_, dilation_),
+            ResNet1dBlock( 64, 256,  512, 2, kernel_, padding_, dilation_),
+            ResNet1dBlock(256, 256,  256, 1, kernel_, padding_, dilation_),
         )
 
     def forward(self, input: torch.Tensor) -> torch.Tensor:
-        out = self.head(input.view(-1, 1, input.size(-1)))
+        out = self.embed(input.view(-1, input.size(-1), 1))
+        out = self.head(out.view(-1, 1, out.size(-1)))
         out = self.gru (out.view(input.size(0), input.size(1), -1))
         out = self.conv(out)
         return out
@@ -167,11 +178,15 @@ class AudioHeadBlock(nn.Module):
 class VideoHeadBlock(nn.Module):
     def __init__(
         self,
-        kernel  : List[int] = [3, 3],
-        padding : List[int] = [1, 1],
-        dilation: List[int] = [1, 1],
+        kernel   : List[int] = [5, 5],
+        padding  : List[int] = [2, 2],
+        dilation : List[int] = [1, 1],
+        kernel_  : int = 3,
+        padding_ : int = 1,
+        dilation_: int = 1,
     ):
         super().__init__()
+        # TODO: 试试空洞卷积
         self.head = nn.Sequential(
             ResNet2dBlock( 1,   4, [360, 640], [4, 4], kernel, padding, dilation),
             ResNet2dBlock( 4,  16, [ 90, 160], [4, 4], kernel, padding, dilation),
@@ -179,11 +194,11 @@ class VideoHeadBlock(nn.Module):
             ResNet2dBlock(64, 256, [  6,  10], [4, 4], kernel, padding, dilation),
             nn.Flatten(start_dim = 1),
         )
-        self.gru = GRUBlock(1536, 1536)
+        self.gru = GRUBlock(1536, 1536, 10)
         self.conv = nn.Sequential(
-            ResNet1dBlock( 10,  64, 1536, 2, kernel[0], padding[0], dilation[0]),
-            ResNet1dBlock( 64, 256,  768, 1, kernel[0], padding[0], dilation[0]),
-            ResNet1dBlock(256, 256,  768, 1, kernel[0], padding[0], dilation[0]),
+            ResNet1dBlock( 10,  64, 1536, 2, kernel_, padding_, dilation_),
+            ResNet1dBlock( 64, 256,  768, 1, kernel_, padding_, dilation_),
+            ResNet1dBlock(256, 256,  768, 1, kernel_, padding_, dilation_),
         )
 
     def forward(self, input: torch.Tensor) -> torch.Tensor:
@@ -290,7 +305,7 @@ class Chobits(nn.Module):
 # input = torch.randn(10, 10, 360, 640)
 # print(model(input).shape)
 
-# model = GRUBlock(768, 768)
+# model = GRUBlock(768, 768, 10)
 # input = torch.randn(10, 10, 768)
 # print(model(input).shape)
 

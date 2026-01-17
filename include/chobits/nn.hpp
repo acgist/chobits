@@ -179,7 +179,7 @@ public:
     GRUBlockImpl(
         const int input_size,
         const int hidden_size,
-        const int time       = 10,
+        const int time,
         const int num_layers = 1
     ) {
         this->gru = this->register_module("gru", torch::nn::GRU(
@@ -267,30 +267,41 @@ TORCH_MODULE(AttentionBlock);
 class AudioHeadBlockImpl : public torch::nn::Module {
 
 private:
-    torch::nn::Sequential head{ nullptr };
-    torch::nn::Sequential gru { nullptr };
-    torch::nn::Sequential conv{ nullptr };
+    torch::nn::Sequential embed{ nullptr };
+    torch::nn::Sequential head { nullptr };
+    torch::nn::Sequential gru  { nullptr };
+    torch::nn::Sequential conv { nullptr };
 
 public:
     AudioHeadBlockImpl(
-        const int kernel   = 3,
-        const int padding  = 1,
-        const int dilation = 1
+        const int kernel    = 5,
+        const int padding   = 2,
+        const int dilation  = 1,
+        const int kernel_   = 3,
+        const int padding_  = 1,
+        const int dilation_ = 1
     ) {
+        this->embed = this->register_module("embed", torch::nn::Sequential(
+            torch::nn::Linear(1, 4),
+            chobits::nn::GRUBlock(4, 4, 800),
+            torch::nn::Flatten(torch::nn::FlattenOptions().start_dim(1))
+        ));
+        // TODO: 试试空洞卷积
         this->head = this->register_module("head", torch::nn::Sequential(
-            chobits::nn::ResNet1dBlock( 1,   4, 800, 4, kernel, padding, dilation),
-            chobits::nn::ResNet1dBlock( 4,  16, 200, 4, kernel, padding, dilation),
-            chobits::nn::ResNet1dBlock(16,  64,  50, 4, kernel, padding, dilation),
-            chobits::nn::ResNet1dBlock(64, 256,  13, 4, kernel, padding, dilation),
+            chobits::nn::ResNet1dBlock(  1,   4, 3200, 4, kernel, padding, dilation),
+            chobits::nn::ResNet1dBlock(  4,  16,  800, 4, kernel, padding, dilation),
+            chobits::nn::ResNet1dBlock( 16,  64,  200, 4, kernel, padding, dilation),
+            chobits::nn::ResNet1dBlock( 64, 256,   50, 4, kernel, padding, dilation),
+            chobits::nn::ResNet1dBlock(256, 256,   13, 4, kernel, padding, dilation),
             torch::nn::Flatten(torch::nn::FlattenOptions().start_dim(1))
         ));
         this->gru = this->register_module("gru", torch::nn::Sequential(
-            chobits::nn::GRUBlock(1024, 1024)
+            chobits::nn::GRUBlock(1024, 1024, 10)
         ));
         this->conv = this->register_module("conv", torch::nn::Sequential(
-            chobits::nn::ResNet1dBlock( 10,  64, 1024, 2, kernel, padding, dilation),
-            chobits::nn::ResNet1dBlock( 64, 256,  512, 2, kernel, padding, dilation),
-            chobits::nn::ResNet1dBlock(256, 256,  256, 1, kernel, padding, dilation)
+            chobits::nn::ResNet1dBlock( 10,  64, 1024, 2, kernel_, padding_, dilation_),
+            chobits::nn::ResNet1dBlock( 64, 256,  512, 2, kernel_, padding_, dilation_),
+            chobits::nn::ResNet1dBlock(256, 256,  256, 1, kernel_, padding_, dilation_)
         ));
     }
     ~AudioHeadBlockImpl() {
@@ -298,7 +309,8 @@ public:
 
 public:
     torch::Tensor forward(const torch::Tensor& input) {
-        auto out = this->head->forward(input.view({ -1, 1, input.size(-1) }));
+        auto out = this->embed->forward(input.view({ -1, input.size(-1), 1 }));
+             out = this->head->forward(out.view({ -1, 1, out.size(-1) }));
              out = this->gru ->forward(out.view({ input.size(0), input.size(1), -1 }));
              out = this->conv->forward(out);
         return out;
@@ -320,10 +332,14 @@ private:
 
 public:
     VideoHeadBlockImpl(
-        const shp kernel   = std::vector<int64_t>{ 3, 3 },
-        const shp padding  = std::vector<int64_t>{ 1, 1 },
-        const shp dilation = std::vector<int64_t>{ 1, 1 }
+        const shp kernel    = std::vector<int64_t>{ 5, 5 },
+        const shp padding   = std::vector<int64_t>{ 2, 2 },
+        const shp dilation  = std::vector<int64_t>{ 1, 1 },
+        const int kernel_   = 3,
+        const int padding_  = 1,
+        const int dilation_ = 1
     ) {
+        // TODO: 试试空洞卷积
         this->head = this->register_module("head", torch::nn::Sequential(
             chobits::nn::ResNet2dBlock( 1,   4, std::vector<int64_t>{ 360, 640 }, std::vector<int64_t>{ 4, 4 }, kernel, padding, dilation),
             chobits::nn::ResNet2dBlock( 4,  16, std::vector<int64_t>{  90, 160 }, std::vector<int64_t>{ 4, 4 }, kernel, padding, dilation),
@@ -332,12 +348,12 @@ public:
             torch::nn::Flatten(torch::nn::FlattenOptions().start_dim(1))
         ));
         this->gru = this->register_module("gru", torch::nn::Sequential(
-            chobits::nn::GRUBlock(1536, 1536)
+            chobits::nn::GRUBlock(1536, 1536, 10)
         ));
         this->conv = this->register_module("conv", torch::nn::Sequential(
-            chobits::nn::ResNet1dBlock( 10,  64, 1536, 2, kernel[0], padding[0], dilation[0]),
-            chobits::nn::ResNet1dBlock( 64, 256,  768, 1, kernel[0], padding[0], dilation[0]),
-            chobits::nn::ResNet1dBlock(256, 256,  768, 1, kernel[0], padding[0], dilation[0])
+            chobits::nn::ResNet1dBlock( 10,  64, 1536, 2, kernel_, padding_, dilation_),
+            chobits::nn::ResNet1dBlock( 64, 256,  768, 1, kernel_, padding_, dilation_),
+            chobits::nn::ResNet1dBlock(256, 256,  768, 1, kernel_, padding_, dilation_)
         ));
     }
     ~VideoHeadBlockImpl() {
