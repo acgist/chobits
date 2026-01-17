@@ -26,6 +26,7 @@ extern bool mode_drop; // 丢弃模式
 extern bool mode_eval; // 验证模式
 extern bool mode_file; // 文件模式
 extern bool mode_play; // 播放模式
+extern bool mode_save; // 保存模式
 
 extern int         batch_size;    // 训练批次大小
 extern int         batch_length;  // 训练批次长度

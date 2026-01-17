@@ -126,6 +126,7 @@ void chobits::model::Trainer::train() {
 }
 
 void chobits::model::Trainer::train(float& loss_val) {
+    // TODO: 预测音频叠加输入还是直接过滤
     auto [success, audio, video, label] = chobits::media::get_data();
     if(!success) {
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
@@ -140,11 +141,11 @@ void chobits::model::Trainer::train(float& loss_val) {
     loss_val += loss.template item<float>();
     if(chobits::mode_play) {
         torch::NoGradGuard no_grad_guard;
-        chobits::media::set_data(pred.cpu());
+        chobits::media::set_data(pred, video);
     }
 }
 
-void chobits::model::Trainer::eval(std::function<void(const std::vector<short>&)> callback) {
+void chobits::model::Trainer::eval() {
     try {
         trainer_state.model->eval();
         torch::NoGradGuard no_grad_guard;
@@ -158,10 +159,7 @@ void chobits::model::Trainer::eval(std::function<void(const std::vector<short>&)
             video = video.to(trainer_state.device);
 //          label = label.to(trainer_state.device);
             auto pred = trainer_state.model->forward(audio, video);
-            auto data = chobits::media::set_data(pred.cpu());
-            if(callback) {
-                callback(data);
-            }
+            chobits::media::set_data(pred, video);
         }
     } catch(const std::exception& e) {
         std::printf("预测异常：%s\n", e.what());

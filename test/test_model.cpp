@@ -4,7 +4,6 @@
 #include "chobits/player.hpp"
 #include "chobits/chobits.hpp"
 
-#include <fstream>
 #include <cinttypes>
 
 static void info(std::shared_ptr<torch::nn::Module> layer) {
@@ -117,19 +116,11 @@ static void info(std::shared_ptr<torch::nn::Module> layer) {
         chobits::media::open_file("video.mp4");
         #endif
     });
-    std::ofstream stream;
-    stream.open("chobits.pcm", std::ios::binary);
+    chobits::mode_save = true;
     chobits::model::Trainer trainer;
     trainer.load();
-    auto time_point = std::chrono::system_clock::now();
-    trainer.eval([&stream, &time_point](const std::vector<short>& data) {
-        stream.write(reinterpret_cast<const char*>(data.data()), data.size() * sizeof(short));
-        auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now() - time_point).count();
-        std::printf("写入音频数据：%" PRIu64 " = %" PRId64 "\n", data.size(), duration);
-        time_point = std::chrono::system_clock::now();
-    });
+    trainer.eval();
     media_thread.join();
-    stream.close();
 }
 
 [[maybe_unused]] static void test_model_train() {

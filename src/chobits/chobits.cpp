@@ -3,11 +3,13 @@
 #include "chobits/player.hpp"
 #include "chobits/chobits.hpp"
 
-bool        chobits::running       = true;
-bool        chobits::mode_drop     = false;
-bool        chobits::mode_eval     = false;
-bool        chobits::mode_file     = false;
-bool        chobits::mode_play     = false;
+bool        chobits::running   = true;
+bool        chobits::mode_drop = false;
+bool        chobits::mode_eval = false;
+bool        chobits::mode_file = false;
+bool        chobits::mode_play = false;
+bool        chobits::mode_save = false;
+
 int         chobits::batch_size    = 1;
 int         chobits::batch_length  = 10;
 int         chobits::train_epoch   = 1;

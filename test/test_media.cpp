@@ -35,7 +35,7 @@
         std::cout << video.sizes() << std::endl;
         std::cout << label.sizes() << std::endl;
         if(success) {
-            chobits::media::set_data(audio.cpu());
+            chobits::media::set_data(audio[0], video);
         } else {
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
         }

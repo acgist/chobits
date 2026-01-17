@@ -31,7 +31,7 @@ public:
     bool load(const std::string& path = "chobits.pt", bool train = false);
     void train();
     void train(float& loss_val);
-    void eval(std::function<void(const std::vector<short>&)> callback = nullptr);
+    void eval();
     void close();
     
 };

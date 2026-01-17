@@ -6,6 +6,7 @@
 #include <random>
 #include <thread>
 #include <numbers>
+#include <fstream>
 #include <algorithm>
 #include <filesystem>
 #include <condition_variable>
@@ -33,6 +34,8 @@ const static AVSampleFormat  audio_format           = AV_SAMPLE_FMT_S16;
 const static AVChannelLayout audio_layout           = AV_CHANNEL_LAYOUT_MONO;
 const static int             audio_bytes_per_sample = av_get_bytes_per_sample(audio_format);
 
+static std::ofstream stream;
+
 struct Dataset {
     size_t cache_size = 150; // 150 * 1000 / per_wind_second = 15000ms = 15s
     size_t audio_size = 2ULL * chobits::audio_sample_rate / chobits::per_wind_second; // 2ULL = 16bits
@@ -45,6 +48,8 @@ struct Dataset {
 static Dataset dataset = {};
 
 thread_local static int dataset_index = 0;
+
+static void init_context();
 
 static SwrContext* init_audio_swr(AVCodecContext* ctx, AVFrame* frame);
 static SwsContext* init_video_sws(AVCodecContext* ctx, AVFrame* frame);
@@ -164,15 +169,7 @@ bool chobits::media::open_file(const std::string& file) {
     AVPacket* packet = av_packet_alloc();
     SwrContext* audio_swr = nullptr;
     SwsContext* video_sws = nullptr;
-    {
-        std::unique_lock<std::mutex> lock(dataset.mutex);
-        if(dataset.audio.empty()) {
-            dataset.audio.resize(chobits::batch_size);
-        }
-        if(dataset.video.empty()) {
-            dataset.video.resize(chobits::batch_size);
-        }
-    }
+    init_context();
     std::vector<torch::Tensor>& audio = dataset.audio[dataset_index];
     std::vector<torch::Tensor>& video = dataset.video[dataset_index];
     while(chobits::running && av_read_frame(format_ctx, packet) == 0) {
@@ -280,15 +277,7 @@ bool chobits::media::open_device() {
     av_dump_format(video_format_ctx, 0, video_format_ctx->url, 0);
     uint64_t audio_frame_count = 0;
     uint64_t video_frame_count = 0;
-    {
-        std::unique_lock<std::mutex> lock(dataset.mutex);
-        if(dataset.audio.empty()) {
-            dataset.audio.resize(chobits::batch_size);
-        }
-        if(dataset.video.empty()) {
-            dataset.video.resize(chobits::batch_size);
-        }
-    }
+    init_context();
     std::vector<torch::Tensor>& audio = dataset.audio[dataset_index];
     std::vector<torch::Tensor>& video = dataset.video[dataset_index];
     std::thread audio_thread([&audio, audio_format_ctx, &audio_frame_count]() {
@@ -379,6 +368,9 @@ void chobits::media::stop_all() {
         std::unique_lock<std::mutex> lock(dataset.mutex);
         dataset.audio.clear();
         dataset.video.clear();
+        if(stream.is_open()) {
+            stream.close();
+        }
     }
     dataset.condition.notify_all();
 }
@@ -425,15 +417,26 @@ std::tuple<bool, at::Tensor, at::Tensor, at::Tensor> chobits::media::get_data() 
     };
 }
 
-std::vector<short> chobits::media::set_data(const torch::Tensor& tensor) {
-    auto pcm_tensor = tensor.mul(audio_normalization).to(torch::kShort);
-    auto pcm_size   = pcm_tensor.size(-1);
-    auto pcm_data   = reinterpret_cast<short*>(pcm_tensor.data_ptr());
-    std::vector<short> pcm;
-    pcm.resize(pcm_size);
-    std::copy_n(pcm_data, pcm_size, pcm.data());
-    chobits::player::play_audio(pcm.data(), pcm_size * sizeof(short));
-    return pcm;
+void chobits::media::set_data(const torch::Tensor& audio, const torch::Tensor& video) {
+    // audio
+    auto audio_tensor = audio.mul(audio_normalization).to(torch::kShort).cpu();
+    auto audio_data   = reinterpret_cast<short*>(audio_tensor.data_ptr());
+    auto audio_length = audio.size(-1);
+    // video
+    auto video_tensor = video[0][0].permute({ 1, 2, 0 }).contiguous().mul(video_normalization).add(video_normalization).to(torch::kUInt8).cpu();
+    auto video_data   = reinterpret_cast<char*>(video_tensor.data_ptr());
+    auto video_width  = chobits::video_width * 3;
+    // play
+    chobits::player::play_audio(audio_data, audio_length * sizeof(short));
+    chobits::player::play_video(video_data, video_width);
+    if(chobits::mode_save && chobits::running && stream.is_open()) {
+        stream.write(reinterpret_cast<const char*>(audio_data), audio_length * sizeof(short));
+    }
+    static auto time_point_a = std::chrono::system_clock::now();
+           auto time_point_z = std::chrono::system_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(time_point_z - time_point_a).count();
+    std::printf("时间统计：%" PRId64 "\n", duration);
+    time_point_a = time_point_z;
 }
 
 static SwrContext* init_audio_swr(AVCodecContext* ctx, AVFrame*) {
@@ -585,9 +588,9 @@ static bool video_to_tensor(std::vector<torch::Tensor>& audio, std::vector<torch
         std::printf("视频重采样失败：%d\n", height);
         return false;
     }
-    if(dataset_index == 0) {
-        chobits::player::play_video(buffer, width);
-    }
+    // if(dataset_index == 0) {
+    //     chobits::player::play_video(buffer, width);
+    // }
     bool insert = false;
     {
         std::unique_lock<std::mutex> lock(dataset.mutex);
@@ -620,6 +623,19 @@ static bool video_to_tensor(std::vector<torch::Tensor>& audio, std::vector<torch
         dataset.condition.notify_all();
     }
     return true;
+}
+
+static void init_context() {
+    std::unique_lock<std::mutex> lock(dataset.mutex);
+    if(dataset.audio.empty()) {
+        dataset.audio.resize(chobits::batch_size);
+    }
+    if(dataset.video.empty()) {
+        dataset.video.resize(chobits::batch_size);
+    }
+    if(chobits::running && !stream.is_open()) {
+        stream.open("chobits.pcm", std::ios::binary);
+    }
 }
 
 static std::vector<std::string> list_train_dataset() {
