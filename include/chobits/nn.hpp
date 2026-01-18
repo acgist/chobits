@@ -172,22 +172,25 @@ TORCH_MODULE(ResNet2dBlock);
 class GRUBlockImpl : public torch::nn::Module {
 
 private:
-    torch::nn::GRU        gru{ nullptr };
-    torch::nn::Sequential out{ nullptr };
+    torch::nn::GRU        gru { nullptr };
+    torch::nn::Sequential proj{ nullptr };
+    torch::nn::Sequential out { nullptr };
 
 public:
     GRUBlockImpl(
         const int input_size,
         const int hidden_size,
         const int time,
-        const int stride     = 2,
         const int num_layers = 1
     ) {
         this->gru = this->register_module("gru", torch::nn::GRU(
             torch::nn::GRUOptions(input_size, hidden_size).num_layers(num_layers).bias(false).batch_first(true)
         ));
+        this->proj = this->register_module("proj", torch::nn::Sequential(
+            torch::nn::Linear(torch::nn::LinearOptions(hidden_size, hidden_size).bias(false))
+        ));
         this->out = this->register_module("out", torch::nn::Sequential(
-            chobits::nn::ResNet1dBlock(time, time, input_size + hidden_size, stride)
+            chobits::nn::ResNet1dBlock(time, time, input_size + hidden_size, 2)
         ));
     }
     ~GRUBlockImpl() {
@@ -196,7 +199,7 @@ public:
 public:
     torch::Tensor forward(const torch::Tensor& input) {
         auto [ output, _ ] = this->gru->forward(input);
-        // TODO: 映射
+        output = this->proj->forward(output);
         return this->out->forward(torch::cat({ input, output }, -1));
     }
 
@@ -283,11 +286,6 @@ public:
         const int padding_  = 1,
         const int dilation_ = 1
     ) {
-        // this->embed = this->register_module("embed", torch::nn::Sequential(
-        //     torch::nn::Linear(1, 4),
-        //     chobits::nn::GRUBlock(4, 4, 800),
-        //     torch::nn::Flatten(torch::nn::FlattenOptions().start_dim(1))
-        // ));
         // TODO: 试试空洞卷积
         this->head = this->register_module("head", torch::nn::Sequential(
             chobits::nn::ResNet1dBlock( 1,   4, 800, 4, kernel, padding, dilation),
@@ -310,11 +308,6 @@ public:
 
 public:
     torch::Tensor forward(const torch::Tensor& input) {
-        // auto out = this->embed->forward(input.view({ -1, input.size(-1), 1 }));
-        //      out = this->head->forward(out.view({ -1, 1, out.size(-1) }));
-        //      out = this->gru ->forward(out.view({ input.size(0), input.size(1), -1 }));
-        //      out = this->conv->forward(out);
-        // return out;
         auto out = this->head->forward(input.view({ -1, 1, input.size(-1) }));
              out = this->gru ->forward(out.view({ input.size(0), input.size(1), -1 }));
              out = this->conv->forward(out);

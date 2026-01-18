@@ -99,16 +99,16 @@ class GRUBlock(nn.Module):
         input_size : int,
         hidden_size: int,
         time,
-        stride     : int = 2,
         num_layers : int = 1,
     ):
         super().__init__()
-        self.gru = nn.GRU(input_size, hidden_size, num_layers = num_layers, batch_first = True, bias = False)
-        self.out = ResNet1dBlock(time, time, input_size + hidden_size, stride)
+        self.gru  = nn.GRU(input_size, hidden_size, num_layers = num_layers, batch_first = True, bias = False)
+        self.proj = nn.Linear(hidden_size, hidden_size, bias = False)
+        self.out  = ResNet1dBlock(time, time, input_size + hidden_size, 2)
 
     def forward(self, input: torch.Tensor) -> torch.Tensor:
         output, _ = self.gru(input)
-        # TODO: 映射
+        output = self.proj(output)
         return self.out(torch.cat([input, output], dim = -1))
 
 class AttentionBlock(nn.Module):
@@ -149,11 +149,6 @@ class AudioHeadBlock(nn.Module):
         dilation_: int = 1,
     ):
         super().__init__()
-        # self.embed = nn.Sequential(
-        #     nn.Linear(1, 4),
-        #     GRUBlock(1, 4, 800),
-        #     nn.Flatten(start_dim = 1),
-        # )
         # TODO: 试试空洞卷积
         self.head = nn.Sequential(
             ResNet1dBlock( 1,   4, 800, 4, kernel, padding, dilation),
@@ -170,11 +165,6 @@ class AudioHeadBlock(nn.Module):
         )
 
     def forward(self, input: torch.Tensor) -> torch.Tensor:
-        # out = self.embed(input.view(-1, input.size(-1), 1))
-        # out = self.head(out.view(-1, 1, out.size(-1)))
-        # out = self.gru (out.view(input.size(0), input.size(1), -1))
-        # out = self.conv(out)
-        # return out
         out = self.head(input.view(-1, 1, input.size(-1)))
         out = self.gru (out.view(input.size(0), input.size(1), -1))
         out = self.conv(out)
