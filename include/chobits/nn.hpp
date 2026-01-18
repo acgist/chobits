@@ -127,8 +127,8 @@ public:
         const shp shape,
         const shp stride   = std::vector<int64_t>{ 1, 1 },
         const shp kernel   = std::vector<int64_t>{ 3, 3 },
-        const shp padding  = std::vector<int64_t>{ 2, 2 },
-        const shp dilation = std::vector<int64_t>{ 2, 2 }
+        const shp padding  = std::vector<int64_t>{ 1, 1 },
+        const shp dilation = std::vector<int64_t>{ 1, 1 }
     ) {
         this->cv1 = this->register_module("cv1", torch::nn::Sequential(
             torch::nn::LayerNorm(torch::nn::LayerNormOptions(shape)),
@@ -180,13 +180,14 @@ public:
         const int input_size,
         const int hidden_size,
         const int time,
+        const int stride     = 2,
         const int num_layers = 1
     ) {
         this->gru = this->register_module("gru", torch::nn::GRU(
             torch::nn::GRUOptions(input_size, hidden_size).num_layers(num_layers).bias(false).batch_first(true)
         ));
         this->out = this->register_module("out", torch::nn::Sequential(
-            chobits::nn::ResNet1dBlock(time, time, input_size + hidden_size, 2)
+            chobits::nn::ResNet1dBlock(time, time, input_size + hidden_size, stride)
         ));
     }
     ~GRUBlockImpl() {
@@ -195,6 +196,7 @@ public:
 public:
     torch::Tensor forward(const torch::Tensor& input) {
         auto [ output, _ ] = this->gru->forward(input);
+        // TODO: 映射
         return this->out->forward(torch::cat({ input, output }, -1));
     }
 
@@ -281,18 +283,17 @@ public:
         const int padding_  = 1,
         const int dilation_ = 1
     ) {
-        this->embed = this->register_module("embed", torch::nn::Sequential(
-            torch::nn::Linear(1, 4),
-            chobits::nn::GRUBlock(4, 4, 800),
-            torch::nn::Flatten(torch::nn::FlattenOptions().start_dim(1))
-        ));
+        // this->embed = this->register_module("embed", torch::nn::Sequential(
+        //     torch::nn::Linear(1, 4),
+        //     chobits::nn::GRUBlock(4, 4, 800),
+        //     torch::nn::Flatten(torch::nn::FlattenOptions().start_dim(1))
+        // ));
         // TODO: 试试空洞卷积
         this->head = this->register_module("head", torch::nn::Sequential(
-            chobits::nn::ResNet1dBlock(  1,   4, 3200, 4, kernel, padding, dilation),
-            chobits::nn::ResNet1dBlock(  4,  16,  800, 4, kernel, padding, dilation),
-            chobits::nn::ResNet1dBlock( 16,  64,  200, 4, kernel, padding, dilation),
-            chobits::nn::ResNet1dBlock( 64, 256,   50, 4, kernel, padding, dilation),
-            chobits::nn::ResNet1dBlock(256, 256,   13, 4, kernel, padding, dilation),
+            chobits::nn::ResNet1dBlock( 1,   4, 800, 4, kernel, padding, dilation),
+            chobits::nn::ResNet1dBlock( 4,  16, 200, 4, kernel, padding, dilation),
+            chobits::nn::ResNet1dBlock(16,  64,  50, 4, kernel, padding, dilation),
+            chobits::nn::ResNet1dBlock(64, 256,  13, 4, kernel, padding, dilation),
             torch::nn::Flatten(torch::nn::FlattenOptions().start_dim(1))
         ));
         this->gru = this->register_module("gru", torch::nn::Sequential(
@@ -309,8 +310,12 @@ public:
 
 public:
     torch::Tensor forward(const torch::Tensor& input) {
-        auto out = this->embed->forward(input.view({ -1, input.size(-1), 1 }));
-             out = this->head->forward(out.view({ -1, 1, out.size(-1) }));
+        // auto out = this->embed->forward(input.view({ -1, input.size(-1), 1 }));
+        //      out = this->head->forward(out.view({ -1, 1, out.size(-1) }));
+        //      out = this->gru ->forward(out.view({ input.size(0), input.size(1), -1 }));
+        //      out = this->conv->forward(out);
+        // return out;
+        auto out = this->head->forward(input.view({ -1, 1, input.size(-1) }));
              out = this->gru ->forward(out.view({ input.size(0), input.size(1), -1 }));
              out = this->conv->forward(out);
         return out;

@@ -68,26 +68,26 @@ bool chobits::media::open_media() {
         std::mt19937 rand(std::random_device{}());
         std::vector<std::thread> threads;
         std::vector<std::string> files = list_train_dataset();
-        std::printf("训练文件数量：%" PRIu64 "\n", files.size());
+        std::printf("加载文件数量：%" PRIu64 "\n", files.size());
         for(int index = 0; index < chobits::batch_size && chobits::running; ++index) {
             threads.push_back(std::thread([&rand, index, files]() mutable {
                 dataset_index = index;
                 std::shuffle(files.begin(), files.end(), rand);
-                std::printf("开始训练：%d\n", dataset_index);
+                std::printf("开始加载文件：%d\n", dataset_index);
                 for(int epoch = 0; epoch < chobits::train_epoch && chobits::running; ++epoch) {
                     for(const auto& file : files) {
                         if(!chobits::running) {
                             break;
                         }
-                        std::printf("开始训练文件：%d = %d = %s\n", dataset_index, epoch, file.c_str());
+                        std::printf("开始加载文件：%d = %d = %s\n", dataset_index, epoch, file.c_str());
                         if(chobits::media::open_file(file)) {
-                            std::printf("文件训练完成：%d = %d = %s\n", dataset_index, epoch, file.c_str());
+                            std::printf("文件加载完成：%d = %d = %s\n", dataset_index, epoch, file.c_str());
                         } else {
-                            std::printf("文件训练失败：%d = %d = %s\n", dataset_index, epoch, file.c_str());
+                            std::printf("文件加载失败：%d = %d = %s\n", dataset_index, epoch, file.c_str());
                         }
                     }
                 }
-                std::printf("训练完成：%d\n", dataset_index);
+                std::printf("文件加载完成：%d\n", dataset_index);
             }));
         }
         for(auto& thread : threads) {

@@ -3,6 +3,9 @@
 #include "chobits/player.hpp"
 #include "chobits/chobits.hpp"
 
+#include <ctime>
+#include <iostream>
+
 bool        chobits::running   = true;
 bool        chobits::mode_drop = false;
 bool        chobits::mode_eval = false;
@@ -22,6 +25,11 @@ int  chobits::video_width       = 640;
 int  chobits::video_height      = 360;
 
 void chobits::stop_all() {
+    std::time_t time = std::time(nullptr);
+    std::tm* tm = std::localtime(&time);
+    char buffer[32];
+    std::strftime(buffer, sizeof(buffer), "%Y-%m-%d %H:%M:%S", tm);
+    std::printf("%s\n", buffer);
     std::printf("等待系统关闭...\n");
     chobits::running = false;
     chobits::player::stop_player();
