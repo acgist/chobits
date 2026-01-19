@@ -12,6 +12,7 @@ class PadBlock(nn.Module):
     ):
         super().__init__()
         self.pad = pad
+    
     def forward(self, input: torch.Tensor) -> torch.Tensor:
         return torch.nn.functional.pad(input, pad = self.pad, value = 0.0)
 
@@ -44,15 +45,11 @@ class ResNet1dBlock(nn.Module):
             nn.Conv1d(out_channels, out_channels, kernel, padding = padding, dilation = dilation),
             layer_act(),
         )
-        self.cv4 = nn.Sequential(
-            nn.Conv1d(out_channels * 2, out_channels, kernel, padding = padding, dilation = dilation),
-            layer_act(),
-        )
 
     def forward(self, input: torch.Tensor) -> torch.Tensor:
         left  = self.cv1(input)
-        right = self.cv2(left) + left
-        return  self.cv4(torch.cat([self.cv3(right), left], dim = 1))
+        right = self.cv2(left)  + left
+        return  self.cv3(right) + left
 
 class ResNet2dBlock(nn.Module):
     def __init__(
@@ -83,15 +80,11 @@ class ResNet2dBlock(nn.Module):
             nn.Conv2d(out_channels, out_channels, kernel, padding = padding, dilation = dilation),
             layer_act(),
         )
-        self.cv4 = nn.Sequential(
-            nn.Conv2d(out_channels * 2, out_channels, kernel, padding = padding, dilation = dilation),
-            layer_act(),
-        )
 
     def forward(self, input: torch.Tensor) -> torch.Tensor:
         left  = self.cv1(input)
-        right = self.cv2(left) + left
-        return  self.cv4(torch.cat([self.cv3(right), left], dim = 1))
+        right = self.cv2(left)  + left
+        return  self.cv3(right) + left
 
 class GRUBlock(nn.Module):
     def __init__(
@@ -141,15 +134,15 @@ class AttentionBlock(nn.Module):
 class AudioHeadBlock(nn.Module):
     def __init__(
         self,
-        kernel   : int = 5,
-        padding  : int = 2,
+        # TODO: 试试空洞卷积
+        kernel   : int = 3,
+        padding  : int = 1,
         dilation : int = 1,
         kernel_  : int = 3,
         padding_ : int = 1,
         dilation_: int = 1,
     ):
         super().__init__()
-        # TODO: 试试空洞卷积
         self.head = nn.Sequential(
             ResNet1dBlock( 1,   4, 800, 4, kernel, padding, dilation),
             ResNet1dBlock( 4,  16, 200, 4, kernel, padding, dilation),
@@ -166,22 +159,22 @@ class AudioHeadBlock(nn.Module):
 
     def forward(self, input: torch.Tensor) -> torch.Tensor:
         out = self.head(input.view(-1, 1, input.size(-1)))
-        out = self.gru (out.view(input.size(0), input.size(1), -1))
+        out = self.gru(out.view(input.size(0), input.size(1), -1))
         out = self.conv(out)
         return out
 
 class VideoHeadBlock(nn.Module):
     def __init__(
         self,
-        kernel   : List[int] = [5, 5],
-        padding  : List[int] = [2, 2],
+        # TODO: 试试空洞卷积
+        kernel   : List[int] = [3, 3],
+        padding  : List[int] = [1, 1],
         dilation : List[int] = [1, 1],
         kernel_  : int = 3,
         padding_ : int = 1,
         dilation_: int = 1,
     ):
         super().__init__()
-        # TODO: 试试空洞卷积
         self.head = nn.Sequential(
             ResNet2dBlock( 1,   4, [360, 640], [4, 4], kernel, padding, dilation),
             ResNet2dBlock( 4,  16, [ 90, 160], [4, 4], kernel, padding, dilation),

@@ -61,7 +61,6 @@ private:
     torch::nn::Sequential cv1{ nullptr };
     torch::nn::Sequential cv2{ nullptr };
     torch::nn::Sequential cv3{ nullptr };
-    torch::nn::Sequential cv4{ nullptr };
 
 public:
     ResNet1dBlockImpl(
@@ -90,10 +89,6 @@ public:
             torch::nn::Conv1d(torch::nn::Conv1dOptions(out_channels, out_channels, kernel).padding(padding).dilation(dilation)),
             layer_act()
         ));
-        this->cv4 = this->register_module("cv4", torch::nn::Sequential(
-            torch::nn::Conv1d(torch::nn::Conv1dOptions(out_channels * 2, out_channels, kernel).padding(padding).dilation(dilation)),
-            layer_act()
-        ));
     }
     ~ResNet1dBlockImpl() {
     }
@@ -101,8 +96,8 @@ public:
 public:
     torch::Tensor forward(const torch::Tensor& input) {
         auto left  = this->cv1->forward(input);
-        auto right = this->cv2->forward(left) + left;
-        return       this->cv4->forward(torch::cat({this->cv3->forward(right), left}, 1));
+        auto right = this->cv2->forward(left)  + left;
+        return       this->cv3->forward(right) + left;
     }
 
 };
@@ -118,7 +113,6 @@ private:
     torch::nn::Sequential cv1{ nullptr };
     torch::nn::Sequential cv2{ nullptr };
     torch::nn::Sequential cv3{ nullptr };
-    torch::nn::Sequential cv4{ nullptr };
 
 public:
     ResNet2dBlockImpl(
@@ -147,10 +141,6 @@ public:
             torch::nn::Conv2d(torch::nn::Conv2dOptions(out_channels, out_channels, kernel).padding(padding).dilation(dilation)),
             layer_act()
         ));
-        this->cv4 = this->register_module("cv4", torch::nn::Sequential(
-            torch::nn::Conv2d(torch::nn::Conv2dOptions(out_channels * 2, out_channels, kernel).padding(padding).dilation(dilation)),
-            layer_act()
-        ));
     }
     ~ResNet2dBlockImpl() {
     }
@@ -158,8 +148,8 @@ public:
 public:
     torch::Tensor forward(const torch::Tensor& input) {
         auto left  = this->cv1->forward(input);
-        auto right = this->cv2->forward(left) + left;
-        return       this->cv4->forward(torch::cat({this->cv3->forward(right), left}, 1));
+        auto right = this->cv2->forward(left)  + left;
+        return       this->cv3->forward(right) + left;
     }
 
 };
@@ -272,21 +262,20 @@ TORCH_MODULE(AttentionBlock);
 class AudioHeadBlockImpl : public torch::nn::Module {
 
 private:
-    torch::nn::Sequential embed{ nullptr };
     torch::nn::Sequential head { nullptr };
     torch::nn::Sequential gru  { nullptr };
     torch::nn::Sequential conv { nullptr };
 
 public:
     AudioHeadBlockImpl(
-        const int kernel    = 5,
-        const int padding   = 2,
+        // TODO: 试试空洞卷积
+        const int kernel    = 3,
+        const int padding   = 1,
         const int dilation  = 1,
         const int kernel_   = 3,
         const int padding_  = 1,
         const int dilation_ = 1
     ) {
-        // TODO: 试试空洞卷积
         this->head = this->register_module("head", torch::nn::Sequential(
             chobits::nn::ResNet1dBlock( 1,   4, 800, 4, kernel, padding, dilation),
             chobits::nn::ResNet1dBlock( 4,  16, 200, 4, kernel, padding, dilation),
@@ -308,9 +297,9 @@ public:
 
 public:
     torch::Tensor forward(const torch::Tensor& input) {
-        auto out = this->head->forward(input.view({ -1, 1, input.size(-1) }));
-             out = this->gru ->forward(out.view({ input.size(0), input.size(1), -1 }));
-             out = this->conv->forward(out);
+        auto out = this->head ->forward(input.view({ -1, 1, input.size(-1) }));
+             out = this->gru  ->forward(out.view({ input.size(0), input.size(1), -1 }));
+             out = this->conv ->forward(out);
         return out;
     }
 
@@ -330,14 +319,14 @@ private:
 
 public:
     VideoHeadBlockImpl(
-        const shp kernel    = std::vector<int64_t>{ 5, 5 },
-        const shp padding   = std::vector<int64_t>{ 2, 2 },
+        // TODO: 试试空洞卷积
+        const shp kernel    = std::vector<int64_t>{ 3, 3 },
+        const shp padding   = std::vector<int64_t>{ 1, 1 },
         const shp dilation  = std::vector<int64_t>{ 1, 1 },
         const int kernel_   = 3,
         const int padding_  = 1,
         const int dilation_ = 1
     ) {
-        // TODO: 试试空洞卷积
         this->head = this->register_module("head", torch::nn::Sequential(
             chobits::nn::ResNet2dBlock( 1,   4, std::vector<int64_t>{ 360, 640 }, std::vector<int64_t>{ 4, 4 }, kernel, padding, dilation),
             chobits::nn::ResNet2dBlock( 4,  16, std::vector<int64_t>{  90, 160 }, std::vector<int64_t>{ 4, 4 }, kernel, padding, dilation),
