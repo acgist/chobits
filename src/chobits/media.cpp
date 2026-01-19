@@ -644,7 +644,7 @@ static std::vector<std::string> list_train_dataset() {
         const auto iterator = std::filesystem::directory_iterator(chobits::train_dataset);
         for(const auto& entry : iterator) {
             const auto& file = entry.path().string();
-            if(std::filesystem::is_regular_file(file) && file.ends_with(".mp4")) {
+            if(std::filesystem::is_regular_file(file) && (file.ends_with(".mp4") || file.ends_with(".mkv"))) {
                 files.push_back(file);
             }
         }
