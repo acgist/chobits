@@ -269,18 +269,19 @@ private:
 public:
     AudioHeadBlockImpl(
         // TODO: 试试空洞卷积
-        const int kernel    = 5,
-        const int padding   = 2,
+        const int kernel    = 3,
+        const int padding   = 1,
         const int dilation  = 1,
         const int kernel_   = 3,
         const int padding_  = 1,
         const int dilation_ = 1
     ) {
         this->head = this->register_module("head", torch::nn::Sequential(
-            chobits::nn::ResNet1dBlock( 1,   4, 800, 4, kernel, padding, dilation),
-            chobits::nn::ResNet1dBlock( 4,  16, 200, 4, kernel, padding, dilation),
-            chobits::nn::ResNet1dBlock(16,  64,  50, 4, kernel, padding, dilation),
-            chobits::nn::ResNet1dBlock(64, 256,  13, 4, kernel, padding, dilation),
+            chobits::nn::ResNet1dBlock(  1,   4, 800, 3, kernel, padding, dilation),
+            chobits::nn::ResNet1dBlock(  4,  16, 267, 3, kernel, padding, dilation),
+            chobits::nn::ResNet1dBlock( 16,  64,  89, 3, kernel, padding, dilation),
+            chobits::nn::ResNet1dBlock( 64, 256,  30, 3, kernel, padding, dilation),
+            chobits::nn::ResNet1dBlock(256, 256,  10, 3, kernel, padding, dilation),
             torch::nn::Flatten(torch::nn::FlattenOptions().start_dim(1))
         ));
         this->gru = this->register_module("gru", torch::nn::Sequential(
@@ -288,8 +289,8 @@ public:
         ));
         this->conv = this->register_module("conv", torch::nn::Sequential(
             chobits::nn::ResNet1dBlock( 10,  64, 1024, 2, kernel_, padding_, dilation_),
-            chobits::nn::ResNet1dBlock( 64, 256,  512, 2, kernel_, padding_, dilation_),
-            chobits::nn::ResNet1dBlock(256, 256,  256, 1, kernel_, padding_, dilation_)
+            chobits::nn::ResNet1dBlock( 64, 256,  512, 2, kernel_, padding_, dilation_)
+//          chobits::nn::ResNet1dBlock(256, 256,  256, 1, kernel_, padding_, dilation_)
         ));
     }
     ~AudioHeadBlockImpl() {
@@ -320,18 +321,19 @@ private:
 public:
     VideoHeadBlockImpl(
         // TODO: 试试空洞卷积
-        const shp kernel    = std::vector<int64_t>{ 5, 5 },
-        const shp padding   = std::vector<int64_t>{ 2, 2 },
+        const shp kernel    = std::vector<int64_t>{ 3, 3 },
+        const shp padding   = std::vector<int64_t>{ 1, 1 },
         const shp dilation  = std::vector<int64_t>{ 1, 1 },
         const int kernel_   = 3,
         const int padding_  = 1,
         const int dilation_ = 1
     ) {
         this->head = this->register_module("head", torch::nn::Sequential(
-            chobits::nn::ResNet2dBlock( 1,   4, std::vector<int64_t>{ 360, 640 }, std::vector<int64_t>{ 4, 4 }, kernel, padding, dilation),
-            chobits::nn::ResNet2dBlock( 4,  16, std::vector<int64_t>{  90, 160 }, std::vector<int64_t>{ 4, 4 }, kernel, padding, dilation),
-            chobits::nn::ResNet2dBlock(16,  64, std::vector<int64_t>{  23,  40 }, std::vector<int64_t>{ 4, 4 }, kernel, padding, dilation),
-            chobits::nn::ResNet2dBlock(64, 256, std::vector<int64_t>{   6,  10 }, std::vector<int64_t>{ 4, 4 }, kernel, padding, dilation),
+            chobits::nn::ResNet2dBlock(  1,   4, std::vector<int64_t>{ 360, 640 }, std::vector<int64_t>{ 3, 3 }, kernel, padding, dilation),
+            chobits::nn::ResNet2dBlock(  4,  16, std::vector<int64_t>{ 120, 214 }, std::vector<int64_t>{ 3, 3 }, kernel, padding, dilation),
+            chobits::nn::ResNet2dBlock( 16,  64, std::vector<int64_t>{  40,  72 }, std::vector<int64_t>{ 3, 3 }, kernel, padding, dilation),
+            chobits::nn::ResNet2dBlock( 64, 256, std::vector<int64_t>{  14,  24 }, std::vector<int64_t>{ 3, 3 }, kernel, padding, dilation),
+            chobits::nn::ResNet2dBlock(256, 256, std::vector<int64_t>{   5,   8 }, std::vector<int64_t>{ 3, 3 }, kernel, padding, dilation),
             torch::nn::Flatten(torch::nn::FlattenOptions().start_dim(1))
         ));
         this->gru = this->register_module("gru", torch::nn::Sequential(
@@ -339,8 +341,8 @@ public:
         ));
         this->conv = this->register_module("conv", torch::nn::Sequential(
             chobits::nn::ResNet1dBlock( 10,  64, 1536, 2, kernel_, padding_, dilation_),
-            chobits::nn::ResNet1dBlock( 64, 256,  768, 1, kernel_, padding_, dilation_),
-            chobits::nn::ResNet1dBlock(256, 256,  768, 1, kernel_, padding_, dilation_)
+            chobits::nn::ResNet1dBlock( 64, 256,  768, 1, kernel_, padding_, dilation_)
+//          chobits::nn::ResNet1dBlock(256, 256,  768, 1, kernel_, padding_, dilation_)
         ));
     }
     ~VideoHeadBlockImpl() {
@@ -373,12 +375,13 @@ public:
         const shp dilation = std::vector<int64_t>{ 1, 1 }
     ) {
         this->head = this->register_module("head", torch::nn::Sequential(
-            chobits::nn::ResNet2dBlock(  3,  16, std::vector<int64_t>{ 360, 640 }, std::vector<int64_t>{ 2, 2 }, kernel, padding, dilation),
-            chobits::nn::ResNet2dBlock( 16,  64, std::vector<int64_t>{ 180, 320 }, std::vector<int64_t>{ 2, 2 }, kernel, padding, dilation),
-            chobits::nn::ResNet2dBlock( 64, 128, std::vector<int64_t>{  90, 160 }, std::vector<int64_t>{ 2, 2 }, kernel, padding, dilation),
-            chobits::nn::ResNet2dBlock(128, 256, std::vector<int64_t>{  45,  80 }, std::vector<int64_t>{ 2, 2 }, kernel, padding, dilation),
+            chobits::nn::ResNet2dBlock(  3,  16, std::vector<int64_t>{ 360, 640 }, std::vector<int64_t>{ 3, 3 }, kernel, padding, dilation),
+            chobits::nn::ResNet2dBlock( 16,  64, std::vector<int64_t>{ 120, 214 }, std::vector<int64_t>{ 3, 3 }, kernel, padding, dilation),
+            chobits::nn::ResNet2dBlock( 64, 256, std::vector<int64_t>{  40,  72 }, std::vector<int64_t>{ 3, 3 }, kernel, padding, dilation),
+            chobits::nn::ResNet2dBlock(256, 256, std::vector<int64_t>{  14,  24 }, std::vector<int64_t>{ 1, 1 }, kernel, padding, dilation),
+//          chobits::nn::ResNet2dBlock(256, 256, std::vector<int64_t>{  14,  24 }, std::vector<int64_t>{ 1, 1 }, kernel, padding, dilation),
             torch::nn::Flatten(torch::nn::FlattenOptions().start_dim(2)),
-            chobits::nn::ResNet1dBlock(256, 256, 920)
+            chobits::nn::ResNet1dBlock(256, 256, 336)
         ));
     }
     ~ImageHeadBlockImpl() {
@@ -408,7 +411,7 @@ public:
     MediaMixerBlockImpl(
         const int audio_in = 256,
         const int video_in = 768,
-        const int image_in = 920
+        const int image_in = 336
     ) {
         const int mixer_in = audio_in + video_in;
         this->audio_attn = this->register_module("audio_attn", chobits::nn::AttentionBlock(audio_in, video_in, video_in, audio_in));
