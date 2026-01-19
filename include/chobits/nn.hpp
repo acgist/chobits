@@ -45,7 +45,7 @@ public:
 
 public:
     torch::Tensor forward(const torch::Tensor& input) {
-        return torch::nn::functional::pad(input, torch::nn::functional::PadFuncOptions(this->pad).value(0.0F));
+        return torch::nn::functional::pad(input, torch::nn::functional::PadFuncOptions(this->pad).mode(torch::kReplicate));
     }
 
 };
@@ -262,15 +262,15 @@ TORCH_MODULE(AttentionBlock);
 class AudioHeadBlockImpl : public torch::nn::Module {
 
 private:
-    torch::nn::Sequential head { nullptr };
-    torch::nn::Sequential gru  { nullptr };
-    torch::nn::Sequential conv { nullptr };
+    torch::nn::Sequential head{ nullptr };
+    torch::nn::Sequential gru { nullptr };
+    torch::nn::Sequential conv{ nullptr };
 
 public:
     AudioHeadBlockImpl(
         // TODO: 试试空洞卷积
-        const int kernel    = 3,
-        const int padding   = 1,
+        const int kernel    = 5,
+        const int padding   = 2,
         const int dilation  = 1,
         const int kernel_   = 3,
         const int padding_  = 1,
@@ -297,9 +297,9 @@ public:
 
 public:
     torch::Tensor forward(const torch::Tensor& input) {
-        auto out = this->head ->forward(input.view({ -1, 1, input.size(-1) }));
-             out = this->gru  ->forward(out.view({ input.size(0), input.size(1), -1 }));
-             out = this->conv ->forward(out);
+        auto out = this->head->forward(input.view({ -1, 1, input.size(-1) }));
+             out = this->gru->forward(out.view({ input.size(0), input.size(1), -1 }));
+             out = this->conv->forward(out);
         return out;
     }
 
@@ -320,8 +320,8 @@ private:
 public:
     VideoHeadBlockImpl(
         // TODO: 试试空洞卷积
-        const shp kernel    = std::vector<int64_t>{ 3, 3 },
-        const shp padding   = std::vector<int64_t>{ 1, 1 },
+        const shp kernel    = std::vector<int64_t>{ 5, 5 },
+        const shp padding   = std::vector<int64_t>{ 2, 2 },
         const shp dilation  = std::vector<int64_t>{ 1, 1 },
         const int kernel_   = 3,
         const int padding_  = 1,
@@ -349,7 +349,7 @@ public:
 public:
     torch::Tensor forward(const torch::Tensor& input) {
         auto out = this->head->forward(input.view({ -1, 1, input.size(2), input.size(3) }));
-             out = this->gru ->forward(out.view({ input.size(0), input.size(1), -1 }));
+             out = this->gru->forward(out.view({ input.size(0), input.size(1), -1 }));
              out = this->conv->forward(out);
         return out;
     }
@@ -373,14 +373,12 @@ public:
         const shp dilation = std::vector<int64_t>{ 1, 1 }
     ) {
         this->head = this->register_module("head", torch::nn::Sequential(
-            chobits::nn::ResNet2dBlock(  3,  32, std::vector<int64_t>{ 360, 640 }, std::vector<int64_t>{ 2, 2 }, kernel, padding, dilation),
-            chobits::nn::ResNet2dBlock( 32,  64, std::vector<int64_t>{ 180, 320 }, std::vector<int64_t>{ 2, 2 }, kernel, padding, dilation),
+            chobits::nn::ResNet2dBlock(  3,  16, std::vector<int64_t>{ 360, 640 }, std::vector<int64_t>{ 2, 2 }, kernel, padding, dilation),
+            chobits::nn::ResNet2dBlock( 16,  64, std::vector<int64_t>{ 180, 320 }, std::vector<int64_t>{ 2, 2 }, kernel, padding, dilation),
             chobits::nn::ResNet2dBlock( 64, 128, std::vector<int64_t>{  90, 160 }, std::vector<int64_t>{ 2, 2 }, kernel, padding, dilation),
             chobits::nn::ResNet2dBlock(128, 256, std::vector<int64_t>{  45,  80 }, std::vector<int64_t>{ 2, 2 }, kernel, padding, dilation),
-            chobits::nn::PadBlock(std::vector<int64_t>{ 0, 0, 1, 0 }),
-            chobits::nn::ResNet2dBlock(256, 256, std::vector<int64_t>{ 24, 40 }, std::vector<int64_t>{ 1, 1 }, kernel, padding, dilation),
             torch::nn::Flatten(torch::nn::FlattenOptions().start_dim(2)),
-            chobits::nn::ResNet1dBlock(256, 256, 960)
+            chobits::nn::ResNet1dBlock(256, 256, 920)
         ));
     }
     ~ImageHeadBlockImpl() {
@@ -410,7 +408,7 @@ public:
     MediaMixerBlockImpl(
         const int audio_in = 256,
         const int video_in = 768,
-        const int image_in = 960
+        const int image_in = 920
     ) {
         const int mixer_in = audio_in + video_in;
         this->audio_attn = this->register_module("audio_attn", chobits::nn::AttentionBlock(audio_in, video_in, video_in, audio_in));

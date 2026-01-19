@@ -46,12 +46,12 @@ static void info(std::shared_ptr<torch::nn::Module> layer) {
 
 [[maybe_unused]] static void test_attention() {
     torch::NoGradGuard no_grad_guard;
-    chobits::nn::AttentionBlock layer(768, 960, 960, 768);
+    chobits::nn::AttentionBlock layer(768, 920, 920, 768);
     info(layer.ptr());
     auto output = layer->forward(
         torch::randn({ 10, 256, 768 }),
-        torch::randn({ 10, 256, 960 }),
-        torch::randn({ 10, 256, 960 })
+        torch::randn({ 10, 256, 920 }),
+        torch::randn({ 10, 256, 920 })
     );
     std::cout << output.sizes() << std::endl;
 }
@@ -87,7 +87,7 @@ static void info(std::shared_ptr<torch::nn::Module> layer) {
     auto output = layer->forward(
         torch::randn({ 10, 256, 256 }),
         torch::randn({ 10, 256, 768 }),
-        torch::randn({ 10, 256, 960 })
+        torch::randn({ 10, 256, 920 })
     );
     std::cout << output.sizes() << std::endl;
 }
