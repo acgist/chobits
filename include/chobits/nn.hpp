@@ -415,8 +415,8 @@ public:
         this->image_attn = this->register_module("image_attn", chobits::nn::AttentionBlock(muxer_in, image_in, image_in, muxer_in));
         this->mixer_attn = this->register_module("mixer_attn", chobits::nn::AttentionBlock(muxer_in, muxer_in, muxer_in, muxer_in));
         this->muxer_conv = this->register_module("muxer_conv", torch::nn::Sequential(
-            chobits::nn::ResNet1dBlock(256, 256, muxer_in),
-            chobits::nn::ResNet1dBlock(256, 256, muxer_in)
+            chobits::nn::ResNet1dBlock(256, 256, muxer_in, 1, 3, 2, 2),
+            chobits::nn::ResNet1dBlock(256, 256, muxer_in, 1, 3, 2, 2)
         ));
     }
     ~MediaMixerBlockImpl() {

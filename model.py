@@ -236,8 +236,8 @@ class MediaMixerBlock(nn.Module):
         self.image_attn = AttentionBlock(muxer_in, image_in, image_in, muxer_in)
         self.mixer_attn = AttentionBlock(muxer_in, muxer_in, muxer_in, muxer_in)
         self.muxer_conv = nn.Sequential(
-            ResNet1dBlock(256, 256, muxer_in),
-            ResNet1dBlock(256, 256, muxer_in),
+            ResNet1dBlock(256, 256, muxer_in, 1, 3, 2, 2),
+            ResNet1dBlock(256, 256, muxer_in, 1, 3, 2, 2),
         )
 
     def forward(
