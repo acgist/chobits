@@ -391,8 +391,8 @@ std::tuple<bool, at::Tensor, at::Tensor, at::Tensor> chobits::media::get_data() 
                     (
                         dataset.audio.size() < batch_thread ||
                         dataset.video.size() < batch_thread ||
-                        std::any_of(dataset.audio.begin(), dataset.audio.end(), [&batch_length](const auto& audio) { return audio.size() < batch_length; }) ||
-                        std::any_of(dataset.video.begin(), dataset.video.end(), [&batch_length](const auto& video) { return video.size() < batch_length; })
+                        std::any_of(dataset.audio.begin(), dataset.audio.end(), [batch_length](const auto& audio) { return audio.size() < batch_length; }) ||
+                        std::any_of(dataset.video.begin(), dataset.video.end(), [batch_length](const auto& video) { return video.size() < batch_length; })
                     )
                 );
         });

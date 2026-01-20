@@ -1,7 +1,6 @@
 #include "chobits/nn.hpp"
 #include "chobits/media.hpp"
 #include "chobits/model.hpp"
-#include "chobits/player.hpp"
 #include "chobits/chobits.hpp"
 
 #include <cinttypes>
@@ -38,7 +37,7 @@ static void info(std::shared_ptr<torch::nn::Module> layer) {
 
 [[maybe_unused]] static void test_gru() {
     torch::NoGradGuard no_grad_guard;
-    chobits::nn::GRUBlock layer(768, 768, 10);
+    chobits::nn::GRUBlock layer(768, 768);
     info(layer.ptr());
     auto output = layer->forward(torch::randn({ 10, 10, 768 }));
     std::cout << output.sizes() << std::endl;
@@ -100,15 +99,9 @@ static void info(std::shared_ptr<torch::nn::Module> layer) {
     std::cout << output.sizes() << std::endl;
 }
 
-[[maybe_unused]] static void test_model() {
-    chobits::model::Trainer trainer;
-    trainer.load();
-    trainer.save();
-    trainer.load();
-    trainer.close();
-}
-
 [[maybe_unused]] static void test_model_eval() {
+    chobits::mode_save    = true;
+    chobits::batch_thread = 1;
     std::thread media_thread([]() {
         #if _WIN32
         chobits::media::open_file("D:/tmp/video.mp4");
@@ -116,39 +109,10 @@ static void info(std::shared_ptr<torch::nn::Module> layer) {
         chobits::media::open_file("video.mp4");
         #endif
     });
-    chobits::mode_save = true;
     chobits::model::Trainer trainer;
     trainer.load();
     trainer.eval();
     media_thread.join();
-}
-
-[[maybe_unused]] static void test_model_train() {
-    std::thread player_thread([]() {
-        chobits::player::open_player();
-    });
-    std::thread media_thread([]() {
-        // #if _WIN32
-        // chobits::media::open_file("D:/tmp/video.mp4");
-        // #else
-        // chobits::media::open_file("video/32429377729-1-192.mp4");
-        // #endif
-        chobits::media::open_device();
-    });
-    std::thread model_thread([]() {
-        chobits::model::Trainer trainer;
-        #if _WIN32
-        trainer.load("D:/tmp/chobits.ckpt");
-        #else
-        trainer.load("chobits.ckpt");
-        #endif
-        trainer.eval();
-        // trainer.train();
-        // trainer.save();
-    });
-    media_thread.join();
-    model_thread.join();
-    player_thread.join();
 }
 
 int main() {
@@ -162,9 +126,7 @@ int main() {
         // test_image_head();
         // test_media_mixer();
         // test_audio_tail();
-        // test_model();
         test_model_eval();
-        // test_model_train();
     } catch(const std::exception& e) {
         std::printf("异常内容：%s", e.what());
     }
