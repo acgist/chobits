@@ -100,7 +100,7 @@ void chobits::model::Trainer::train() {
         auto scheduler  = torch::optim::StepLR(optimizer, 10, 0.9999);
         auto loss_val   = 0.0F;
         auto time_point = std::chrono::system_clock::now();
-        static const int per_op_epoch = 20;
+        static const int per_op_epoch = 10;
         static const int per_ck_epoch = 10000;
         for (size_t epoch = 1; epoch <= 31'536'000'000ULL && chobits::running; ++epoch) {
             this->train(loss_val);

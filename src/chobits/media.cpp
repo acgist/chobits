@@ -69,7 +69,7 @@ bool chobits::media::open_media() {
         std::vector<std::thread> threads;
         std::vector<std::string> files = list_train_dataset();
         std::printf("加载文件数量：%" PRIu64 "\n", files.size());
-        for(int index = 0; index < chobits::batch_size && chobits::running; ++index) {
+        for(int index = 0; index < chobits::batch_thread && chobits::running; ++index) {
             threads.push_back(std::thread([&rand, index, files]() mutable {
                 dataset_index = index;
                 std::shuffle(files.begin(), files.end(), rand);
@@ -379,17 +379,18 @@ std::tuple<bool, at::Tensor, at::Tensor, at::Tensor> chobits::media::get_data() 
     std::vector<torch::Tensor> audio;
     std::vector<torch::Tensor> video;
     std::vector<torch::Tensor> label;
+    const int epoch = chobits::batch_size <= chobits::batch_thread ? 1 : (chobits::batch_size / chobits::batch_thread);
     {
         std::unique_lock<std::mutex> lock(dataset.mutex);
-        dataset.condition.wait(lock, []() {
-            const size_t batch_size   = chobits::batch_size;
-            const size_t batch_length = chobits::batch_length + 1;
+        dataset.condition.wait(lock, [epoch]() {
+            const size_t batch_thread = chobits::batch_thread;
+            const size_t batch_length = chobits::batch_length + epoch;
             return
                 !(
                     chobits::running &&
                     (
-                        dataset.audio.size() < batch_size ||
-                        dataset.video.size() < batch_size ||
+                        dataset.audio.size() < batch_thread ||
+                        dataset.video.size() < batch_thread ||
                         std::any_of(dataset.audio.begin(), dataset.audio.end(), [&batch_length](const auto& audio) { return audio.size() < batch_length; }) ||
                         std::any_of(dataset.video.begin(), dataset.video.end(), [&batch_length](const auto& video) { return video.size() < batch_length; })
                     )
@@ -398,14 +399,16 @@ std::tuple<bool, at::Tensor, at::Tensor, at::Tensor> chobits::media::get_data() 
         if(!chobits::running) {
             return { false, {}, {}, {} };
         }
-        for(int index = 0; index < chobits::batch_size; ++index) {
-            auto& dataset_audio = dataset.audio[index];
-            auto& dataset_video = dataset.video[index];
-            audio.push_back(torch::stack(std::vector<torch::Tensor>(dataset_audio.begin(), dataset_audio.begin() + chobits::batch_length)));
-            video.push_back(torch::stack(std::vector<torch::Tensor>(dataset_video.begin(), dataset_video.begin() + chobits::batch_length)));
-            label.push_back(dataset_audio[chobits::batch_length]);
-            dataset_audio.erase(dataset_audio.begin());
-            dataset_video.erase(dataset_video.begin());
+        for(int jndex = 0; jndex < epoch; ++ jndex) {
+            for(int index = 0; index < chobits::batch_thread; ++index) {
+                auto& dataset_audio = dataset.audio[index];
+                auto& dataset_video = dataset.video[index];
+                audio.push_back(torch::stack(std::vector<torch::Tensor>(dataset_audio.begin(), dataset_audio.begin() + chobits::batch_length)));
+                video.push_back(torch::stack(std::vector<torch::Tensor>(dataset_video.begin(), dataset_video.begin() + chobits::batch_length)));
+                label.push_back(dataset_audio[chobits::batch_length]);
+                dataset_audio.erase(dataset_audio.begin());
+                dataset_video.erase(dataset_video.begin());
+            }
         }
     }
     dataset.condition.notify_all();
@@ -628,12 +631,12 @@ static bool video_to_tensor(std::vector<torch::Tensor>& audio, std::vector<torch
 static void init_context() {
     std::unique_lock<std::mutex> lock(dataset.mutex);
     if(dataset.audio.empty()) {
-        dataset.audio.resize(chobits::batch_size);
+        dataset.audio.resize(chobits::batch_thread);
     }
     if(dataset.video.empty()) {
-        dataset.video.resize(chobits::batch_size);
+        dataset.video.resize(chobits::batch_thread);
     }
-    if(chobits::running && !stream.is_open()) {
+    if(chobits::mode_save && chobits::running && !stream.is_open()) {
         stream.open("chobits.pcm", std::ios::binary);
     }
 }

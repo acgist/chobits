@@ -85,17 +85,18 @@ R"(
             chobits::mode_file     = true;
             chobits::mode_play     = false;
             chobits::batch_size    = argc >= 4 ? std::atoi(argv[3]) : 10;
+            chobits::batch_thread  = argc >= 5 ? std::atoi(argv[4]) :  4;
             chobits::train_epoch   = argc >= 3 ? std::atoi(argv[2]) : 10;
             chobits::train_dataset = argv[1];
         }
     }
     std::printf(
         "丢弃模式：%d 验证模式：%d 文件模式：%d 播放模式：%d "
-        "训练批次大小：%d 训练批次长度：%d 训练批次轮数：%d 训练数据集：%s "
+        "训练批次大小：%d 训练批次长度：%d 文件线程数量：%d 训练批次轮数：%d 训练数据集：%s "
         "音频每秒窗口：%d 音频采样率：%d 音频通道：%d "
         "视频宽度：%d 视频高度：%d\n",
         chobits::mode_drop, chobits::mode_eval, chobits::mode_file, chobits::mode_play,
-        chobits::batch_size, chobits::batch_length, chobits::train_epoch, chobits::train_dataset.c_str(),
+        chobits::batch_size, chobits::batch_length, chobits::batch_thread, chobits::train_epoch, chobits::train_dataset.c_str(),
         chobits::per_wind_second, chobits::audio_sample_rate, chobits::audio_nb_channels,
         chobits::video_width, chobits::video_height
     );
@@ -104,7 +105,7 @@ R"(
 
 static void help() {
     std::printf(R"(帮助：chobits[.exe] [?|-h|--help]
-视频文件训练：chobits[.exe] file [训练批次大小] [训练批次轮数]
+视频文件训练：chobits[.exe] file [训练批次大小] [训练批次轮数] [文件线程数量]
 媒体设备评估：chobits[.exe] eval
 媒体设备训练：chobits[.exe]
 )");
