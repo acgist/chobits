@@ -57,7 +57,6 @@ class ResNet1dBlockImpl : public torch::nn::Module {
 private:
     torch::nn::Sequential cv1{ nullptr };
     torch::nn::Sequential cv2{ nullptr };
-    torch::nn::Sequential cv3{ nullptr };
 
 public:
     ResNet1dBlockImpl(
@@ -95,21 +94,14 @@ public:
             torch::nn::Conv1d(torch::nn::Conv1dOptions(out_channels, out_channels, kernel).padding(padding).dilation(dilation)),
             layer_act()
         ));
-        this->cv3 = this->register_module("cv3", torch::nn::Sequential(
-            torch::nn::Conv1d(torch::nn::Conv1dOptions(out_channels, out_channels, kernel).padding(padding).dilation(dilation)),
-            layer_act(),
-            torch::nn::Conv1d(torch::nn::Conv1dOptions(out_channels, out_channels, kernel).padding(padding).dilation(dilation)),
-            layer_act()
-        ));
     }
     ~ResNet1dBlockImpl() {
     }
 
 public:
     torch::Tensor forward(const torch::Tensor& input) {
-        auto left  = this->cv1->forward(input);
-        auto right = this->cv2->forward(left)  + left;
-        return       this->cv3->forward(right) + left;
+        auto left = this->cv1->forward(input);
+        return      this->cv2->forward(left) + left;
     }
 
 };
@@ -124,7 +116,6 @@ class ResNet2dBlockImpl : public torch::nn::Module {
 private:
     torch::nn::Sequential cv1{ nullptr };
     torch::nn::Sequential cv2{ nullptr };
-    torch::nn::Sequential cv3{ nullptr };
 
 public:
     ResNet2dBlockImpl(
@@ -149,21 +140,14 @@ public:
             torch::nn::Conv2d(torch::nn::Conv2dOptions(out_channels, out_channels, kernel).padding(padding).dilation(dilation)),
             layer_act()
         ));
-        this->cv3 = this->register_module("cv3", torch::nn::Sequential(
-            torch::nn::Conv2d(torch::nn::Conv2dOptions(out_channels, out_channels, kernel).padding(padding).dilation(dilation)),
-            layer_act(),
-            torch::nn::Conv2d(torch::nn::Conv2dOptions(out_channels, out_channels, kernel).padding(padding).dilation(dilation)),
-            layer_act()
-        ));
     }
     ~ResNet2dBlockImpl() {
     }
 
 public:
     torch::Tensor forward(const torch::Tensor& input) {
-        auto left  = this->cv1->forward(input);
-        auto right = this->cv2->forward(left)  + left;
-        return       this->cv3->forward(right) + left;
+        auto left = this->cv1->forward(input);
+        return      this->cv2->forward(left) + left;
     }
 
 };
