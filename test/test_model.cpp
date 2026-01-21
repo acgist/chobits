@@ -37,18 +37,18 @@ static void info(std::shared_ptr<torch::nn::Module> layer) {
 
 [[maybe_unused]] static void test_gru() {
     torch::NoGradGuard no_grad_guard;
-    chobits::nn::GRUBlock layer(768, 768);
+    chobits::nn::GRUBlock layer(384, 384);
     info(layer.ptr());
-    auto output = layer->forward(torch::randn({ 10, 10, 768 }));
+    auto output = layer->forward(torch::randn({ 10, 10, 384 }));
     std::cout << output.sizes() << std::endl;
 }
 
 [[maybe_unused]] static void test_attention() {
     torch::NoGradGuard no_grad_guard;
-    chobits::nn::AttentionBlock layer(768, 336, 336, 768);
+    chobits::nn::AttentionBlock layer(384, 336, 336, 384);
     info(layer.ptr());
     auto output = layer->forward(
-        torch::randn({ 10, 256, 768 }),
+        torch::randn({ 10, 256, 384 }),
         torch::randn({ 10, 256, 336 }),
         torch::randn({ 10, 256, 336 })
     );
@@ -85,7 +85,7 @@ static void info(std::shared_ptr<torch::nn::Module> layer) {
     info(layer.ptr());
     auto output = layer->forward(
         torch::randn({ 10, 256, 256 }),
-        torch::randn({ 10, 256, 768 }),
+        torch::randn({ 10, 256, 384 }),
         torch::randn({ 10, 256, 336 })
     );
     std::cout << output.sizes() << std::endl;
@@ -95,7 +95,7 @@ static void info(std::shared_ptr<torch::nn::Module> layer) {
     torch::NoGradGuard no_grad_guard;
     chobits::nn::AudioTailBlock layer;
     info(layer.ptr());
-    auto output = layer->forward(torch::randn({ 10, 256, 1024 }));
+    auto output = layer->forward(torch::randn({ 10, 256, 640 }));
     std::cout << output.sizes() << std::endl;
 }
 

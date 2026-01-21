@@ -199,7 +199,7 @@ public:
     torch::Tensor forward(const torch::Tensor& input) {
         auto [ output, _ ] = this->gru->forward(input);
         output = this->proj->forward(output);
-        return input + output;
+        return torch::cat({ input, output }, -1);
     }
 
 };
@@ -217,6 +217,7 @@ private:
     torch::nn::Sequential         v   { nullptr };
     torch::nn::MultiheadAttention attn{ nullptr };
     torch::nn::Sequential         proj{ nullptr };
+    torch::nn::Sequential         out { nullptr };
 
 public:
     AttentionBlockImpl(
@@ -241,6 +242,10 @@ public:
         this->proj = this->register_module("proj", torch::nn::Sequential(
             torch::nn::Linear(torch::nn::LinearOptions(o_dim, o_dim).bias(false))
         ));
+        this->out = this->register_module("out", torch::nn::Sequential(
+            chobits::nn::ResNet1dBlock(256, 256, q_dim + o_dim, 2, 3, 1, 1),
+            chobits::nn::ResNet1dBlock(256, 256, o_dim,         1, 3, 2, 2)
+        ));
     }
     ~AttentionBlockImpl() {
     }
@@ -253,7 +258,7 @@ public:
         auto [ o, _ ] = this->attn->forward(q, k, v);
         o = o.permute({ 1, 0, 2 });
         o = this->proj->forward(o);
-        return query + o;
+        return this->out->forward(torch::cat({ query, o }, -1));
     }
 
 };
@@ -288,9 +293,10 @@ public:
             chobits::nn::GRUBlock(1024, 1024)
         ));
         this->conv = this->register_module("conv", torch::nn::Sequential(
-            chobits::nn::ResNet1dBlock( 10,  64, 1024, 2, 3, 1, 1),
-            chobits::nn::ResNet1dBlock( 64, 256,  512, 2, 3, 1, 1),
-            chobits::nn::ResNet1dBlock(256, 256,  256, 1, 3, 2, 2)
+            chobits::nn::ResNet1dBlock( 10,  32, 2048, 2, 3, 1, 1),
+            chobits::nn::ResNet1dBlock( 32,  64, 1024, 2, 3, 1, 1),
+            chobits::nn::ResNet1dBlock( 64, 128,  512, 2, 3, 1, 1),
+            chobits::nn::ResNet1dBlock(128, 256,  256, 1, 3, 2, 2)
         ));
     }
     ~AudioHeadBlockImpl() {
@@ -336,8 +342,10 @@ public:
             chobits::nn::GRUBlock(1536, 1536)
         ));
         this->conv = this->register_module("conv", torch::nn::Sequential(
-            chobits::nn::ResNet1dBlock( 10,  64, 1536, 2, 3, 1, 1),
-            chobits::nn::ResNet1dBlock( 64, 256,  768, 1, 3, 2, 2)
+            chobits::nn::ResNet1dBlock( 10,  32, 3072, 2, 3, 1, 1),
+            chobits::nn::ResNet1dBlock( 32,  64, 1536, 2, 3, 1, 1),
+            chobits::nn::ResNet1dBlock( 64, 128,  768, 2, 3, 1, 1),
+            chobits::nn::ResNet1dBlock(128, 256,  384, 1, 3, 2, 2)
         ));
     }
     ~VideoHeadBlockImpl() {
@@ -406,7 +414,7 @@ private:
 public:
     MediaMixerBlockImpl(
         const int audio_in = 256,
-        const int video_in = 768,
+        const int video_in = 384,
         const int image_in = 336
     ) {
         const int muxer_in = audio_in + video_in;
@@ -445,7 +453,7 @@ private:
 
 public:
     AudioTailBlockImpl(
-        const int in_features  = 1024,
+        const int in_features  = 640,
         const int out_features = 800,
         const shp channel      = std::vector<int64_t>{ 256, 64, 16, 4, 1 }
     ) {

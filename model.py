@@ -117,7 +117,7 @@ class GRUBlock(nn.Module):
     def forward(self, input: torch.Tensor) -> torch.Tensor:
         output, _ = self.gru(input)
         output = self.proj(output)
-        return input + output
+        return torch.cat([ input, output ], dim = -1)
 
 class AttentionBlock(nn.Module):
     def __init__(
@@ -134,6 +134,10 @@ class AttentionBlock(nn.Module):
         self.v    = nn.Linear(v_dim, o_dim, bias = False)
         self.attn = nn.MultiheadAttention(o_dim, num_heads, bias = False, batch_first = False)
         self.proj = nn.Linear(o_dim, o_dim, bias = False)
+        self.out  = nn.Sequential(
+            ResNet1dBlock(256, 256, q_dim + o_dim, 2, 3, 1, 1),
+            ResNet1dBlock(256, 256, o_dim,         1, 3, 2, 2),
+        )
 
     def forward(self, query: torch.Tensor, key: torch.Tensor, value: torch.Tensor) -> torch.Tensor:
         q = self.q(query.permute(1, 0, 2))
@@ -142,7 +146,7 @@ class AttentionBlock(nn.Module):
         o, _ = self.attn(q, k, v)
         o = o.permute(1, 0, 2)
         o = self.proj(o)
-        return query + o
+        return self.out(torch.cat([ query, o ], dim = -1))
 
 class AudioHeadBlock(nn.Module):
     def __init__(
@@ -162,9 +166,10 @@ class AudioHeadBlock(nn.Module):
         )
         self.gru = GRUBlock(1024, 1024)
         self.conv = nn.Sequential(
-            ResNet1dBlock( 10,  64, 1024, 2, 3, 1, 1),
-            ResNet1dBlock( 64, 256,  512, 2, 3, 1, 1),
-            ResNet1dBlock(256, 256,  256, 1, 3, 2, 2),
+            ResNet1dBlock( 10,  32, 2048, 2, 3, 1, 1),
+            ResNet1dBlock( 32,  64, 1024, 2, 3, 1, 1),
+            ResNet1dBlock( 64, 128,  512, 2, 3, 1, 1),
+            ResNet1dBlock(128, 256,  256, 1, 3, 2, 2),
         )
 
     def forward(self, input: torch.Tensor) -> torch.Tensor:
@@ -191,8 +196,10 @@ class VideoHeadBlock(nn.Module):
         )
         self.gru = GRUBlock(1536, 1536)
         self.conv = nn.Sequential(
-            ResNet1dBlock( 10,  64, 1536, 2, 3, 1, 1),
-            ResNet1dBlock( 64, 256,  768, 1, 3, 2, 2),
+            ResNet1dBlock( 10,  32, 3072, 2, 3, 1, 1),
+            ResNet1dBlock( 32,  64, 1536, 2, 3, 1, 1),
+            ResNet1dBlock( 64, 128,  768, 2, 3, 1, 1),
+            ResNet1dBlock(128, 256,  384, 1, 3, 2, 2),
         )
 
     def forward(self, input: torch.Tensor) -> torch.Tensor:
@@ -226,7 +233,7 @@ class MediaMixerBlock(nn.Module):
     def __init__(
         self,
         audio_in: int = 256,
-        video_in: int = 768,
+        video_in: int = 384,
         image_in: int = 336,
     ):
         super().__init__()
@@ -255,7 +262,7 @@ class MediaMixerBlock(nn.Module):
 class AudioTailBlock(nn.Module):
     def __init__(
         self,
-        in_features : int = 1024,
+        in_features : int = 640,
         out_features: int = 800,
         channels    : List[int] = [256, 64, 16, 4, 1],
     ):
@@ -302,12 +309,12 @@ class Chobits(nn.Module):
 # input = torch.randn(10, 10, 360, 640)
 # print(model(input).shape)
 
-# model = GRUBlock(768, 768)
-# input = torch.randn(10, 10, 768)
+# model = GRUBlock(384, 384)
+# input = torch.randn(10, 10, 384)
 # print(model(input).shape)
 
-# model = AttentionBlock(768, 336, 336, 768)
-# input = (torch.randn(10, 256, 768), torch.randn(10, 256, 336), torch.randn(10, 256, 336))
+# model = AttentionBlock(384, 336, 336, 384)
+# input = (torch.randn(10, 256, 384), torch.randn(10, 256, 336), torch.randn(10, 256, 336))
 # print(model(*input).shape)
 
 # model = AudioHeadBlock()
@@ -323,11 +330,11 @@ class Chobits(nn.Module):
 # print(model(input).shape)
 
 # model = MediaMixerBlock()
-# input = (torch.randn(10, 256, 256), torch.randn(10, 256, 768), torch.randn(10, 256, 336))
+# input = (torch.randn(10, 256, 256), torch.randn(10, 256, 384), torch.randn(10, 256, 336))
 # print(model(*input).shape)
 
 # model = AudioTailBlock()
-# input = torch.randn(10, 256, 1024)
+# input = torch.randn(10, 256, 640)
 # print(model(input).shape)
 
 model = Chobits()
