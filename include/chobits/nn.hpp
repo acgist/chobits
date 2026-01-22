@@ -20,7 +20,6 @@
 #include "torch/nn.h"
 
 using layer_act = torch::nn::SiLU;
-// using layer_act = torch::nn::GELU;
 
 using shp = std::vector<int64_t>;
 
@@ -57,26 +56,36 @@ class ResNet1dBlockImpl : public torch::nn::Module {
 private:
     torch::nn::Sequential cv1{ nullptr };
     torch::nn::Sequential cv2{ nullptr };
+    torch::nn::Sequential cv3{ nullptr };
+    torch::nn::Sequential cv4{ nullptr };
 
 public:
     ResNet1dBlockImpl(
         const int in_channels,
         const int out_channels,
-        const int features,
         const int stride    = 1,
         const int kernel    = 3,
         const int padding   = 1,
         const int dilation  = 1
     ) {
         this->cv1 = this->register_module("cv1", torch::nn::Sequential(
-            torch::nn::LayerNorm(torch::nn::LayerNormOptions(std::vector<int64_t>{ features })),
             torch::nn::Conv1d(torch::nn::Conv1dOptions(in_channels, out_channels, kernel).padding(padding).dilation(dilation).bias(false).stride(stride)),
             layer_act()
         ));
         this->cv2 = this->register_module("cv2", torch::nn::Sequential(
             torch::nn::Conv1d(torch::nn::Conv1dOptions(out_channels, out_channels, 3).padding(1).dilation(1)),
+            layer_act()
+        ));
+        this->cv3 = this->register_module("cv3", torch::nn::Sequential(
+            torch::nn::Conv1d(torch::nn::Conv1dOptions(out_channels, out_channels, 3).padding(2).dilation(2)),
             layer_act(),
-            torch::nn::Conv1d(torch::nn::Conv1dOptions(out_channels, out_channels, 3).padding(1).dilation(1)),
+            torch::nn::Conv1d(torch::nn::Conv1dOptions(out_channels, out_channels, 3).padding(2).dilation(2)),
+            layer_act()
+        ));
+        this->cv4 = this->register_module("cv4", torch::nn::Sequential(
+            torch::nn::Conv1d(torch::nn::Conv1dOptions(out_channels, out_channels, 3).padding(2).dilation(2)),
+            layer_act(),
+            torch::nn::Conv1d(torch::nn::Conv1dOptions(out_channels, out_channels, 3).padding(2).dilation(2)),
             layer_act()
         ));
     }
@@ -85,13 +94,73 @@ public:
 
 public:
     torch::Tensor forward(const torch::Tensor& input) {
-        auto left = this->cv1->forward(input);
-        return      this->cv2->forward(left) + left;
+        auto cv1 = this->cv1->forward(input);
+        auto cv2 = this->cv2->forward(cv1);
+        auto cv3 = this->cv3->forward(cv1);
+        auto cv4 = this->cv4->forward(cv2);
+        return cv1 + cv2 + cv3 + cv4;
     }
 
 };
 
 TORCH_MODULE(ResNet1dBlock);
+
+/**
+ * 1D残差网络
+ */
+class ResNet1dCatBlockImpl : public torch::nn::Module {
+
+private:
+    torch::nn::Sequential cv1{ nullptr };
+    torch::nn::Sequential cv2{ nullptr };
+    torch::nn::Sequential cv3{ nullptr };
+    torch::nn::Sequential cv4{ nullptr };
+
+public:
+    ResNet1dCatBlockImpl(
+        const int in_channels,
+        const int out_channels,
+        const int stride    = 1,
+        const int kernel    = 3,
+        const int padding   = 1,
+        const int dilation  = 1
+    ) {
+        this->cv1 = this->register_module("cv1", torch::nn::Sequential(
+            torch::nn::Conv1d(torch::nn::Conv1dOptions(in_channels, out_channels, kernel).padding(padding).dilation(dilation).bias(false).stride(stride)),
+            layer_act()
+        ));
+        this->cv2 = this->register_module("cv2", torch::nn::Sequential(
+            torch::nn::Conv1d(torch::nn::Conv1dOptions(out_channels, out_channels, 3).padding(1).dilation(1)),
+            layer_act()
+        ));
+        this->cv3 = this->register_module("cv3", torch::nn::Sequential(
+            torch::nn::Conv1d(torch::nn::Conv1dOptions(out_channels, out_channels, 3).padding(2).dilation(2)),
+            layer_act(),
+            torch::nn::Conv1d(torch::nn::Conv1dOptions(out_channels, out_channels, 3).padding(2).dilation(2)),
+            layer_act()
+        ));
+        this->cv4 = this->register_module("cv4", torch::nn::Sequential(
+            torch::nn::Conv1d(torch::nn::Conv1dOptions(out_channels, out_channels, 3).padding(2).dilation(2)),
+            layer_act(),
+            torch::nn::Conv1d(torch::nn::Conv1dOptions(out_channels, out_channels, 3).padding(2).dilation(2)),
+            layer_act()
+        ));
+    }
+    ~ResNet1dCatBlockImpl() {
+    }
+
+public:
+    torch::Tensor forward(const torch::Tensor& input) {
+        auto cv1 = this->cv1->forward(input);
+        auto cv2 = this->cv2->forward(cv1);
+        auto cv3 = this->cv3->forward(cv1);
+        auto cv4 = this->cv4->forward(cv2);
+        return torch::cat({ cv1, cv2, cv3, cv4 }, 1);
+    }
+
+};
+
+TORCH_MODULE(ResNet1dCatBlock);
 
 /**
  * 2D残差网络
@@ -101,26 +170,36 @@ class ResNet2dBlockImpl : public torch::nn::Module {
 private:
     torch::nn::Sequential cv1{ nullptr };
     torch::nn::Sequential cv2{ nullptr };
+    torch::nn::Sequential cv3{ nullptr };
+    torch::nn::Sequential cv4{ nullptr };
 
 public:
     ResNet2dBlockImpl(
         const int in_channels,
         const int out_channels,
-        const shp shape,
         const shp stride   = std::vector<int64_t>{ 1, 1 },
         const shp kernel   = std::vector<int64_t>{ 3, 3 },
         const shp padding  = std::vector<int64_t>{ 1, 1 },
         const shp dilation = std::vector<int64_t>{ 1, 1 }
     ) {
         this->cv1 = this->register_module("cv1", torch::nn::Sequential(
-            torch::nn::LayerNorm(torch::nn::LayerNormOptions(shape)),
             torch::nn::Conv2d(torch::nn::Conv2dOptions(in_channels, out_channels, kernel).padding(padding).dilation(dilation).bias(false).stride(stride)),
             layer_act()
         ));
         this->cv2 = this->register_module("cv2", torch::nn::Sequential(
             torch::nn::Conv2d(torch::nn::Conv2dOptions(out_channels, out_channels, std::vector<int64_t>{ 3, 3 }).padding(std::vector<int64_t>{ 1, 1 }).dilation(std::vector<int64_t>{ 1, 1 })),
+            layer_act()
+        ));
+        this->cv3 = this->register_module("cv3", torch::nn::Sequential(
+            torch::nn::Conv2d(torch::nn::Conv2dOptions(out_channels, out_channels, std::vector<int64_t>{ 3, 3 }).padding(std::vector<int64_t>{ 2, 2 }).dilation(std::vector<int64_t>{ 2, 2 })),
             layer_act(),
-            torch::nn::Conv2d(torch::nn::Conv2dOptions(out_channels, out_channels, std::vector<int64_t>{ 3, 3 }).padding(std::vector<int64_t>{ 1, 1 }).dilation(std::vector<int64_t>{ 1, 1 })),
+            torch::nn::Conv2d(torch::nn::Conv2dOptions(out_channels, out_channels, std::vector<int64_t>{ 3, 3 }).padding(std::vector<int64_t>{ 2, 2 }).dilation(std::vector<int64_t>{ 2, 2 })),
+            layer_act()
+        ));
+        this->cv4 = this->register_module("cv4", torch::nn::Sequential(
+            torch::nn::Conv2d(torch::nn::Conv2dOptions(out_channels, out_channels, std::vector<int64_t>{ 3, 3 }).padding(std::vector<int64_t>{ 2, 2 }).dilation(std::vector<int64_t>{ 2, 2 })),
+            layer_act(),
+            torch::nn::Conv2d(torch::nn::Conv2dOptions(out_channels, out_channels, std::vector<int64_t>{ 3, 3 }).padding(std::vector<int64_t>{ 2, 2 }).dilation(std::vector<int64_t>{ 2, 2 })),
             layer_act()
         ));
     }
@@ -129,13 +208,73 @@ public:
 
 public:
     torch::Tensor forward(const torch::Tensor& input) {
-        auto left = this->cv1->forward(input);
-        return      this->cv2->forward(left) + left;
+        auto cv1 = this->cv1->forward(input);
+        auto cv2 = this->cv2->forward(cv1);
+        auto cv3 = this->cv3->forward(cv1);
+        auto cv4 = this->cv4->forward(cv2);
+        return cv1 + cv2 + cv3 + cv4;
     }
 
 };
 
 TORCH_MODULE(ResNet2dBlock);
+
+/**
+ * 2D残差网络
+ */
+class ResNet2dCatBlockImpl : public torch::nn::Module {
+
+private:
+    torch::nn::Sequential cv1{ nullptr };
+    torch::nn::Sequential cv2{ nullptr };
+    torch::nn::Sequential cv3{ nullptr };
+    torch::nn::Sequential cv4{ nullptr };
+
+public:
+    ResNet2dCatBlockImpl(
+        const int in_channels,
+        const int out_channels,
+        const shp stride   = std::vector<int64_t>{ 1, 1 },
+        const shp kernel   = std::vector<int64_t>{ 3, 3 },
+        const shp padding  = std::vector<int64_t>{ 1, 1 },
+        const shp dilation = std::vector<int64_t>{ 1, 1 }
+    ) {
+        this->cv1 = this->register_module("cv1", torch::nn::Sequential(
+            torch::nn::Conv2d(torch::nn::Conv2dOptions(in_channels, out_channels, kernel).padding(padding).dilation(dilation).bias(false).stride(stride)),
+            layer_act()
+        ));
+        this->cv2 = this->register_module("cv2", torch::nn::Sequential(
+            torch::nn::Conv2d(torch::nn::Conv2dOptions(out_channels, out_channels, std::vector<int64_t>{ 3, 3 }).padding(std::vector<int64_t>{ 1, 1 }).dilation(std::vector<int64_t>{ 1, 1 })),
+            layer_act()
+        ));
+        this->cv3 = this->register_module("cv3", torch::nn::Sequential(
+            torch::nn::Conv2d(torch::nn::Conv2dOptions(out_channels, out_channels, std::vector<int64_t>{ 3, 3 }).padding(std::vector<int64_t>{ 2, 2 }).dilation(std::vector<int64_t>{ 2, 2 })),
+            layer_act(),
+            torch::nn::Conv2d(torch::nn::Conv2dOptions(out_channels, out_channels, std::vector<int64_t>{ 3, 3 }).padding(std::vector<int64_t>{ 2, 2 }).dilation(std::vector<int64_t>{ 2, 2 })),
+            layer_act()
+        ));
+        this->cv4 = this->register_module("cv4", torch::nn::Sequential(
+            torch::nn::Conv2d(torch::nn::Conv2dOptions(out_channels, out_channels, std::vector<int64_t>{ 3, 3 }).padding(std::vector<int64_t>{ 2, 2 }).dilation(std::vector<int64_t>{ 2, 2 })),
+            layer_act(),
+            torch::nn::Conv2d(torch::nn::Conv2dOptions(out_channels, out_channels, std::vector<int64_t>{ 3, 3 }).padding(std::vector<int64_t>{ 2, 2 }).dilation(std::vector<int64_t>{ 2, 2 })),
+            layer_act()
+        ));
+    }
+    ~ResNet2dCatBlockImpl() {
+    }
+
+public:
+    torch::Tensor forward(const torch::Tensor& input) {
+        auto cv1 = this->cv1->forward(input);
+        auto cv2 = this->cv2->forward(cv1);
+        auto cv3 = this->cv3->forward(cv1);
+        auto cv4 = this->cv4->forward(cv2);
+        return torch::cat({ cv1, cv2, cv3, cv4 }, 1);
+    }
+
+};
+
+TORCH_MODULE(ResNet2dCatBlock);
 
 /**
  * GRU
@@ -165,8 +304,7 @@ public:
 public:
     torch::Tensor forward(const torch::Tensor& input) {
         auto [ output, _ ] = this->gru->forward(input);
-        output = this->proj->forward(output);
-        return torch::cat({ input, output }, -1);
+        return this->proj->forward(output);
     }
 
 };
@@ -210,8 +348,7 @@ public:
             torch::nn::Linear(torch::nn::LinearOptions(o_dim, o_dim).bias(false))
         ));
         this->out = this->register_module("out", torch::nn::Sequential(
-            chobits::nn::ResNet1dBlock(256, 256, q_dim + o_dim, 2, 2, 0, 1),
-            chobits::nn::ResNet1dBlock(256, 256, o_dim,         1, 3, 2, 2)
+            chobits::nn::ResNet1dBlock(256, 256, 2, 2, 0, 1) // q_dim + o_dim
         ));
     }
     ~AttentionBlockImpl() {
@@ -249,21 +386,21 @@ public:
         const int dilation = 1
     ) {
         this->head = this->register_module("head", torch::nn::Sequential(
-            chobits::nn::ResNet1dBlock(  1,   4, 800, 3, kernel, padding, dilation),
-            chobits::nn::ResNet1dBlock(  4,  16, 267, 3, kernel, padding, dilation),
-            chobits::nn::ResNet1dBlock( 16,  64,  89, 3, kernel, padding, dilation),
-            chobits::nn::ResNet1dBlock( 64, 256,  30, 3, kernel, padding, dilation),
-            chobits::nn::ResNet1dBlock(256, 256,  10, 3, kernel, padding, dilation),
+            chobits::nn::ResNet1dCatBlock(  1,   1, 3, kernel, padding, dilation), // 800
+            chobits::nn::ResNet1dCatBlock(  4,   4, 3, kernel, padding, dilation), // 267
+            chobits::nn::ResNet1dCatBlock( 16,  16, 3, kernel, padding, dilation), //  89
+            chobits::nn::ResNet1dCatBlock( 64,  64, 3, kernel, padding, dilation), //  30
+            chobits::nn::ResNet1dBlock   (256, 256, 3, kernel, padding, dilation), //  10
             torch::nn::Flatten(torch::nn::FlattenOptions().start_dim(1))
         ));
         this->gru = this->register_module("gru", torch::nn::Sequential(
             chobits::nn::GRUBlock(1024, 1024)
         ));
         this->conv = this->register_module("conv", torch::nn::Sequential(
-            chobits::nn::ResNet1dBlock( 10,  32, 2048, 2, 2, 0, 1),
-            chobits::nn::ResNet1dBlock( 32,  64, 1024, 2, 2, 0, 1),
-            chobits::nn::ResNet1dBlock( 64, 128,  512, 2, 2, 0, 1),
-            chobits::nn::ResNet1dBlock(128, 256,  256, 1, 3, 2, 2)
+            torch::nn::LayerNorm(torch::nn::LayerNormOptions(std::vector<int64_t>{ 1024 })),
+            chobits::nn::ResNet1dCatBlock( 20,  20, 2, 2, 0, 1), // 1024
+            chobits::nn::ResNet1dBlock   ( 80, 160, 2, 2, 0, 1), //  512
+            chobits::nn::ResNet1dBlock   (160, 256, 1, 3, 1, 1)  //  256
         ));
     }
     ~AudioHeadBlockImpl() {
@@ -271,10 +408,9 @@ public:
 
 public:
     torch::Tensor forward(const torch::Tensor& input) {
-        auto out = this->head->forward(input.view({ -1, 1, input.size(-1) }));
-             out = this->gru->forward(out.view({ input.size(0), input.size(1), -1 }));
-             out = this->conv->forward(out);
-        return out;
+        auto out = this->head->forward(input.view({ -1, 1, input.size(-1) })).view({ input.size(0), input.size(1), -1 });
+        auto gru = this->gru->forward(out);
+        return this->conv->forward(torch::cat({ out, gru }, 1));
     }
 
 };
@@ -298,21 +434,21 @@ public:
         const shp dilation = std::vector<int64_t>{ 1, 1 }
     ) {
         this->head = this->register_module("head", torch::nn::Sequential(
-            chobits::nn::ResNet2dBlock(  1,   4, std::vector<int64_t>{ 360, 640 }, std::vector<int64_t>{ 3, 3 }, kernel, padding, dilation),
-            chobits::nn::ResNet2dBlock(  4,  16, std::vector<int64_t>{ 120, 214 }, std::vector<int64_t>{ 3, 3 }, kernel, padding, dilation),
-            chobits::nn::ResNet2dBlock( 16,  64, std::vector<int64_t>{  40,  72 }, std::vector<int64_t>{ 3, 3 }, kernel, padding, dilation),
-            chobits::nn::ResNet2dBlock( 64, 256, std::vector<int64_t>{  14,  24 }, std::vector<int64_t>{ 3, 3 }, kernel, padding, dilation),
-            chobits::nn::ResNet2dBlock(256, 256, std::vector<int64_t>{   5,   8 }, std::vector<int64_t>{ 3, 3 }, kernel, padding, dilation),
+            chobits::nn::ResNet2dCatBlock(  1,   1, std::vector<int64_t>{ 3, 3 }, kernel, padding, dilation), // std::vector<int64_t>{ 360, 640 }
+            chobits::nn::ResNet2dCatBlock(  4,   4, std::vector<int64_t>{ 3, 3 }, kernel, padding, dilation), // std::vector<int64_t>{ 120, 214 }
+            chobits::nn::ResNet2dCatBlock( 16,  16, std::vector<int64_t>{ 3, 3 }, kernel, padding, dilation), // std::vector<int64_t>{  40,  72 }
+            chobits::nn::ResNet2dCatBlock( 64,  64, std::vector<int64_t>{ 3, 3 }, kernel, padding, dilation), // std::vector<int64_t>{  14,  24 }
+            chobits::nn::ResNet2dBlock   (256, 256, std::vector<int64_t>{ 3, 3 }, kernel, padding, dilation), // std::vector<int64_t>{   5,   8 }
             torch::nn::Flatten(torch::nn::FlattenOptions().start_dim(1))
         ));
         this->gru = this->register_module("gru", torch::nn::Sequential(
             chobits::nn::GRUBlock(1536, 1536)
         ));
         this->conv = this->register_module("conv", torch::nn::Sequential(
-            chobits::nn::ResNet1dBlock( 10,  32, 3072, 2, 2, 0, 1),
-            chobits::nn::ResNet1dBlock( 32,  64, 1536, 2, 2, 0, 1),
-            chobits::nn::ResNet1dBlock( 64, 128,  768, 2, 2, 0, 1),
-            chobits::nn::ResNet1dBlock(128, 256,  384, 1, 3, 2, 2)
+            torch::nn::LayerNorm(torch::nn::LayerNormOptions(std::vector<int64_t>{ 1536 })),
+            chobits::nn::ResNet1dCatBlock( 20,  20, 2, 2, 0, 1), // 1536
+            chobits::nn::ResNet1dBlock   ( 80, 160, 2, 2, 0, 1), //  768
+            chobits::nn::ResNet1dBlock   (160, 256, 1, 3, 1, 1)  //  384
         ));
     }
     ~VideoHeadBlockImpl() {
@@ -320,10 +456,9 @@ public:
 
 public:
     torch::Tensor forward(const torch::Tensor& input) {
-        auto out = this->head->forward(input.view({ -1, 1, input.size(2), input.size(3) }));
-             out = this->gru->forward(out.view({ input.size(0), input.size(1), -1 }));
-             out = this->conv->forward(out);
-        return out;
+        auto out = this->head->forward(input.view({ -1, 1, input.size(2), input.size(3) })).view({ input.size(0), input.size(1), -1 });
+        auto gru = this->gru->forward(out);
+        return this->conv->forward(torch::cat({ out, gru }, 1));
     }
 
 };
@@ -345,12 +480,14 @@ public:
         const shp dilation = std::vector<int64_t>{ 1, 1 }
     ) {
         this->head = this->register_module("head", torch::nn::Sequential(
-            chobits::nn::ResNet2dBlock( 3,  16, std::vector<int64_t>{ 360, 640 }, std::vector<int64_t>{ 3, 3 }, kernel, padding, dilation),
-            chobits::nn::ResNet2dBlock(16,  64, std::vector<int64_t>{ 120, 214 }, std::vector<int64_t>{ 3, 3 }, kernel, padding, dilation),
-            chobits::nn::ResNet2dBlock(64, 256, std::vector<int64_t>{  40,  72 }, std::vector<int64_t>{ 3, 3 }, kernel, padding, dilation),
+            chobits::nn::ResNet2dCatBlock(  3,   3, std::vector<int64_t>{ 3, 3 }, kernel, padding, dilation), // std::vector<int64_t>{ 360, 640 }
+            chobits::nn::ResNet2dBlock   ( 12,  16, std::vector<int64_t>{ 1, 1 }, kernel, padding, dilation), // std::vector<int64_t>{ 120, 214 }
+            chobits::nn::ResNet2dCatBlock( 16,  16, std::vector<int64_t>{ 3, 3 }, kernel, padding, dilation), // std::vector<int64_t>{ 120, 214 }
+            chobits::nn::ResNet2dCatBlock( 64,  64, std::vector<int64_t>{ 3, 3 }, kernel, padding, dilation), // std::vector<int64_t>{  40,  72 }
+            chobits::nn::ResNet2dBlock   (256, 256, std::vector<int64_t>{ 1, 1 }, kernel, padding, dilation), // std::vector<int64_t>{  14,  24 }
             torch::nn::Flatten(torch::nn::FlattenOptions().start_dim(2)),
-            chobits::nn::ResNet1dBlock(256, 256, 336, 1, 3, 1, 1),
-            chobits::nn::ResNet1dBlock(256, 256, 336, 1, 3, 2, 2)
+            torch::nn::LayerNorm(torch::nn::LayerNormOptions(std::vector<int64_t>{ 336 })),
+            chobits::nn::ResNet1dBlock(256, 256, 1, 3, 1, 1)  // 336
         ));
     }
     ~ImageHeadBlockImpl() {
@@ -389,8 +526,7 @@ public:
         this->image_attn = this->register_module("image_attn", chobits::nn::AttentionBlock(muxer_in, image_in, image_in, muxer_in));
         this->mixer_attn = this->register_module("mixer_attn", chobits::nn::AttentionBlock(muxer_in, muxer_in, muxer_in, muxer_in));
         this->muxer_conv = this->register_module("muxer_conv", torch::nn::Sequential(
-            chobits::nn::ResNet1dBlock(256, 256, muxer_in, 1, 3, 2, 2),
-            chobits::nn::ResNet1dBlock(256, 256, muxer_in, 1, 3, 2, 2)
+            chobits::nn::ResNet1dBlock(256, 256, 1, 3, 1, 1) // muxer_in
         ));
     }
     ~MediaMixerBlockImpl() {
@@ -424,6 +560,7 @@ public:
         const shp channel      = std::vector<int64_t>{ 256, 64, 16, 4, 1 }
     ) {
         this->tail = this->register_module("tail", torch::nn::Sequential(
+            torch::nn::LayerNorm(torch::nn::LayerNormOptions(std::vector<int64_t>{ in_features })),
             torch::nn::Conv1d(torch::nn::Conv1dOptions(channel[0], channel[1], 3)),
             layer_act(),
             torch::nn::Conv1d(torch::nn::Conv1dOptions(channel[1], channel[2], 3)),
