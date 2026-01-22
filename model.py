@@ -27,31 +27,17 @@ class ResNet1dBlock(nn.Module):
         kernel      : int = 3,
         padding     : int = 1,
         dilation    : int = 1,
-        kernel_     : int = 2,
-        padding_    : int = 0,
-        dilation_   : int = 1
     ):
         super().__init__()
-        if stride == 2:
-            self.cv1 = nn.Sequential(
-                nn.LayerNorm([features]),
-                nn.Conv1d(in_channels, out_channels, kernel_, padding = padding_, dilation = dilation_, bias = False, stride = stride),
-                layer_act(),
-                nn.Conv1d(out_channels, out_channels, kernel, padding = padding, dilation = dilation),
-                layer_act(),
-            )
-        else:
-            self.cv1 = nn.Sequential(
-                nn.LayerNorm([features]),
-                nn.Conv1d(in_channels, out_channels, kernel, padding = padding, dilation = dilation, bias = False, stride = stride),
-                layer_act(),
-                nn.Conv1d(out_channels, out_channels, kernel, padding = padding, dilation = dilation),
-                layer_act(),
-            )
-        self.cv2 = nn.Sequential(
-            nn.Conv1d(out_channels, out_channels, kernel, padding = padding, dilation = dilation),
+        self.cv1 = nn.Sequential(
+            nn.LayerNorm([features]),
+            nn.Conv1d(in_channels, out_channels, kernel, padding = padding, dilation = dilation, bias = False, stride = stride),
             layer_act(),
-            nn.Conv1d(out_channels, out_channels, kernel, padding = padding, dilation = dilation),
+        )
+        self.cv2 = nn.Sequential(
+            nn.Conv1d(out_channels, out_channels, 3, padding = 1, dilation = 1),
+            layer_act(),
+            nn.Conv1d(out_channels, out_channels, 3, padding = 1, dilation = 1),
             layer_act(),
         )
 
@@ -75,13 +61,11 @@ class ResNet2dBlock(nn.Module):
             nn.LayerNorm(shape),
             nn.Conv2d(in_channels, out_channels, kernel, padding = padding, dilation = dilation, bias = False, stride = stride),
             layer_act(),
-            nn.Conv2d(out_channels, out_channels, kernel, padding = padding, dilation = dilation),
-            layer_act(),
         )
         self.cv2 = nn.Sequential(
-            nn.Conv2d(out_channels, out_channels, kernel, padding = padding, dilation = dilation),
+            nn.Conv2d(out_channels, out_channels, [ 3, 3 ], padding = [ 1, 1 ], dilation = [ 1, 1 ]),
             layer_act(),
-            nn.Conv2d(out_channels, out_channels, kernel, padding = padding, dilation = dilation),
+            nn.Conv2d(out_channels, out_channels, [ 3, 3 ], padding = [ 1, 1 ], dilation = [ 1, 1 ]),
             layer_act(),
         )
 
@@ -121,7 +105,7 @@ class AttentionBlock(nn.Module):
         self.attn = nn.MultiheadAttention(o_dim, num_heads, bias = False, batch_first = False)
         self.proj = nn.Linear(o_dim, o_dim, bias = False)
         self.out  = nn.Sequential(
-            ResNet1dBlock(256, 256, q_dim + o_dim, 2, 3, 1, 1),
+            ResNet1dBlock(256, 256, q_dim + o_dim, 2, 2, 0, 1),
             ResNet1dBlock(256, 256, o_dim,         1, 3, 2, 2),
         )
 
@@ -152,9 +136,9 @@ class AudioHeadBlock(nn.Module):
         )
         self.gru = GRUBlock(1024, 1024)
         self.conv = nn.Sequential(
-            ResNet1dBlock( 10,  32, 2048, 2, 3, 1, 1),
-            ResNet1dBlock( 32,  64, 1024, 2, 3, 1, 1),
-            ResNet1dBlock( 64, 128,  512, 2, 3, 1, 1),
+            ResNet1dBlock( 10,  32, 2048, 2, 2, 0, 1),
+            ResNet1dBlock( 32,  64, 1024, 2, 2, 0, 1),
+            ResNet1dBlock( 64, 128,  512, 2, 2, 0, 1),
             ResNet1dBlock(128, 256,  256, 1, 3, 2, 2),
         )
 
@@ -182,9 +166,9 @@ class VideoHeadBlock(nn.Module):
         )
         self.gru = GRUBlock(1536, 1536)
         self.conv = nn.Sequential(
-            ResNet1dBlock( 10,  32, 3072, 2, 3, 1, 1),
-            ResNet1dBlock( 32,  64, 1536, 2, 3, 1, 1),
-            ResNet1dBlock( 64, 128,  768, 2, 3, 1, 1),
+            ResNet1dBlock( 10,  32, 3072, 2, 2, 0, 1),
+            ResNet1dBlock( 32,  64, 1536, 2, 2, 0, 1),
+            ResNet1dBlock( 64, 128,  768, 2, 2, 0, 1),
             ResNet1dBlock(128, 256,  384, 1, 3, 2, 2),
         )
 
@@ -203,10 +187,9 @@ class ImageHeadBlock(nn.Module):
     ):
         super().__init__()
         self.head = nn.Sequential(
-            ResNet2dBlock(  3,  16, [ 360, 640 ], [ 3, 3 ], kernel, padding, dilation),
-            ResNet2dBlock( 16,  64, [ 120, 214 ], [ 3, 3 ], kernel, padding, dilation),
-            ResNet2dBlock( 64, 256, [  40,  72 ], [ 3, 3 ], kernel, padding, dilation),
-            ResNet2dBlock(256, 256, [  14,  24 ], [ 1, 1 ], kernel, padding, dilation),
+            ResNet2dBlock( 3,  16, [ 360, 640 ], [ 3, 3 ], kernel, padding, dilation),
+            ResNet2dBlock(16,  64, [ 120, 214 ], [ 3, 3 ], kernel, padding, dilation),
+            ResNet2dBlock(64, 256, [  40,  72 ], [ 3, 3 ], kernel, padding, dilation),
             nn.Flatten(start_dim = 2),
             ResNet1dBlock(256, 256, 336, 1, 3, 1, 1),
             ResNet1dBlock(256, 256, 336, 1, 3, 2, 2),

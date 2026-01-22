@@ -66,32 +66,17 @@ public:
         const int stride    = 1,
         const int kernel    = 3,
         const int padding   = 1,
-        const int dilation  = 1,
-        const int kernel_   = 2,
-        const int padding_  = 0,
-        const int dilation_ = 1
+        const int dilation  = 1
     ) {
-        if(stride == 2) {
-            this->cv1 = this->register_module("cv1", torch::nn::Sequential(
-                torch::nn::LayerNorm(torch::nn::LayerNormOptions(std::vector<int64_t>{ features })),
-                torch::nn::Conv1d(torch::nn::Conv1dOptions(in_channels, out_channels, kernel_).padding(padding_).dilation(dilation_).bias(false).stride(stride)),
-                layer_act(),
-                torch::nn::Conv1d(torch::nn::Conv1dOptions(out_channels, out_channels, kernel).padding(padding).dilation(dilation)),
-                layer_act()
-            ));
-        } else {
-            this->cv1 = this->register_module("cv1", torch::nn::Sequential(
-                torch::nn::LayerNorm(torch::nn::LayerNormOptions(std::vector<int64_t>{ features })),
-                torch::nn::Conv1d(torch::nn::Conv1dOptions(in_channels, out_channels, kernel).padding(padding).dilation(dilation).bias(false).stride(stride)),
-                layer_act(),
-                torch::nn::Conv1d(torch::nn::Conv1dOptions(out_channels, out_channels, kernel).padding(padding).dilation(dilation)),
-                layer_act()
-            ));
-        }
+        this->cv1 = this->register_module("cv1", torch::nn::Sequential(
+            torch::nn::LayerNorm(torch::nn::LayerNormOptions(std::vector<int64_t>{ features })),
+            torch::nn::Conv1d(torch::nn::Conv1dOptions(in_channels, out_channels, kernel).padding(padding).dilation(dilation).bias(false).stride(stride)),
+            layer_act()
+        ));
         this->cv2 = this->register_module("cv2", torch::nn::Sequential(
-            torch::nn::Conv1d(torch::nn::Conv1dOptions(out_channels, out_channels, kernel).padding(padding).dilation(dilation)),
+            torch::nn::Conv1d(torch::nn::Conv1dOptions(out_channels, out_channels, 3).padding(1).dilation(1)),
             layer_act(),
-            torch::nn::Conv1d(torch::nn::Conv1dOptions(out_channels, out_channels, kernel).padding(padding).dilation(dilation)),
+            torch::nn::Conv1d(torch::nn::Conv1dOptions(out_channels, out_channels, 3).padding(1).dilation(1)),
             layer_act()
         ));
     }
@@ -130,14 +115,12 @@ public:
         this->cv1 = this->register_module("cv1", torch::nn::Sequential(
             torch::nn::LayerNorm(torch::nn::LayerNormOptions(shape)),
             torch::nn::Conv2d(torch::nn::Conv2dOptions(in_channels, out_channels, kernel).padding(padding).dilation(dilation).bias(false).stride(stride)),
-            layer_act(),
-            torch::nn::Conv2d(torch::nn::Conv2dOptions(out_channels, out_channels, kernel).padding(padding).dilation(dilation)),
             layer_act()
         ));
         this->cv2 = this->register_module("cv2", torch::nn::Sequential(
-            torch::nn::Conv2d(torch::nn::Conv2dOptions(out_channels, out_channels, kernel).padding(padding).dilation(dilation)),
+            torch::nn::Conv2d(torch::nn::Conv2dOptions(out_channels, out_channels, std::vector<int64_t>{ 3, 3 }).padding(std::vector<int64_t>{ 1, 1 }).dilation(std::vector<int64_t>{ 1, 1 })),
             layer_act(),
-            torch::nn::Conv2d(torch::nn::Conv2dOptions(out_channels, out_channels, kernel).padding(padding).dilation(dilation)),
+            torch::nn::Conv2d(torch::nn::Conv2dOptions(out_channels, out_channels, std::vector<int64_t>{ 3, 3 }).padding(std::vector<int64_t>{ 1, 1 }).dilation(std::vector<int64_t>{ 1, 1 })),
             layer_act()
         ));
     }
@@ -227,7 +210,7 @@ public:
             torch::nn::Linear(torch::nn::LinearOptions(o_dim, o_dim).bias(false))
         ));
         this->out = this->register_module("out", torch::nn::Sequential(
-            chobits::nn::ResNet1dBlock(256, 256, q_dim + o_dim, 2, 3, 1, 1),
+            chobits::nn::ResNet1dBlock(256, 256, q_dim + o_dim, 2, 2, 0, 1),
             chobits::nn::ResNet1dBlock(256, 256, o_dim,         1, 3, 2, 2)
         ));
     }
@@ -277,9 +260,9 @@ public:
             chobits::nn::GRUBlock(1024, 1024)
         ));
         this->conv = this->register_module("conv", torch::nn::Sequential(
-            chobits::nn::ResNet1dBlock( 10,  32, 2048, 2, 3, 1, 1),
-            chobits::nn::ResNet1dBlock( 32,  64, 1024, 2, 3, 1, 1),
-            chobits::nn::ResNet1dBlock( 64, 128,  512, 2, 3, 1, 1),
+            chobits::nn::ResNet1dBlock( 10,  32, 2048, 2, 2, 0, 1),
+            chobits::nn::ResNet1dBlock( 32,  64, 1024, 2, 2, 0, 1),
+            chobits::nn::ResNet1dBlock( 64, 128,  512, 2, 2, 0, 1),
             chobits::nn::ResNet1dBlock(128, 256,  256, 1, 3, 2, 2)
         ));
     }
@@ -326,9 +309,9 @@ public:
             chobits::nn::GRUBlock(1536, 1536)
         ));
         this->conv = this->register_module("conv", torch::nn::Sequential(
-            chobits::nn::ResNet1dBlock( 10,  32, 3072, 2, 3, 1, 1),
-            chobits::nn::ResNet1dBlock( 32,  64, 1536, 2, 3, 1, 1),
-            chobits::nn::ResNet1dBlock( 64, 128,  768, 2, 3, 1, 1),
+            chobits::nn::ResNet1dBlock( 10,  32, 3072, 2, 2, 0, 1),
+            chobits::nn::ResNet1dBlock( 32,  64, 1536, 2, 2, 0, 1),
+            chobits::nn::ResNet1dBlock( 64, 128,  768, 2, 2, 0, 1),
             chobits::nn::ResNet1dBlock(128, 256,  384, 1, 3, 2, 2)
         ));
     }
@@ -362,10 +345,9 @@ public:
         const shp dilation = std::vector<int64_t>{ 1, 1 }
     ) {
         this->head = this->register_module("head", torch::nn::Sequential(
-            chobits::nn::ResNet2dBlock(  3,  16, std::vector<int64_t>{ 360, 640 }, std::vector<int64_t>{ 3, 3 }, kernel, padding, dilation),
-            chobits::nn::ResNet2dBlock( 16,  64, std::vector<int64_t>{ 120, 214 }, std::vector<int64_t>{ 3, 3 }, kernel, padding, dilation),
-            chobits::nn::ResNet2dBlock( 64, 256, std::vector<int64_t>{  40,  72 }, std::vector<int64_t>{ 3, 3 }, kernel, padding, dilation),
-            chobits::nn::ResNet2dBlock(256, 256, std::vector<int64_t>{  14,  24 }, std::vector<int64_t>{ 1, 1 }, kernel, padding, dilation),
+            chobits::nn::ResNet2dBlock( 3,  16, std::vector<int64_t>{ 360, 640 }, std::vector<int64_t>{ 3, 3 }, kernel, padding, dilation),
+            chobits::nn::ResNet2dBlock(16,  64, std::vector<int64_t>{ 120, 214 }, std::vector<int64_t>{ 3, 3 }, kernel, padding, dilation),
+            chobits::nn::ResNet2dBlock(64, 256, std::vector<int64_t>{  40,  72 }, std::vector<int64_t>{ 3, 3 }, kernel, padding, dilation),
             torch::nn::Flatten(torch::nn::FlattenOptions().start_dim(2)),
             chobits::nn::ResNet1dBlock(256, 256, 336, 1, 3, 1, 1),
             chobits::nn::ResNet1dBlock(256, 256, 336, 1, 3, 2, 2)
