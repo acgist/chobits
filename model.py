@@ -21,6 +21,7 @@ class ResNet1dBlock(nn.Module):
         self,
         in_channels : int,
         out_channels: int,
+        features    : int,
         stride      : int = 1,
         kernel      : int = 3,
         padding     : int = 1,
@@ -29,6 +30,7 @@ class ResNet1dBlock(nn.Module):
         super().__init__()
         self.cv1 = nn.Sequential(
             nn.Conv1d(in_channels, out_channels, kernel, padding = padding, dilation = dilation, bias = False, stride = stride),
+            nn.LayerNorm(features),
             layer_act(),
         )
         self.cv2 = nn.Sequential(
@@ -59,6 +61,7 @@ class ResNet1dCatBlock(nn.Module):
     def __init__(
         self,
         channels: int,
+        features: int,
         stride  : int = 1,
         kernel  : int = 3,
         padding : int = 1,
@@ -67,6 +70,7 @@ class ResNet1dCatBlock(nn.Module):
         super().__init__()
         self.cv1 = nn.Sequential(
             nn.Conv1d(channels * 4, channels * 4, kernel, padding = padding, dilation = dilation, bias = False, stride = stride),
+            nn.LayerNorm(features),
             layer_act(),
         )
         self.cv2 = nn.Sequential(
@@ -97,6 +101,7 @@ class ResNet2dBlock(nn.Module):
         self,
         in_channels : int,
         out_channels: int,
+        features    : List[int],
         stride      : List[int] = [ 1, 1 ],
         kernel      : List[int] = [ 3, 3 ],
         padding     : List[int] = [ 1, 1 ],
@@ -105,6 +110,7 @@ class ResNet2dBlock(nn.Module):
         super().__init__()
         self.cv1 = nn.Sequential(
             nn.Conv2d(in_channels, out_channels, kernel, padding = padding, dilation = dilation, bias = False, stride = stride),
+            nn.LayerNorm(features),
             layer_act(),
         )
         self.cv2 = nn.Sequential(
@@ -135,6 +141,7 @@ class ResNet2dCatBlock(nn.Module):
     def __init__(
         self,
         channels: int,
+        features: List[int],
         stride  : List[int] = [ 1, 1 ],
         kernel  : List[int] = [ 3, 3 ],
         padding : List[int] = [ 1, 1 ],
@@ -143,6 +150,7 @@ class ResNet2dCatBlock(nn.Module):
         super().__init__()
         self.cv1 = nn.Sequential(
             nn.Conv2d(channels * 4, channels * 4, kernel, padding = padding, dilation = dilation, bias = False, stride = stride),
+            nn.LayerNorm(features),
             layer_act(),
         )
         self.cv2 = nn.Sequential(
@@ -199,7 +207,7 @@ class AttentionBlock(nn.Module):
         self.attn = nn.MultiheadAttention(o_dim, num_heads, bias = False, batch_first = False)
         self.proj = nn.Linear(o_dim, o_dim, bias = False)
         self.out  = nn.Sequential(
-            ResNet1dBlock(256, 256, 2, 2, 0, 1), # q_dim + o_dim
+            ResNet1dBlock(256, 256, o_dim, 2, 2, 0, 1),
         )
 
     def forward(self, query: torch.Tensor, key: torch.Tensor, value: torch.Tensor) -> torch.Tensor:
@@ -220,19 +228,20 @@ class AudioHeadBlock(nn.Module):
     ):
         super().__init__()
         self.head = nn.Sequential(
-            ResNet1dCatBlock(  1,      3, kernel, padding, dilation), # 800
-            ResNet1dCatBlock(  4,      3, kernel, padding, dilation), # 267
-            ResNet1dCatBlock( 16,      3, kernel, padding, dilation), #  89
-            ResNet1dCatBlock( 64,      3, kernel, padding, dilation), #  30
-            ResNet1dBlock   (256, 256, 3, kernel, padding, dilation), #  10
+            #                          800
+            ResNet1dCatBlock(  1,      267, 3, kernel, padding, dilation),
+            ResNet1dCatBlock(  4,       89, 3, kernel, padding, dilation),
+            ResNet1dCatBlock( 16,       30, 3, kernel, padding, dilation),
+            ResNet1dCatBlock( 64,       10, 3, kernel, padding, dilation),
+            ResNet1dBlock   (256, 256,   4, 3, kernel, padding, dilation),
             nn.Flatten(start_dim = 1),
         )
         self.gru = GRUBlock(1024, 1024)
         self.conv = nn.Sequential(
-            nn.LayerNorm(1024),
-            ResNet1dCatBlock( 20,      2, 2, 0, 1), # 1024
-            ResNet1dBlock   ( 80, 160, 2, 2, 0, 1), #  512
-            ResNet1dBlock   (160, 256, 1, 3, 1, 1), #  256
+            #                          1024
+            ResNet1dCatBlock( 20,       512, 2, 2, 0, 1),
+            ResNet1dBlock   ( 80, 160,  256, 2, 2, 0, 1),
+            ResNet1dBlock   (160, 256,  256, 1, 3, 1, 1),
         )
 
     def forward(self, input: torch.Tensor) -> torch.Tensor:
@@ -249,19 +258,20 @@ class VideoHeadBlock(nn.Module):
     ):
         super().__init__()
         self.head = nn.Sequential(
-            ResNet2dCatBlock(  1,      [ 3, 3 ], kernel, padding, dilation), # [ 360, 640 ]
-            ResNet2dCatBlock(  4,      [ 3, 3 ], kernel, padding, dilation), # [ 120, 214 ]
-            ResNet2dCatBlock( 16,      [ 3, 3 ], kernel, padding, dilation), # [  40,  72 ]
-            ResNet2dCatBlock( 64,      [ 3, 3 ], kernel, padding, dilation), # [  14,  24 ]
-            ResNet2dBlock   (256, 256, [ 3, 3 ], kernel, padding, dilation), # [   5,   8 ]
+            #                            360, 640
+            ResNet2dCatBlock(  1,      [ 120, 214 ], [ 3, 3 ], kernel, padding, dilation),
+            ResNet2dCatBlock(  4,      [  40,  72 ], [ 3, 3 ], kernel, padding, dilation),
+            ResNet2dCatBlock( 16,      [  14,  24 ], [ 3, 3 ], kernel, padding, dilation),
+            ResNet2dCatBlock( 64,      [   5,   8 ], [ 3, 3 ], kernel, padding, dilation),
+            ResNet2dBlock   (256, 256, [   2,   3 ], [ 3, 3 ], kernel, padding, dilation),
             nn.Flatten(start_dim = 1),
         )
         self.gru = GRUBlock(1536, 1536)
         self.conv = nn.Sequential(
-            nn.LayerNorm(1536),
-            ResNet1dCatBlock( 20,      2, 2, 0, 1), # 1536
-            ResNet1dBlock   ( 80, 160, 2, 2, 0, 1), #  768
-            ResNet1dBlock   (160, 256, 1, 3, 1, 1), #  384
+            #                          1536
+            ResNet1dCatBlock( 20,       768, 2, 2, 0, 1),
+            ResNet1dBlock   ( 80, 160,  384, 2, 2, 0, 1),
+            ResNet1dBlock   (160, 256,  384, 1, 3, 1, 1),
         )
 
     def forward(self, input: torch.Tensor) -> torch.Tensor:
@@ -278,13 +288,13 @@ class ImageHeadBlock(nn.Module):
     ):
         super().__init__()
         self.head = nn.Sequential(
-            ResNet2dCatBlock(  3,      [ 3, 3 ], kernel, padding, dilation), # [ 360, 640 ]
-            ResNet2dCatBlock( 12,      [ 3, 3 ], kernel, padding, dilation), # [ 120, 214 ]
-            ResNet2dCatBlock( 48,      [ 3, 3 ], kernel, padding, dilation), # [  40,  72 ]
-            ResNet2dBlock   (192, 256, [ 1, 1 ], kernel, padding, dilation), # [  14,  24 ]
+            #                            360, 640
+            ResNet2dCatBlock(  3,      [ 120, 214 ], [ 3, 3 ], kernel, padding, dilation),
+            ResNet2dCatBlock( 12,      [  40,  72 ], [ 3, 3 ], kernel, padding, dilation),
+            ResNet2dCatBlock( 48,      [  14,  24 ], [ 3, 3 ], kernel, padding, dilation),
+            ResNet2dBlock   (192, 256, [  14,  24 ], [ 1, 1 ], kernel, padding, dilation),
             nn.Flatten(start_dim = 2),
-            nn.LayerNorm(336),
-            ResNet1dBlock(256, 256, 1, 3, 1, 1), # 336
+            ResNet1dBlock(256, 256, 336, 1, 3, 1, 1),
         )
 
     def forward(self, input: torch.Tensor) -> torch.Tensor:
@@ -304,7 +314,7 @@ class MediaMixerBlock(nn.Module):
         self.image_attn = AttentionBlock(muxer_in, image_in, image_in, muxer_in)
         self.mixer_attn = AttentionBlock(muxer_in, muxer_in, muxer_in, muxer_in)
         self.muxer_conv = nn.Sequential(
-            ResNet1dBlock(256, 256, 1, 3, 1, 1), # muxer_in
+            ResNet1dBlock(256, 256, muxer_in, 1, 3, 1, 1),
         )
 
     def forward(
@@ -328,7 +338,6 @@ class AudioTailBlock(nn.Module):
     ):
         super().__init__()
         self.tail = nn.Sequential(
-            nn.LayerNorm(in_features),
             nn.Conv1d(channels[0], channels[1], 3),
             layer_act(),
             nn.Conv1d(channels[1], channels[2], 3),
