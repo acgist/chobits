@@ -328,7 +328,7 @@ class MediaMixerBlock(nn.Module):
         audio_o = self.audio_attn(audio,   image_o, image_o)
         video_o = self.video_attn(image_o, audio,   audio  )
         media_o = self.muxer_conv(torch.cat([ audio_o, video_o ], dim = -1))
-        muxer_o = self.muxer_attn(media_o, image, image)
+        muxer_o = self.muxer_attn(media_o, image,   image  )
         return    self.mixer_attn(muxer_o, muxer_o, muxer_o)
 
 class AudioTailBlock(nn.Module):

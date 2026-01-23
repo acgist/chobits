@@ -545,7 +545,7 @@ public:
         auto audio_o = this->audio_attn->forward(audio,   image_o, image_o);
         auto video_o = this->video_attn->forward(image_o, audio,   audio  );
         auto media_o = this->muxer_conv->forward(torch::cat({ audio_o, video_o }, -1));
-        auto muxer_o = this->muxer_attn->forward(media_o, image, image);
+        auto muxer_o = this->muxer_attn->forward(media_o, image,   image  );
         return         this->mixer_attn->forward(muxer_o, muxer_o, muxer_o);
     }
 
