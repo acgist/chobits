@@ -114,7 +114,7 @@ bool chobits::media::open_file(const std::string& file) {
         std::printf("打开输入文件失败：%d - %s\n", ret, file.c_str());
         return false;
     }
-    av_dump_format(format_ctx, 0, format_ctx->url, 0);
+    // av_dump_format(format_ctx, 0, format_ctx->url, 0);
     int audio_index = -1;
     int video_index = -1;
     for(uint32_t i = 0; i < format_ctx->nb_streams; ++i) {
@@ -273,8 +273,8 @@ bool chobits::media::open_device() {
         std::printf("打开视频硬件失败：%d - %s\n", ret, video_device_name.c_str());
         return false;
     }
-    av_dump_format(audio_format_ctx, 0, audio_format_ctx->url, 0);
-    av_dump_format(video_format_ctx, 0, video_format_ctx->url, 0);
+    // av_dump_format(audio_format_ctx, 0, audio_format_ctx->url, 0);
+    // av_dump_format(video_format_ctx, 0, video_format_ctx->url, 0);
     uint64_t audio_frame_count = 0;
     uint64_t video_frame_count = 0;
     init_context();
