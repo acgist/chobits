@@ -238,16 +238,16 @@ class AudioHeadBlock(nn.Module):
         )
         self.gru = GRUBlock(1024, 1024)
         self.conv = nn.Sequential(
-            #                          1024
-            ResNet1dCatBlock( 20,       512, 2, 2, 0, 1),
-            ResNet1dBlock   ( 80, 160,  256, 2, 2, 0, 1),
-            ResNet1dBlock   (160, 256,  256, 1, 3, 1, 1),
+            #                          2048
+            ResNet1dCatBlock( 10,      1024, 2, 2, 0, 1),
+            ResNet1dCatBlock( 40,       512, 2, 2, 0, 1),
+            ResNet1dBlock   (160, 256,  256, 2, 2, 0, 1),
         )
 
     def forward(self, input: torch.Tensor) -> torch.Tensor:
         out = self.head(input.view(-1, 1, input.size(-1))).view(input.size(0), input.size(1), -1)
         gru = self.gru(out)
-        return self.conv(torch.cat([ out, gru ], dim = 1))
+        return self.conv(torch.cat([ out, gru ], dim = -1))
 
 class VideoHeadBlock(nn.Module):
     def __init__(
@@ -268,16 +268,16 @@ class VideoHeadBlock(nn.Module):
         )
         self.gru = GRUBlock(1536, 1536)
         self.conv = nn.Sequential(
-            #                          1536
-            ResNet1dCatBlock( 20,       768, 2, 2, 0, 1),
-            ResNet1dBlock   ( 80, 160,  384, 2, 2, 0, 1),
-            ResNet1dBlock   (160, 256,  384, 1, 3, 1, 1),
+            #                          3072
+            ResNet1dCatBlock( 10,      1536, 2, 2, 0, 1),
+            ResNet1dCatBlock( 40,       768, 2, 2, 0, 1),
+            ResNet1dBlock   (160, 256,  384, 2, 2, 0, 1),
         )
 
     def forward(self, input: torch.Tensor) -> torch.Tensor:
         out = self.head(input.view(-1, 1, input.size(2), input.size(3))).view(input.size(0), input.size(1), -1)
         gru = self.gru(out)
-        return self.conv(torch.cat([ out, gru ], dim = 1))
+        return self.conv(torch.cat([ out, gru ], dim = -1))
 
 class ImageHeadBlock(nn.Module):
     def __init__(
@@ -309,9 +309,10 @@ class MediaMixerBlock(nn.Module):
     ):
         super().__init__()
         muxer_in = audio_in + video_in
+        self.image_attn = AttentionBlock(video_in, image_in, image_in, video_in)
         self.audio_attn = AttentionBlock(audio_in, video_in, video_in, audio_in)
         self.video_attn = AttentionBlock(video_in, audio_in, audio_in, video_in)
-        self.image_attn = AttentionBlock(muxer_in, image_in, image_in, muxer_in)
+        self.muxer_attn = AttentionBlock(muxer_in, image_in, image_in, muxer_in)
         self.mixer_attn = AttentionBlock(muxer_in, muxer_in, muxer_in, muxer_in)
         self.muxer_conv = nn.Sequential(
             ResNet1dBlock(256, 256, muxer_in, 1, 3, 1, 1),
@@ -323,11 +324,12 @@ class MediaMixerBlock(nn.Module):
         video: torch.Tensor,
         image: torch.Tensor,
     ) -> torch.Tensor:
-        audio_o = self.audio_attn(audio, video, video)
-        video_o = self.video_attn(video, audio, audio)
-        muxer_o = self.muxer_conv(torch.cat([ audio_o, video_o ], dim = -1))
-        mixer_o = self.image_attn(muxer_o, image, image)
-        return    self.mixer_attn(mixer_o, mixer_o, mixer_o)
+        image_o = self.image_attn(video,   image,   image  )
+        audio_o = self.audio_attn(audio,   image_o, image_o)
+        video_o = self.video_attn(image_o, audio,   audio  )
+        media_o = self.muxer_conv(torch.cat([ audio_o, video_o ], dim = -1))
+        muxer_o = self.muxer_attn(media_o, image, image)
+        return    self.mixer_attn(muxer_o, muxer_o, muxer_o)
 
 class AudioTailBlock(nn.Module):
     def __init__(

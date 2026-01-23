@@ -402,10 +402,10 @@ public:
             chobits::nn::GRUBlock(1024, 1024)
         ));
         this->conv = this->register_module("conv", torch::nn::Sequential(
-            //                                      1024
-            chobits::nn::ResNet1dCatBlock( 20,       512, 2, 2, 0, 1),
-            chobits::nn::ResNet1dBlock   ( 80, 160,  256, 2, 2, 0, 1),
-            chobits::nn::ResNet1dBlock   (160, 256,  256, 1, 3, 1, 1)
+            //                                      2048
+            chobits::nn::ResNet1dCatBlock( 10,      1024, 2, 2, 0, 1),
+            chobits::nn::ResNet1dCatBlock( 40,       512, 2, 2, 0, 1),
+            chobits::nn::ResNet1dBlock   (160, 256,  256, 2, 2, 0, 1)
         ));
     }
     ~AudioHeadBlockImpl() {
@@ -415,7 +415,7 @@ public:
     torch::Tensor forward(const torch::Tensor& input) {
         auto out = this->head->forward(input.view({ -1, 1, input.size(-1) })).view({ input.size(0), input.size(1), -1 });
         auto gru = this->gru->forward(out);
-        return this->conv->forward(torch::cat({ out, gru }, 1));
+        return this->conv->forward(torch::cat({ out, gru }, -1));
     }
 
 };
@@ -451,10 +451,10 @@ public:
             chobits::nn::GRUBlock(1536, 1536)
         ));
         this->conv = this->register_module("conv", torch::nn::Sequential(
-            //                                      1536
-            chobits::nn::ResNet1dCatBlock( 20,       768, 2, 2, 0, 1),
-            chobits::nn::ResNet1dBlock   ( 80, 160,  384, 2, 2, 0, 1),
-            chobits::nn::ResNet1dBlock   (160, 256,  384, 1, 3, 1, 1)
+            //                                      3072
+            chobits::nn::ResNet1dCatBlock( 10,      1536, 2, 2, 0, 1),
+            chobits::nn::ResNet1dCatBlock( 40,       768, 2, 2, 0, 1),
+            chobits::nn::ResNet1dBlock   (160, 256,  384, 2, 2, 0, 1)
         ));
     }
     ~VideoHeadBlockImpl() {
@@ -464,7 +464,7 @@ public:
     torch::Tensor forward(const torch::Tensor& input) {
         auto out = this->head->forward(input.view({ -1, 1, input.size(2), input.size(3) })).view({ input.size(0), input.size(1), -1 });
         auto gru = this->gru->forward(out);
-        return this->conv->forward(torch::cat({ out, gru }, 1));
+        return this->conv->forward(torch::cat({ out, gru }, -1));
     }
 
 };
@@ -513,9 +513,10 @@ TORCH_MODULE(ImageHeadBlock);
 class MediaMixerBlockImpl : public torch::nn::Module {
 
 private:
+    chobits::nn::AttentionBlock image_attn{ nullptr };
     chobits::nn::AttentionBlock audio_attn{ nullptr };
     chobits::nn::AttentionBlock video_attn{ nullptr };
-    chobits::nn::AttentionBlock image_attn{ nullptr };
+    chobits::nn::AttentionBlock muxer_attn{ nullptr };
     chobits::nn::AttentionBlock mixer_attn{ nullptr };
     torch::nn::Sequential       muxer_conv{ nullptr };
 
@@ -526,9 +527,10 @@ public:
         const int image_in = 336
     ) {
         const int muxer_in = audio_in + video_in;
+        this->image_attn = this->register_module("image_attn", chobits::nn::AttentionBlock(video_in, image_in, image_in, video_in));
         this->audio_attn = this->register_module("audio_attn", chobits::nn::AttentionBlock(audio_in, video_in, video_in, audio_in));
         this->video_attn = this->register_module("video_attn", chobits::nn::AttentionBlock(video_in, audio_in, audio_in, video_in));
-        this->image_attn = this->register_module("image_attn", chobits::nn::AttentionBlock(muxer_in, image_in, image_in, muxer_in));
+        this->muxer_attn = this->register_module("muxer_attn", chobits::nn::AttentionBlock(muxer_in, image_in, image_in, muxer_in));
         this->mixer_attn = this->register_module("mixer_attn", chobits::nn::AttentionBlock(muxer_in, muxer_in, muxer_in, muxer_in));
         this->muxer_conv = this->register_module("muxer_conv", torch::nn::Sequential(
             chobits::nn::ResNet1dBlock(256, 256, muxer_in, 1, 3, 1, 1)
@@ -539,11 +541,12 @@ public:
     
 public:
     torch::Tensor forward(const torch::Tensor& audio, const torch::Tensor& video, const torch::Tensor& image) {
-        auto audio_o = this->audio_attn->forward(audio, video, video);
-        auto video_o = this->video_attn->forward(video, audio, audio);
-        auto muxer_o = this->muxer_conv->forward(torch::cat({ audio_o, video_o }, -1));
-        auto mixer_o = this->image_attn->forward(muxer_o, image, image);
-        return         this->mixer_attn->forward(mixer_o, mixer_o, mixer_o);
+        auto image_o = this->image_attn->forward(video,   image,   image  );
+        auto audio_o = this->audio_attn->forward(audio,   image_o, image_o);
+        auto video_o = this->video_attn->forward(image_o, audio,   audio  );
+        auto media_o = this->muxer_conv->forward(torch::cat({ audio_o, video_o }, -1));
+        auto muxer_o = this->muxer_attn->forward(media_o, image, image);
+        return         this->mixer_attn->forward(muxer_o, muxer_o, muxer_o);
     }
 
 };
