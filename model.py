@@ -334,7 +334,7 @@ class AudioTailBlock(nn.Module):
         self,
         in_features : int = 640,
         out_features: int = 800,
-        channels    : List[int] = [256, 64, 16, 4, 1],
+        channels    : List[int] = [ 256, 64, 16, 4, 1 ],
     ):
         super().__init__()
         self.tail = nn.Sequential(
@@ -369,23 +369,23 @@ class Chobits(nn.Module):
         mixer_out = self.mixer(audio_out, video_out, image_out)
         return self.tail(mixer_out)
 
-# # model = ResNet1dBlock(10, 64)
-# model = ResNet1dBlock(10, 64, 2)
+# # model = ResNet1dBlock(10, 64, 800)
+# model = ResNet1dBlock(10, 64, 800, 2)
 # input = torch.randn(10, 10, 800)
 # print(model(input).shape)
 
-# # model = ResNet1dCatBlock(10)
-# model = ResNet1dCatBlock(10, 2)
+# # model = ResNet1dCatBlock(10, 800)
+# model = ResNet1dCatBlock(10, 800, 2)
 # input = torch.randn(10, 10, 800)
 # print(model(input).shape)
 
-# # model = ResNet2dBlock(10, 64)
-# model = ResNet2dBlock(10, 64, [ 2, 2 ])
+# # model = ResNet2dBlock(10, 64, [ 360, 640 ])
+# model = ResNet2dBlock(10, 64, [ 360, 640 ], [ 2, 2 ])
 # input = torch.randn(10, 10, 360, 640)
 # print(model(input).shape)
 
-# # model = ResNet2dCatBlock(10)
-# model = ResNet2dCatBlock(10, [ 2, 2 ])
+# # model = ResNet2dCatBlock(10, [ 360, 640 ])
+# model = ResNet2dCatBlock(10, [ 360, 640 ], [ 2, 2 ])
 # input = torch.randn(10, 10, 360, 640)
 # print(model(input).shape)
 
@@ -418,7 +418,7 @@ class Chobits(nn.Module):
 # print(model(input).shape)
 
 model = Chobits()
-model.eval();
+model.eval()
 input = (torch.randn(10, 10, 800), torch.randn(10, 10, 3, 360, 640))
 print(model(*input).shape)
 

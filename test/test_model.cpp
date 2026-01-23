@@ -19,8 +19,8 @@ static void info(std::shared_ptr<torch::nn::Module> layer) {
 
 [[maybe_unused]] static void test_res_net_1d() {
     torch::NoGradGuard no_grad_guard;
-    // chobits::nn::ResNet1dBlock layer(10, 64);
-    chobits::nn::ResNet1dBlock layer(10, 64, 2);
+    // chobits::nn::ResNet1dBlock layer(10, 64, 800);
+    chobits::nn::ResNet1dBlock layer(10, 64, 800, 2);
     info(layer.ptr());
     auto output = layer->forward(torch::randn({ 10, 10, 800 }));
     std::cout << output.sizes() << std::endl;
@@ -28,8 +28,8 @@ static void info(std::shared_ptr<torch::nn::Module> layer) {
 
 [[maybe_unused]] static void test_res_net_1d_cat() {
     torch::NoGradGuard no_grad_guard;
-    // chobits::nn::ResNet1dCatBlock layer(10);
-    chobits::nn::ResNet1dCatBlock layer(10, 2);
+    // chobits::nn::ResNet1dCatBlock layer(10, 800);
+    chobits::nn::ResNet1dCatBlock layer(10, 800, 2);
     info(layer.ptr());
     auto output = layer->forward(torch::randn({ 10, 10, 800 }));
     std::cout << output.sizes() << std::endl;
@@ -37,8 +37,8 @@ static void info(std::shared_ptr<torch::nn::Module> layer) {
 
 [[maybe_unused]] static void test_res_net_2d() {
     torch::NoGradGuard no_grad_guard;
-    // chobits::nn::ResNet2dBlock layer(10, 64);
-    chobits::nn::ResNet2dBlock layer(10, 64, std::vector<int64_t>{ 2, 2 });
+    // chobits::nn::ResNet2dBlock layer(10, 64, std::vector<int64_t>{ 360, 640 });
+    chobits::nn::ResNet2dBlock layer(10, 64, std::vector<int64_t>{ 360, 640 }, std::vector<int64_t>{ 2, 2 });
     info(layer.ptr());
     auto output = layer->forward(torch::randn({ 10, 10, 360, 640 }));
     std::cout << output.sizes() << std::endl;
@@ -46,8 +46,8 @@ static void info(std::shared_ptr<torch::nn::Module> layer) {
 
 [[maybe_unused]] static void test_res_net_2d_cat() {
     torch::NoGradGuard no_grad_guard;
-    // chobits::nn::ResNet2dCatBlock layer(10);
-    chobits::nn::ResNet2dCatBlock layer(10, std::vector<int64_t>{ 2, 2 });
+    // chobits::nn::ResNet2dCatBlock layer(10, std::vector<int64_t>{ 360, 640 });
+    chobits::nn::ResNet2dCatBlock layer(10, std::vector<int64_t>{ 360, 640 }, std::vector<int64_t>{ 2, 2 });
     info(layer.ptr());
     auto output = layer->forward(torch::randn({ 10, 10, 360, 640 }));
     std::cout << output.sizes() << std::endl;
