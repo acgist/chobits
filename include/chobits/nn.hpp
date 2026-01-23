@@ -513,7 +513,6 @@ TORCH_MODULE(ImageHeadBlock);
 class MediaMixerBlockImpl : public torch::nn::Module {
 
 private:
-    chobits::nn::AttentionBlock image_attn{ nullptr };
     chobits::nn::AttentionBlock audio_attn{ nullptr };
     chobits::nn::AttentionBlock video_attn{ nullptr };
     chobits::nn::AttentionBlock muxer_attn{ nullptr };
@@ -527,7 +526,6 @@ public:
         const int image_in = 336
     ) {
         const int muxer_in = audio_in + video_in;
-        this->image_attn = this->register_module("image_attn", chobits::nn::AttentionBlock(video_in, image_in, image_in, video_in));
         this->audio_attn = this->register_module("audio_attn", chobits::nn::AttentionBlock(audio_in, video_in, video_in, audio_in));
         this->video_attn = this->register_module("video_attn", chobits::nn::AttentionBlock(video_in, audio_in, audio_in, video_in));
         this->muxer_attn = this->register_module("muxer_attn", chobits::nn::AttentionBlock(muxer_in, image_in, image_in, muxer_in));
@@ -541,9 +539,8 @@ public:
     
 public:
     torch::Tensor forward(const torch::Tensor& audio, const torch::Tensor& video, const torch::Tensor& image) {
-        auto image_o = this->image_attn->forward(video,   image,   image  );
-        auto audio_o = this->audio_attn->forward(audio,   image_o, image_o);
-        auto video_o = this->video_attn->forward(image_o, audio,   audio  );
+        auto audio_o = this->audio_attn->forward(audio, video, video);
+        auto video_o = this->video_attn->forward(video, audio, audio);
         auto media_o = this->muxer_conv->forward(torch::cat({ audio_o, video_o }, -1));
         auto muxer_o = this->muxer_attn->forward(media_o, image,   image  );
         return         this->mixer_attn->forward(muxer_o, muxer_o, muxer_o);

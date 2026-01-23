@@ -309,7 +309,6 @@ class MediaMixerBlock(nn.Module):
     ):
         super().__init__()
         muxer_in = audio_in + video_in
-        self.image_attn = AttentionBlock(video_in, image_in, image_in, video_in)
         self.audio_attn = AttentionBlock(audio_in, video_in, video_in, audio_in)
         self.video_attn = AttentionBlock(video_in, audio_in, audio_in, video_in)
         self.muxer_attn = AttentionBlock(muxer_in, image_in, image_in, muxer_in)
@@ -324,9 +323,8 @@ class MediaMixerBlock(nn.Module):
         video: torch.Tensor,
         image: torch.Tensor,
     ) -> torch.Tensor:
-        image_o = self.image_attn(video,   image,   image  )
-        audio_o = self.audio_attn(audio,   image_o, image_o)
-        video_o = self.video_attn(image_o, audio,   audio  )
+        audio_o = self.audio_attn(audio, video, video)
+        video_o = self.video_attn(video, audio, audio)
         media_o = self.muxer_conv(torch.cat([ audio_o, video_o ], dim = -1))
         muxer_o = self.muxer_attn(media_o, image,   image  )
         return    self.mixer_attn(muxer_o, muxer_o, muxer_o)
