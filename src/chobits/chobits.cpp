@@ -14,7 +14,7 @@ bool        chobits::mode_play = false;
 bool        chobits::mode_save = false;
 
 int         chobits::batch_size    = 1;
-int         chobits::batch_length  = 10;
+int         chobits::batch_length  = 32;
 int         chobits::batch_thread  = 4;
 int         chobits::train_epoch   = 1;
 std::string chobits::train_dataset = "";
