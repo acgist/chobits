@@ -418,13 +418,23 @@ public:
     }
     
 public:
-    std::tuple<torch::Tensor, torch::Tensor, torch::Tensor> forward(const torch::Tensor& audio, const torch::Tensor& video, const torch::Tensor& image) {
+    std::tuple<torch::Tensor, torch::Tensor, torch::Tensor> forward(
+        const torch::Tensor& audio,
+        const torch::Tensor& video,
+        const torch::Tensor& image,
+        const torch::Tensor& muxer = torch::Tensor{ nullptr }
+    ) {
         auto audio_o = this->audio_attn->forward(audio, video, video);
         auto video_o = this->video_attn->forward(video, audio, audio);
         auto muxer_c = this->muxer_conv->forward(torch::cat({ audio_o, video_o }, -1));
-        auto muxer_o = this->muxer_attn->forward(muxer_c, image,   image  );
-        auto mixer_o = this->mixer_attn->forward(muxer_o, muxer_o, muxer_o);
-        return { audio_o, video_o, mixer_o };
+        auto muxer_o = this->muxer_attn->forward(muxer_c, image, image);
+        if(!muxer.defined()) {
+            auto mixer_o = this->mixer_attn->forward(muxer_o, muxer_o, muxer_o);
+            return { audio_o, video_o, mixer_o };
+        } else {
+            auto mixer_o = this->mixer_attn->forward(muxer, muxer_o, muxer_o);
+            return { audio_o, video_o, mixer_o };
+        }
     }
 
 };
@@ -458,9 +468,9 @@ public:
 public:
     torch::Tensor forward(const torch::Tensor& audio, const torch::Tensor& video, const torch::Tensor& image) {
         auto [ audio_1, video_1, mixer_1 ] = this->mixer_1->forward(audio,   video,   image);
-        auto [ audio_2, video_2, mixer_2 ] = this->mixer_2->forward(audio_1, video_1, image);
-        auto [ audio_3, video_3, mixer_3 ] = this->mixer_3->forward(audio_2, video_2, image);
-        return mixer_1 + mixer_2 + mixer_3;
+        auto [ audio_2, video_2, mixer_2 ] = this->mixer_2->forward(audio_1, video_1, image, mixer_1);
+        auto [ audio_3, video_3, mixer_3 ] = this->mixer_3->forward(audio_2, video_2, image, mixer_2);
+        return mixer_3;
     }
 
 };

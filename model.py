@@ -259,12 +259,16 @@ class MediaMuxerBlock(nn.Module):
         audio: torch.Tensor,
         video: torch.Tensor,
         image: torch.Tensor,
+        muxer: torch.Tensor = None,
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         audio_o = self.audio_attn(audio, video, video)
         video_o = self.video_attn(video, audio, audio)
         muxer_c = self.muxer_conv(torch.cat([ audio_o, video_o ], dim = -1))
-        muxer_o = self.muxer_attn(muxer_c, image,   image  )
-        mixer_o = self.mixer_attn(muxer_o, muxer_o, muxer_o)
+        muxer_o = self.muxer_attn(muxer_c, image, image)
+        if muxer is None:
+            mixer_o = self.mixer_attn(muxer_o, muxer_o, muxer_o)
+        else:
+            mixer_o = self.mixer_attn(muxer, muxer_o, muxer_o)
         return (audio_o, video_o, mixer_o)
 
 class MediaMixerBlock(nn.Module):
@@ -287,9 +291,9 @@ class MediaMixerBlock(nn.Module):
         image: torch.Tensor,
     ) -> torch.Tensor:
         [ audio_1, video_1, mixer_1 ] = self.muxer_1(audio,   video,   image)
-        [ audio_2, video_2, mixer_2 ] = self.muxer_2(audio_1, video_1, image)
-        [ audio_3, video_3, mixer_3 ] = self.muxer_3(audio_2, video_2, image)
-        return mixer_1 + mixer_2 + mixer_3
+        [ audio_2, video_2, mixer_2 ] = self.muxer_2(audio_1, video_1, image, mixer_1)
+        [ audio_3, video_3, mixer_3 ] = self.muxer_3(audio_2, video_2, image, mixer_2)
+        return mixer_3
 
 class AudioTailBlock(nn.Module):
     def __init__(
