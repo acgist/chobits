@@ -19,44 +19,14 @@
 
 #include "torch/nn.h"
 
-using layer_act = torch::nn::SiLU;
-
 using shp = std::vector<int64_t>;
+
+using layer_act = torch::nn::SiLU;
 
 namespace chobits::nn {
 
 /**
  * 位置嵌入
- */
-class SinusoidalPositionEmbeddingImpl : public torch::nn::Module {
-
-private:
-    torch::Tensor pe{ nullptr };
-
-public:
-    SinusoidalPositionEmbeddingImpl(int64_t dim, int64_t max_len = 512) {
-        torch::Tensor pe = torch::zeros({ max_len, dim }, torch::kFloat);
-        torch::Tensor position = torch::arange(0, max_len, torch::kFloat).unsqueeze(1);
-        torch::Tensor div_term = torch::exp(torch::arange(0, dim, 2, torch::kFloat) * (-std::log(10000.0) / static_cast<double>(dim)));
-        // pe.slice(1, 0, dim, 2) = torch::sin(position * div_term.unsqueeze(0));
-        // pe.slice(1, 1, dim, 2) = torch::cos(position * div_term.unsqueeze(0));
-        pe.index_put_({ torch::indexing::Slice(), torch::indexing::Slice(torch::indexing::None, torch::indexing::None, 2) }, torch::sin(position * div_term));
-        pe.index_put_({ torch::indexing::Slice(), torch::indexing::Slice(1,                     torch::indexing::None, 2) }, torch::cos(position * div_term));
-        this->pe = this->register_buffer("pe", pe.unsqueeze(0));
-    }
-
-public:
-    torch::Tensor forward(torch::Tensor input) {
-//             input + this->pe.slice (1, 0, input.size(1));
-        return input + this->pe.narrow(1, 0, input.size(1));
-    }
-
-};
-
-TORCH_MODULE(SinusoidalPositionEmbedding);
-
-/**
- * 旋转位置嵌入
  */
 class RotaryPositionEmbeddingImpl : public torch::nn::Module {
 
@@ -236,13 +206,13 @@ TORCH_MODULE(ResNet2dBlock);
 class AttentionBlockImpl : public torch::nn::Module {
 
 private:
-    torch::nn::Sequential                q   { nullptr };
-    torch::nn::Sequential                k   { nullptr };
-    torch::nn::Sequential                v   { nullptr };
-    torch::nn::MultiheadAttention        attn{ nullptr };
-    torch::nn::Sequential                proj{ nullptr };
+    torch::nn::Linear                    q   { nullptr };
+    torch::nn::Linear                    k   { nullptr };
+    torch::nn::Linear                    v   { nullptr };
     chobits::nn::RotaryPositionEmbedding rope{ nullptr };
-    torch::nn::Sequential                out { nullptr };
+    torch::nn::MultiheadAttention        attn{ nullptr };
+    torch::nn::Linear                    proj{ nullptr };
+    torch::nn::LayerNorm                 norm{ nullptr };
 
 public:
     AttentionBlockImpl(
@@ -254,24 +224,13 @@ public:
         const int num_heads = 8,
         const int max_len   = 512
     ) {
-        this->q = this->register_module("q", torch::nn::Sequential(
-            torch::nn::Linear(torch::nn::LinearOptions(q_dim, h_dim).bias(false))
-        ));
-        this->k = this->register_module("k", torch::nn::Sequential(
-            torch::nn::Linear(torch::nn::LinearOptions(k_dim, h_dim).bias(false))
-        ));
-        this->v = this->register_module("v", torch::nn::Sequential(
-            torch::nn::Linear(torch::nn::LinearOptions(v_dim, h_dim).bias(false))
-        ));
-        this->attn = this->register_module("attn", torch::nn::MultiheadAttention(
-            torch::nn::MultiheadAttentionOptions(h_dim, num_heads).bias(false)
-        ));
-        this->proj = this->register_module("proj", torch::nn::Sequential(
-            torch::nn::Linear(torch::nn::LinearOptions(h_dim, o_dim).bias(false))
-        ));
-        this->out = this->register_module("out", torch::nn::Sequential(
-            torch::nn::LayerNorm(torch::nn::LayerNormOptions(std::vector<int64_t>{ o_dim }))
-        ));
+        this->q    = this->register_module("q", torch::nn::Linear(torch::nn::LinearOptions(q_dim, h_dim).bias(false)));
+        this->k    = this->register_module("k", torch::nn::Linear(torch::nn::LinearOptions(k_dim, h_dim).bias(false)));
+        this->v    = this->register_module("v", torch::nn::Linear(torch::nn::LinearOptions(v_dim, h_dim).bias(false)));
+        this->rope = this->register_module("rope", chobits::nn::RotaryPositionEmbedding(h_dim / num_heads, max_len));
+        this->attn = this->register_module("attn", torch::nn::MultiheadAttention(torch::nn::MultiheadAttentionOptions(h_dim, num_heads).bias(false)));
+        this->proj = this->register_module("proj", torch::nn::Linear(torch::nn::LinearOptions(h_dim, o_dim).bias(false)));
+        this->norm = this->register_module("norm", torch::nn::LayerNorm(torch::nn::LayerNormOptions(std::vector<int64_t>{ o_dim })));
     }
     ~AttentionBlockImpl() {
     }
@@ -283,9 +242,7 @@ public:
         auto v = this->v->forward(value.permute({ 1, 0, 2 }));
         auto [ q_embed, k_embed ] = this->rope->forward(q, k);
         auto [ o, _ ] = this->attn->forward(q_embed, k_embed, v);
-        o = o.permute({ 1, 0, 2 });
-        o = this->proj->forward(o);
-        return query + this->out->forward(o);
+        return this->norm->forward(query + this->proj->forward(o.permute({ 1, 0, 2 })));
     }
 
 };
@@ -301,59 +258,48 @@ private:
     const int n_fft    = 400;
     const int hop_size = 80;
     const int win_size = 400;
-    torch::Tensor wind{ nullptr };
+    torch::Tensor window{ nullptr };
     torch::nn::Sequential       head{ nullptr };
-    torch::nn::Sequential       conv{ nullptr };
     chobits::nn::AttentionBlock attn{ nullptr };
-    chobits::nn::SinusoidalPositionEmbedding embd{ nullptr };
 
 public:
     AudioHeadBlockImpl() {
         this->head = this->register_module("head", torch::nn::Sequential(
-            torch::nn::Conv2d(torch::nn::Conv2dOptions(1, 32, std::vector<int64_t>{ 2, 2 }).padding(std::vector<int64_t>{ 0, 0 }).dilation(std::vector<int64_t>{ 1, 1 }).stride(std::vector<int64_t>{ 2, 2 })),
-            torch::nn::LayerNorm(torch::nn::LayerNormOptions(std::vector<int64_t>{ 5, 100 })),
-            chobits::nn::ResNet2dBlock( 32,  32, std::vector<int64_t>{ 5, 100 }, std::vector<int64_t>{ 1, 1 }, std::vector<int64_t>{ 3, 3 }, std::vector<int64_t>{ 1, 1 }, std::vector<int64_t>{ 1, 1 }),
-            chobits::nn::ResNet2dBlock( 32,  64, std::vector<int64_t>{ 2,  50 }, std::vector<int64_t>{ 2, 2 }, std::vector<int64_t>{ 2, 2 }, std::vector<int64_t>{ 0, 0 }, std::vector<int64_t>{ 1, 1 }),
-            chobits::nn::ResNet2dBlock( 64,  64, std::vector<int64_t>{ 2,  50 }, std::vector<int64_t>{ 1, 1 }, std::vector<int64_t>{ 3, 3 }, std::vector<int64_t>{ 1, 1 }, std::vector<int64_t>{ 1, 1 }),
-            chobits::nn::ResNet2dBlock( 64, 128, std::vector<int64_t>{ 1,  25 }, std::vector<int64_t>{ 2, 2 }, std::vector<int64_t>{ 2, 2 }, std::vector<int64_t>{ 0, 0 }, std::vector<int64_t>{ 1, 1 }),
-            chobits::nn::ResNet2dBlock(128, 128, std::vector<int64_t>{ 1,  25 }, std::vector<int64_t>{ 1, 1 }, std::vector<int64_t>{ 3, 3 }, std::vector<int64_t>{ 1, 1 }, std::vector<int64_t>{ 1, 1 }),
+            torch::nn::Conv2d(torch::nn::Conv2dOptions(1, 32, std::vector<int64_t>{ 5, 5 }).padding(std::vector<int64_t>{ 0, 0 }).dilation(std::vector<int64_t>{ 1, 1 }).stride(std::vector<int64_t>{ 5, 5 })),
+            torch::nn::LayerNorm(torch::nn::LayerNormOptions(std::vector<int64_t>{ 40, 64 })),
+            chobits::nn::ResNet2dBlock( 32,  32, std::vector<int64_t>{ 40, 64 }, std::vector<int64_t>{ 1, 1 }, std::vector<int64_t>{ 3, 3 }, std::vector<int64_t>{ 1, 1 }, std::vector<int64_t>{ 1, 1 }),
+            chobits::nn::ResNet2dBlock( 32,  64, std::vector<int64_t>{ 20, 32 }, std::vector<int64_t>{ 2, 2 }, std::vector<int64_t>{ 2, 2 }, std::vector<int64_t>{ 0, 0 }, std::vector<int64_t>{ 1, 1 }),
+            chobits::nn::ResNet2dBlock( 64,  64, std::vector<int64_t>{ 20, 32 }, std::vector<int64_t>{ 1, 1 }, std::vector<int64_t>{ 3, 3 }, std::vector<int64_t>{ 1, 1 }, std::vector<int64_t>{ 1, 1 }),
+            chobits::nn::ResNet2dBlock( 64, 128, std::vector<int64_t>{ 10, 16 }, std::vector<int64_t>{ 2, 2 }, std::vector<int64_t>{ 2, 2 }, std::vector<int64_t>{ 0, 0 }, std::vector<int64_t>{ 1, 1 }),
+            chobits::nn::ResNet2dBlock(128, 256, std::vector<int64_t>{ 10, 16 }, std::vector<int64_t>{ 1, 1 }, std::vector<int64_t>{ 3, 3 }, std::vector<int64_t>{ 1, 1 }, std::vector<int64_t>{ 1, 1 }),
             torch::nn::Flatten(torch::nn::FlattenOptions().start_dim(2))
         ));
-        this->embd = this->register_module("embd", chobits::nn::SinusoidalPositionEmbedding(3200, 32));
-        this->conv = this->register_module("conv", torch::nn::Sequential(
-            chobits::nn::ResNet1dBlock( 32,  64, 800, 4, 4, 0, 1),
-            chobits::nn::ResNet1dBlock( 64, 128, 200, 4, 4, 0, 1),
-            chobits::nn::ResNet1dBlock(128, 128, 200, 1, 3, 1, 1)
-        ));
-        this->attn = this->register_module("attn", chobits::nn::AttentionBlock(200, 200, 200, 200, 512));
+        this->attn = this->register_module("attn", chobits::nn::AttentionBlock(160, 160, 160, 160, 512));
     }
     ~AudioHeadBlockImpl() {
     }
 
 public:
     torch::Tensor forward(const torch::Tensor& input) {
-        if(!this->wind.defined()) {
-            this->wind = torch::hann_window(this->win_size).to(input.device());
+        if(!this->window.defined()) {
+            this->window = torch::hann_window(this->win_size).to(input.device());
         }
         auto com = torch::stft(
-            input.view({ -1, input.size(-1) }),
+            input.view({ input.size(0), -1 }),
             this->n_fft,
             this->hop_size,
             this->win_size,
-            this->wind,
+            this->window,
             true,
             "reflect",
             false,
             std::nullopt,
             true
         );
-        // TODO: 直接嵌入
         auto mag = torch::abs(com);
 //      auto pha = torch::angle(com);
-             mag = mag.unsqueeze(1).permute({ 0, 1, 3, 2 }).contiguous();
-        auto out = this->head->forward(mag).view({ input.size(0), input.size(1), -1 });
-             out = this->embd->forward(out);
-             out = this->conv->forward(out);
+             mag = mag.unsqueeze(1).contiguous();
+        auto out = this->head->forward(mag);
         return this->attn->forward(out, out, out);
     }
 
@@ -370,7 +316,6 @@ private:
     torch::nn::Sequential       head{ nullptr };
     torch::nn::Sequential       conv{ nullptr };
     chobits::nn::AttentionBlock attn{ nullptr };
-    chobits::nn::SinusoidalPositionEmbedding embd{ nullptr };
 
 public:
     VideoHeadBlockImpl() {
@@ -384,11 +329,10 @@ public:
             chobits::nn::ResNet2dBlock(128, 128, std::vector<int64_t>{  4,   8 }, std::vector<int64_t>{ 1, 1 }, std::vector<int64_t>{ 3, 3 }, std::vector<int64_t>{ 1, 1 }, std::vector<int64_t>{ 1, 1 }),
             torch::nn::Flatten(torch::nn::FlattenOptions().start_dim(2))
         ));
-        this->embd = this->register_module("embd", chobits::nn::SinusoidalPositionEmbedding(4096, 32));
         this->conv = this->register_module("conv", torch::nn::Sequential(
             chobits::nn::ResNet1dBlock( 32,  64, 2048, 2, 2, 0, 1),
             chobits::nn::ResNet1dBlock( 64, 128, 1024, 2, 2, 0, 1),
-            chobits::nn::ResNet1dBlock(128, 128, 1024, 1, 3, 1, 1)
+            chobits::nn::ResNet1dBlock(128, 256, 1024, 1, 3, 1, 1)
         ));
         this->attn = this->register_module("attn", AttentionBlock(1024, 1024, 1024, 1024));
     }
@@ -398,7 +342,6 @@ public:
 public:
     torch::Tensor forward(const torch::Tensor& input) {
         auto out = this->head->forward(input.view({ -1, 1, input.size(2), input.size(3) })).view({ input.size(0), input.size(1), -1 });
-             out = this->embd->forward(out);
              out = this->conv->forward(out);
         return this->attn->forward(out, out, out);
     }
@@ -425,7 +368,7 @@ public:
             chobits::nn::ResNet2dBlock( 32,  64, std::vector<int64_t>{ 36,  64 }, std::vector<int64_t>{ 2, 2 }, std::vector<int64_t>{ 2, 2 }, std::vector<int64_t>{ 0, 0 }, std::vector<int64_t>{ 1, 1 }),
             chobits::nn::ResNet2dBlock( 64,  64, std::vector<int64_t>{ 36,  64 }, std::vector<int64_t>{ 1, 1 }, std::vector<int64_t>{ 3, 3 }, std::vector<int64_t>{ 1, 1 }, std::vector<int64_t>{ 1, 1 }),
             chobits::nn::ResNet2dBlock( 64, 128, std::vector<int64_t>{ 18,  32 }, std::vector<int64_t>{ 2, 2 }, std::vector<int64_t>{ 2, 2 }, std::vector<int64_t>{ 0, 0 }, std::vector<int64_t>{ 1, 1 }),
-            chobits::nn::ResNet2dBlock(128, 128, std::vector<int64_t>{ 18,  32 }, std::vector<int64_t>{ 1, 1 }, std::vector<int64_t>{ 3, 3 }, std::vector<int64_t>{ 1, 1 }, std::vector<int64_t>{ 1, 1 }),
+            chobits::nn::ResNet2dBlock(128, 256, std::vector<int64_t>{ 18,  32 }, std::vector<int64_t>{ 1, 1 }, std::vector<int64_t>{ 3, 3 }, std::vector<int64_t>{ 1, 1 }, std::vector<int64_t>{ 1, 1 }),
             torch::nn::Flatten(torch::nn::FlattenOptions().start_dim(2))
         ));
         this->attn = this->register_module("attn", AttentionBlock(576, 576, 576, 576));
@@ -453,63 +396,35 @@ private:
     chobits::nn::AttentionBlock video_attn{ nullptr };
     chobits::nn::AttentionBlock muxer_attn{ nullptr };
     chobits::nn::AttentionBlock mixer_attn{ nullptr };
-    torch::nn::Sequential       audio_conv{ nullptr };
-    torch::nn::Sequential       video_conv{ nullptr };
-    torch::nn::Sequential       image_conv{ nullptr };
     torch::nn::Sequential       muxer_conv{ nullptr };
 
 public:
     MediaMuxerBlockImpl(
-        const int in_channels  =  128,
-        const int out_channels =  256,
-        const int audio_in     =  200,
-        const int video_in     = 1024,
-        const int image_in     =  576
+        const int audio_in =  160,
+        const int video_in = 1024,
+        const int image_in =  576,
+        const int channels =  256
     ) {
         const int muxer_in = audio_in + video_in;
         this->audio_attn = this->register_module("audio_attn", chobits::nn::AttentionBlock(audio_in, video_in, video_in, audio_in));
         this->video_attn = this->register_module("video_attn", chobits::nn::AttentionBlock(video_in, audio_in, audio_in, video_in));
         this->muxer_attn = this->register_module("muxer_attn", chobits::nn::AttentionBlock(muxer_in, image_in, image_in, muxer_in));
         this->mixer_attn = this->register_module("mixer_attn", chobits::nn::AttentionBlock(muxer_in, muxer_in, muxer_in, muxer_in));
-        if(in_channels == out_channels) {
-            this->audio_conv = this->register_module("audio_conv", torch::nn::Sequential(
-                torch::nn::Identity()
-            ));
-            this->video_conv = this->register_module("video_conv", torch::nn::Sequential(
-                torch::nn::Identity()
-            ));
-            this->image_conv = this->register_module("image_conv", torch::nn::Sequential(
-                torch::nn::Identity()
-            ));
-        } else {
-            this->audio_conv = this->register_module("audio_conv", torch::nn::Sequential(
-                torch::nn::Conv1d(torch::nn::Conv1dOptions(in_channels, out_channels, 3).padding(1).dilation(1))
-            ));
-            this->video_conv = this->register_module("video_conv", torch::nn::Sequential(
-                torch::nn::Conv1d(torch::nn::Conv1dOptions(in_channels, out_channels, 3).padding(1).dilation(1))
-            ));
-            this->image_conv = this->register_module("image_conv", torch::nn::Sequential(
-                torch::nn::Conv1d(torch::nn::Conv1dOptions(in_channels, out_channels, 3).padding(1).dilation(1))
-            ));
-        }
         this->muxer_conv = this->register_module("muxer_conv", torch::nn::Sequential(
-            chobits::nn::ResNet1dBlock(out_channels, out_channels, muxer_in, 1, 3, 1, 1)
+            chobits::nn::ResNet1dBlock(channels, channels, muxer_in, 1, 3, 1, 1)
         ));
     }
     ~MediaMuxerBlockImpl() {
     }
     
 public:
-    std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor> forward(const torch::Tensor& audio, const torch::Tensor& video, const torch::Tensor& image) {
-        auto audio_c = this->audio_conv->forward(audio);
-        auto video_c = this->video_conv->forward(video);
-        auto image_c = this->image_conv->forward(image);
-        auto audio_o = this->audio_attn->forward(audio_c, video_c, video_c);
-        auto video_o = this->video_attn->forward(video_c, audio_c, audio_c);
-        auto media_o = this->muxer_conv->forward(torch::cat({ audio_o, video_o }, -1));
-        auto muxer_o = this->muxer_attn->forward(media_o, image_c, image_c);
+    std::tuple<torch::Tensor, torch::Tensor, torch::Tensor> forward(const torch::Tensor& audio, const torch::Tensor& video, const torch::Tensor& image) {
+        auto audio_o = this->audio_attn->forward(audio, video, video);
+        auto video_o = this->video_attn->forward(video, audio, audio);
+        auto muxer_c = this->muxer_conv->forward(torch::cat({ audio_o, video_o }, -1));
+        auto muxer_o = this->muxer_attn->forward(muxer_c, image,   image  );
         auto mixer_o = this->mixer_attn->forward(muxer_o, muxer_o, muxer_o);
-        return { audio_o, video_o, image_c, mixer_o };
+        return { audio_o, video_o, mixer_o };
     }
 
 };
@@ -522,30 +437,30 @@ TORCH_MODULE(MediaMuxerBlock);
 class MediaMixerBlockImpl : public torch::nn::Module {
 
 private:
-    torch::nn::Sequential        conv   { nullptr };
     chobits::nn::MediaMuxerBlock mixer_1{ nullptr };
     chobits::nn::MediaMuxerBlock mixer_2{ nullptr };
+    chobits::nn::MediaMuxerBlock mixer_3{ nullptr };
 
 public:
     MediaMixerBlockImpl(
-        const int audio_in =  200,
+        const int audio_in =  160,
         const int video_in = 1024,
-        const int image_in =  576
+        const int image_in =  576,
+        const int channels =  256
     ) {
-        this->conv = this->register_module("conv", torch::nn::Sequential(
-            torch::nn::Conv1d(torch::nn::Conv1dOptions(128, 256, 3).padding(1).dilation(1))
-        ));
-        this->mixer_1 = this->register_module("mixer_1", chobits::nn::MediaMuxerBlock(128, 128, audio_in, video_in, image_in));
-        this->mixer_2 = this->register_module("mixer_2", chobits::nn::MediaMuxerBlock(128, 256, audio_in, video_in, image_in));
+        this->mixer_1 = this->register_module("mixer_1", chobits::nn::MediaMuxerBlock(audio_in, video_in, image_in, channels));
+        this->mixer_2 = this->register_module("mixer_2", chobits::nn::MediaMuxerBlock(audio_in, video_in, image_in, channels));
+        this->mixer_3 = this->register_module("mixer_3", chobits::nn::MediaMuxerBlock(audio_in, video_in, image_in, channels));
     }
     ~MediaMixerBlockImpl() {
     }
     
 public:
     torch::Tensor forward(const torch::Tensor& audio, const torch::Tensor& video, const torch::Tensor& image) {
-        auto [ audio_1, video_1, image_1, mixer_1 ] = this->mixer_1->forward(audio,   video,   image  );
-        auto [ audio_2, video_2, image_2, mixer_2 ] = this->mixer_2->forward(audio_1, video_1, image_1);
-        return this->conv->forward(mixer_1) + mixer_2;
+        auto [ audio_1, video_1, mixer_1 ] = this->mixer_1->forward(audio,   video,   image);
+        auto [ audio_2, video_2, mixer_2 ] = this->mixer_2->forward(audio_1, video_1, image);
+        auto [ audio_3, video_3, mixer_3 ] = this->mixer_3->forward(audio_2, video_2, image);
+        return mixer_1 + mixer_2 + mixer_3;
     }
 
 };
@@ -562,7 +477,7 @@ private:
 
 public:
     AudioTailBlockImpl(
-        const int in_features  = 1224,
+        const int in_features  = 1184,
         const int out_features = 800,
         const shp channel      = std::vector<int64_t>{ 256, 64, 16, 4, 1 }
     ) {

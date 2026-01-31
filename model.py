@@ -2,26 +2,9 @@ import math
 import torch
 import torch.nn as nn
 
-from typing import List
+from typing import List, Tuple
 
 layer_act = nn.SiLU
-
-class SinusoidalPositionEmbedding(nn.Module):
-    def __init__(
-        self,
-        dim    : int,
-        max_len: int = 512
-    ):
-        super().__init__()
-        pe = torch.zeros(max_len, dim, dtype = torch.float)
-        position = torch.arange(0, max_len, dtype = torch.float).unsqueeze(1)
-        div_term = torch.exp(torch.arange(0, dim, 2, dtype = torch.float) * (-math.log(10000.0) / dim))
-        pe[:, 0::2] = torch.sin(position * div_term)
-        pe[:, 1::2] = torch.cos(position * div_term)
-        self.register_buffer("pe", pe.unsqueeze(0), persistent = False)
-
-    def forward(self, input: torch.Tensor) -> torch.Tensor:
-        return input + self.pe[:, :input.size(1)]
 
 class RotaryPositionEmbedding(nn.Module):
     def __init__(
@@ -46,7 +29,7 @@ class RotaryPositionEmbedding(nn.Module):
         x2 = x[..., d // 2 :]
         return torch.cat((-x2, x1), dim = -1)
 
-    def forward(self, query: torch.Tensor, key: torch.Tensor) -> List[torch.Tensor]:
+    def forward(self, query: torch.Tensor, key: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         q = query.view(query.size(0), query.size(1), self.num_heads, self.dim).transpose(1, 2)
         k = key  .view(key  .size(0), key  .size(1), self.num_heads, self.dim).transpose(1, 2)
         cos = self.cos_cached[:, :, :q.size(2), :].expand_as(q)
@@ -55,10 +38,11 @@ class RotaryPositionEmbedding(nn.Module):
         k_rotated = self.rotate_half(k)
         q_embed = (q * cos) + (q_rotated * sin)
         k_embed = (k * cos) + (k_rotated * sin)
-        return [
+        return \
+            (
                 q_embed.transpose(1, 2).view(query.size(0), query.size(1), -1),
                 k_embed.transpose(1, 2).view(key  .size(0), key  .size(1), -1)
-            ]
+            )
 
 class ResNet1dBlock(nn.Module):
     def __init__(
@@ -160,12 +144,10 @@ class AttentionBlock(nn.Module):
         self.q    = nn.Linear(q_dim, h_dim, bias = False)
         self.k    = nn.Linear(k_dim, h_dim, bias = False)
         self.v    = nn.Linear(v_dim, h_dim, bias = False)
+        self.rope = RotaryPositionEmbedding(h_dim // num_heads, max_len = max_len)
         self.attn = nn.MultiheadAttention(h_dim, num_heads, bias = False, batch_first = False)
         self.proj = nn.Linear(h_dim, o_dim, bias = False)
-        self.rope = RotaryPositionEmbedding(h_dim // num_heads, max_len = max_len)
-        self.out  = nn.Sequential(
-            nn.LayerNorm(o_dim),
-        )
+        self.norm = nn.LayerNorm(o_dim)
 
     def forward(self, query: torch.Tensor, key: torch.Tensor, value: torch.Tensor) -> torch.Tensor:
         q = self.q(query.permute(1, 0, 2))
@@ -173,9 +155,7 @@ class AttentionBlock(nn.Module):
         v = self.v(value.permute(1, 0, 2))
         q_embed, k_embed = self.rope(q, k)
         o, _ = self.attn(q_embed, k_embed, v)
-        o = o.permute(1, 0, 2)
-        o = self.proj(o)
-        return query + self.out(o)
+        return self.norm(query + self.proj(o.permute(1, 0, 2)))
 
 class AudioHeadBlock(nn.Module):
     def __init__(self):
@@ -185,26 +165,20 @@ class AudioHeadBlock(nn.Module):
         self.win_length = 400
         self.window     = torch.hann_window(self.win_length)
         self.head = nn.Sequential(
-            nn.Conv2d(1, 32, [ 2, 2 ], padding = [ 0, 0 ], dilation = [ 1, 1 ], stride = [ 2, 2 ]),
-            nn.LayerNorm([ 5, 100 ]),
-            ResNet2dBlock( 32,  32, [ 5, 100 ], [ 1, 1 ], [ 3, 3 ], [ 1, 1 ], [ 1, 1 ]),
-            ResNet2dBlock( 32,  64, [ 2,  50 ], [ 2, 2 ], [ 2, 2 ], [ 0, 0 ], [ 1, 1 ]),
-            ResNet2dBlock( 64,  64, [ 2,  50 ], [ 1, 1 ], [ 3, 3 ], [ 1, 1 ], [ 1, 1 ]),
-            ResNet2dBlock( 64, 128, [ 1,  25 ], [ 2, 2 ], [ 2, 2 ], [ 0, 0 ], [ 1, 1 ]),
-            ResNet2dBlock(128, 128, [ 1,  25 ], [ 1, 1 ], [ 3, 3 ], [ 1, 1 ], [ 1, 1 ]),
+            nn.Conv2d(1, 32, [ 5, 5 ], padding = [ 0, 0 ], dilation = [ 1, 1 ], stride = [ 5, 5 ]),
+            nn.LayerNorm([ 40, 64 ]),
+            ResNet2dBlock( 32,  32, [ 40, 64 ], [ 1, 1 ], [ 3, 3 ], [ 1, 1 ], [ 1, 1 ]),
+            ResNet2dBlock( 32,  64, [ 20, 32 ], [ 2, 2 ], [ 2, 2 ], [ 0, 0 ], [ 1, 1 ]),
+            ResNet2dBlock( 64,  64, [ 20, 32 ], [ 1, 1 ], [ 3, 3 ], [ 1, 1 ], [ 1, 1 ]),
+            ResNet2dBlock( 64, 128, [ 10, 16 ], [ 2, 2 ], [ 2, 2 ], [ 0, 0 ], [ 1, 1 ]),
+            ResNet2dBlock(128, 256, [ 10, 16 ], [ 1, 1 ], [ 3, 3 ], [ 1, 1 ], [ 1, 1 ]),
             nn.Flatten(start_dim = 2),
         )
-        self.embd = SinusoidalPositionEmbedding(3200, 32)
-        self.conv = nn.Sequential(
-            ResNet1dBlock( 32,  64, 800, 4, 4, 0, 1),
-            ResNet1dBlock( 64, 128, 200, 4, 4, 0, 1),
-            ResNet1dBlock(128, 128, 200, 1, 3, 1, 1),
-        )
-        self.attn = AttentionBlock(200, 200, 200, 200, 512)
+        self.attn = AttentionBlock(160, 160, 160, 160, 512)
 
     def forward(self, input: torch.Tensor) -> torch.Tensor:
         com = torch.stft(
-            input.view(-1, input.size(-1)),
+            input.view(input.size(0), -1),
             n_fft          = self.n_fft,
             hop_length     = self.hop_length,
             win_length     = self.win_length,
@@ -214,10 +188,8 @@ class AudioHeadBlock(nn.Module):
         )
         mag = torch.abs(com)
 #       pha = torch.angle(com)
-        mag = mag.unsqueeze(1).permute(0, 1, 3, 2).contiguous()
-        out = self.head(mag).view(input.size(0), input.size(1), -1)
-        out = self.embd(out)
-        out = self.conv(out)
+        mag = mag.unsqueeze(1).contiguous()
+        out = self.head(mag)
         return self.attn(out, out, out)
 
 class VideoHeadBlock(nn.Module):
@@ -233,18 +205,15 @@ class VideoHeadBlock(nn.Module):
             ResNet2dBlock(128, 128, [  4,   8 ], [ 1, 1 ], [ 3, 3 ], [ 1, 1 ], [ 1, 1 ]),
             nn.Flatten(start_dim = 2),
         )
-        self.embd = SinusoidalPositionEmbedding(4096, 32)
         self.conv = nn.Sequential(
             ResNet1dBlock( 32,  64, 2048, 2, 2, 0, 1),
             ResNet1dBlock( 64, 128, 1024, 2, 2, 0, 1),
-            ResNet1dBlock(128, 128, 1024, 1, 3, 1, 1),
+            ResNet1dBlock(128, 256, 1024, 1, 3, 1, 1),
         )
         self.attn = AttentionBlock(1024, 1024, 1024, 1024)
 
     def forward(self, input: torch.Tensor) -> torch.Tensor:
-        out = input.view(-1, 1, input.size(2), input.size(3))
-        out = self.head(out).view(input.size(0), input.size(1), -1)
-        out = self.embd(out)
+        out = self.head(input.view(-1, 1, input.size(2), input.size(3))).view(input.size(0), input.size(1), -1)
         out = self.conv(out)
         return self.attn(out, out, out)
 
@@ -258,7 +227,7 @@ class ImageHeadBlock(nn.Module):
             ResNet2dBlock( 32,  64, [ 36,  64 ], [ 2, 2 ], [ 2, 2 ], [ 0, 0 ], [ 1, 1 ]),
             ResNet2dBlock( 64,  64, [ 36,  64 ], [ 1, 1 ], [ 3, 3 ], [ 1, 1 ], [ 1, 1 ]),
             ResNet2dBlock( 64, 128, [ 18,  32 ], [ 2, 2 ], [ 2, 2 ], [ 0, 0 ], [ 1, 1 ]),
-            ResNet2dBlock(128, 128, [ 18,  32 ], [ 1, 1 ], [ 3, 3 ], [ 1, 1 ], [ 1, 1 ]),
+            ResNet2dBlock(128, 256, [ 18,  32 ], [ 1, 1 ], [ 3, 3 ], [ 1, 1 ], [ 1, 1 ]),
             nn.Flatten(start_dim = 2),
         )
         self.attn = AttentionBlock(576, 576, 576, 576)
@@ -270,11 +239,10 @@ class ImageHeadBlock(nn.Module):
 class MediaMuxerBlock(nn.Module):
     def __init__(
         self,
-        in_channel : int =  128,
-        out_channel: int =  256,
-        audio_in   : int =  200,
-        video_in   : int = 1024,
-        image_in   : int =  576,
+        audio_in: int =  160,
+        video_in: int = 1024,
+        image_in: int =  576,
+        channels: int =  256,
     ):
         super().__init__()
         muxer_in = audio_in + video_in
@@ -282,28 +250,8 @@ class MediaMuxerBlock(nn.Module):
         self.video_attn = AttentionBlock(video_in, audio_in, audio_in, video_in)
         self.muxer_attn = AttentionBlock(muxer_in, image_in, image_in, muxer_in)
         self.mixer_attn = AttentionBlock(muxer_in, muxer_in, muxer_in, muxer_in)
-        if in_channel == out_channel:
-            self.audio_conv = nn.Sequential(
-                nn.Identity(),
-            )
-            self.video_conv = nn.Sequential(
-                nn.Identity(),
-            )
-            self.image_conv = nn.Sequential(
-                nn.Identity(),
-            )
-        else:
-            self.audio_conv = nn.Sequential(
-                nn.Conv1d(in_channel, out_channel, 3, padding = 1, dilation = 1),
-            )
-            self.video_conv = nn.Sequential(
-                nn.Conv1d(in_channel, out_channel, 3, padding = 1, dilation = 1),
-            )
-            self.image_conv = nn.Sequential(
-                nn.Conv1d(in_channel, out_channel, 3, padding = 1, dilation = 1),
-            )
         self.muxer_conv = nn.Sequential(
-            ResNet1dBlock(out_channel, out_channel, muxer_in, 1, 3, 1, 1),
+            ResNet1dBlock(channels, channels, muxer_in, 1, 3, 1, 1),
         )
 
     def forward(
@@ -311,28 +259,26 @@ class MediaMuxerBlock(nn.Module):
         audio: torch.Tensor,
         video: torch.Tensor,
         image: torch.Tensor,
-    ) -> List[torch.Tensor]:
-        audio_c = self.audio_conv(audio)
-        video_c = self.video_conv(video)
-        image_c = self.image_conv(image)
-        audio_o = self.audio_attn(audio_c, video_c, video_c)
-        video_o = self.video_attn(video_c, audio_c, audio_c)
-        media_o = self.muxer_conv(torch.cat([ audio_o, video_o ], dim = -1))
-        muxer_o = self.muxer_attn(media_o, image_c, image_c)
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        audio_o = self.audio_attn(audio, video, video)
+        video_o = self.video_attn(video, audio, audio)
+        muxer_c = self.muxer_conv(torch.cat([ audio_o, video_o ], dim = -1))
+        muxer_o = self.muxer_attn(muxer_c, image,   image  )
         mixer_o = self.mixer_attn(muxer_o, muxer_o, muxer_o)
-        return [ audio_o, video_o, image_c, mixer_o ]
+        return (audio_o, video_o, mixer_o)
 
 class MediaMixerBlock(nn.Module):
     def __init__(
         self,
-        audio_in: int =  200,
+        audio_in: int =  160,
         video_in: int = 1024,
         image_in: int =  576,
+        channels: int =  256,
     ):
         super().__init__()
-        self.conv = nn.Conv1d(128, 256, 3, padding = 1, dilation = 1)
-        self.muxer_1 = MediaMuxerBlock(128, 128, audio_in, video_in, image_in)
-        self.muxer_2 = MediaMuxerBlock(128, 256, audio_in, video_in, image_in)
+        self.muxer_1 = MediaMuxerBlock(audio_in, video_in, image_in, channels)
+        self.muxer_2 = MediaMuxerBlock(audio_in, video_in, image_in, channels)
+        self.muxer_3 = MediaMuxerBlock(audio_in, video_in, image_in, channels)
 
     def forward(
         self,
@@ -340,14 +286,15 @@ class MediaMixerBlock(nn.Module):
         video: torch.Tensor,
         image: torch.Tensor,
     ) -> torch.Tensor:
-        [ audio_1, video_1, image_1, mixer_1 ] = self.muxer_1(audio,   video,   image  )
-        [ audio_2, video_2, image_2, mixer_2 ] = self.muxer_2(audio_1, video_1, image_1)
-        return self.conv(mixer_1) + mixer_2
+        [ audio_1, video_1, mixer_1 ] = self.muxer_1(audio,   video,   image)
+        [ audio_2, video_2, mixer_2 ] = self.muxer_2(audio_1, video_1, image)
+        [ audio_3, video_3, mixer_3 ] = self.muxer_3(audio_2, video_2, image)
+        return mixer_1 + mixer_2 + mixer_3
 
 class AudioTailBlock(nn.Module):
     def __init__(
         self,
-        in_features : int = 1224,
+        in_features : int = 1184,
         out_features: int = 800,
         channels    : List[int] = [ 256, 64, 16, 4, 1 ],
     ):
@@ -385,10 +332,6 @@ class Chobits(nn.Module):
         mixer_out = self.mixer(audio_out, video_out, image_out)
         return self.tail(mixer_out)
 
-# input = torch.randn(10, 32, 128)
-# embedding = SinusoidalPositionEmbedding(128)
-# print(embedding(input).shape)
-
 # embedding = RotaryPositionEmbedding(128)
 # q = torch.randn(10, 8, 32, 128)
 # k = torch.randn(10, 8, 32, 128)
@@ -424,16 +367,27 @@ class Chobits(nn.Module):
 # input = torch.randn(10, 3, 360, 640)
 # print(model(input).shape)
 
+# model = MediaMuxerBlock()
+# input = (
+#     torch.randn(10, 256,  160),
+#     torch.randn(10, 256, 1024),
+#     torch.randn(10, 256,  576),
+# )
+# audio, video, muxer = model(*input)
+# print(audio.shape)
+# print(video.shape)
+# print(muxer.shape)
+
 # model = MediaMixerBlock()
 # input = (
-#     torch.randn(10, 128,  200),
-#     torch.randn(10, 128, 1024),
-#     torch.randn(10, 128,  576),
+#     torch.randn(10, 256,  160),
+#     torch.randn(10, 256, 1024),
+#     torch.randn(10, 256,  576),
 # )
 # print(model(*input).shape)
 
 # model = AudioTailBlock()
-# input = torch.randn(10, 256, 1224)
+# input = torch.randn(10, 256, 1184)
 # print(model(input).shape)
 
 model = Chobits()

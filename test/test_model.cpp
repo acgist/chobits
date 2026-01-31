@@ -17,14 +17,6 @@ static void info(std::shared_ptr<torch::nn::Module> layer) {
     std::printf("参数总量：%" PRId64 "\n", total_numel);
 }
 
-[[maybe_unused]] static void test_sinusoidal() {
-    // torch::NoGradGuard no_grad_guard;
-    chobits::nn::SinusoidalPositionEmbedding layer(128);
-    info(layer.ptr());
-    auto output = layer->forward(torch::randn({ 10, 32, 128 }));
-    std::cout << output.sizes() << std::endl;
-}
-
 [[maybe_unused]] static void test_rotary() {
     torch::NoGradGuard no_grad_guard;
     chobits::nn::RotaryPositionEmbedding layer(128);
@@ -89,14 +81,28 @@ static void info(std::shared_ptr<torch::nn::Module> layer) {
     std::cout << output.sizes() << std::endl;
 }
 
+[[maybe_unused]] static void test_media_muxer() {
+    torch::NoGradGuard no_grad_guard;
+    chobits::nn::MediaMuxerBlock layer;
+    info(layer.ptr());
+    auto [ audio, video, muxer ] = layer->forward(
+        torch::randn({ 10, 256,  160 }),
+        torch::randn({ 10, 256, 1024 }),
+        torch::randn({ 10, 256,  576 })
+    );
+    std::cout << audio.sizes() << std::endl;
+    std::cout << video.sizes() << std::endl;
+    std::cout << muxer.sizes() << std::endl;
+}
+
 [[maybe_unused]] static void test_media_mixer() {
     torch::NoGradGuard no_grad_guard;
     chobits::nn::MediaMixerBlock layer;
     info(layer.ptr());
     auto output = layer->forward(
-        torch::randn({ 10, 128,  200 }),
-        torch::randn({ 10, 128, 1024 }),
-        torch::randn({ 10, 128,  576 })
+        torch::randn({ 10, 256,  160 }),
+        torch::randn({ 10, 256, 1024 }),
+        torch::randn({ 10, 256,  576 })
     );
     std::cout << output.sizes() << std::endl;
 }
@@ -105,7 +111,7 @@ static void info(std::shared_ptr<torch::nn::Module> layer) {
     torch::NoGradGuard no_grad_guard;
     chobits::nn::AudioTailBlock layer;
     info(layer.ptr());
-    auto output = layer->forward(torch::randn({ 10, 256, 1224 }));
+    auto output = layer->forward(torch::randn({ 10, 256, 1184 }));
     std::cout << output.sizes() << std::endl;
 }
 
@@ -127,17 +133,17 @@ static void info(std::shared_ptr<torch::nn::Module> layer) {
 
 int main() {
     try {
-        // test_sinusoidal();
         // test_rotary();
         // test_res_net_1d();
-        test_res_net_2d();
+        // test_res_net_2d();
         // test_attention();
         // test_audio_head();
         // test_video_head();
         // test_image_head();
+        // test_media_muxer();
         // test_media_mixer();
         // test_audio_tail();
-        // test_model_eval();
+        test_model_eval();
     } catch(const std::exception& e) {
         std::printf("异常内容：%s", e.what());
     }
