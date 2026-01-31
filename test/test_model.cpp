@@ -17,17 +17,29 @@ static void info(std::shared_ptr<torch::nn::Module> layer) {
     std::printf("参数总量：%" PRId64 "\n", total_numel);
 }
 
-[[maybe_unused]] static void test_res_net_1d() {
-    torch::NoGradGuard no_grad_guard;
-    chobits::nn::ResNet1dBlock layer(8, 16, 800);
+[[maybe_unused]] static void test_sinusoidal() {
+    // torch::NoGradGuard no_grad_guard;
+    chobits::nn::SinusoidalPositionEmbedding layer(128);
     info(layer.ptr());
-    auto output = layer->forward(torch::randn({ 10, 8, 800 }));
+    auto output = layer->forward(torch::randn({ 10, 32, 128 }));
     std::cout << output.sizes() << std::endl;
 }
 
-[[maybe_unused]] static void test_res_net_1d_cat() {
+[[maybe_unused]] static void test_rotary() {
     torch::NoGradGuard no_grad_guard;
-    chobits::nn::ResNet1dCatBlock layer(8, 800);
+    chobits::nn::RotaryPositionEmbedding layer(128);
+    info(layer.ptr());
+    auto [ q, k ] = layer->forward(
+        torch::randn({ 10, 8, 32, 128 }),
+        torch::randn({ 10, 8, 32, 128 })
+    );
+    std::cout << q.sizes() << std::endl;
+    std::cout << k.sizes() << std::endl;
+}
+
+[[maybe_unused]] static void test_res_net_1d() {
+    torch::NoGradGuard no_grad_guard;
+    chobits::nn::ResNet1dBlock layer(8, 16, 800);
     info(layer.ptr());
     auto output = layer->forward(torch::randn({ 10, 8, 800 }));
     std::cout << output.sizes() << std::endl;
@@ -38,22 +50,6 @@ static void info(std::shared_ptr<torch::nn::Module> layer) {
     chobits::nn::ResNet2dBlock layer(8, 16, std::vector<int64_t>{ 360, 640 });
     info(layer.ptr());
     auto output = layer->forward(torch::randn({ 10, 8, 360, 640 }));
-    std::cout << output.sizes() << std::endl;
-}
-
-[[maybe_unused]] static void test_res_net_2d_cat() {
-    torch::NoGradGuard no_grad_guard;
-    chobits::nn::ResNet2dCatBlock layer(8, std::vector<int64_t>{ 360, 640 });
-    info(layer.ptr());
-    auto output = layer->forward(torch::randn({ 10, 8, 360, 640 }));
-    std::cout << output.sizes() << std::endl;
-}
-
-[[maybe_unused]] static void test_gru() {
-    torch::NoGradGuard no_grad_guard;
-    chobits::nn::GRUBlock layer(800, 800);
-    info(layer.ptr());
-    auto output = layer->forward(torch::randn({ 10, 32, 800 }));
     std::cout << output.sizes() << std::endl;
 }
 
@@ -98,9 +94,9 @@ static void info(std::shared_ptr<torch::nn::Module> layer) {
     chobits::nn::MediaMixerBlock layer;
     info(layer.ptr());
     auto output = layer->forward(
-        torch::randn({ 10, 256, 320 }),
-        torch::randn({ 10, 256, 512 }),
-        torch::randn({ 10, 256, 576 })
+        torch::randn({ 10, 128,  200 }),
+        torch::randn({ 10, 128, 1024 }),
+        torch::randn({ 10, 128,  576 })
     );
     std::cout << output.sizes() << std::endl;
 }
@@ -109,7 +105,7 @@ static void info(std::shared_ptr<torch::nn::Module> layer) {
     torch::NoGradGuard no_grad_guard;
     chobits::nn::AudioTailBlock layer;
     info(layer.ptr());
-    auto output = layer->forward(torch::randn({ 10, 256, 832 }));
+    auto output = layer->forward(torch::randn({ 10, 256, 1224 }));
     std::cout << output.sizes() << std::endl;
 }
 
@@ -131,18 +127,17 @@ static void info(std::shared_ptr<torch::nn::Module> layer) {
 
 int main() {
     try {
+        // test_sinusoidal();
+        // test_rotary();
         // test_res_net_1d();
-        // test_res_net_1d_cat();
-        // test_res_net_2d();
-        // test_res_net_2d_cat();
-        // test_gru();
+        test_res_net_2d();
         // test_attention();
         // test_audio_head();
         // test_video_head();
         // test_image_head();
         // test_media_mixer();
         // test_audio_tail();
-        test_model_eval();
+        // test_model_eval();
     } catch(const std::exception& e) {
         std::printf("异常内容：%s", e.what());
     }
