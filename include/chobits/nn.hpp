@@ -212,7 +212,7 @@ private:
     chobits::nn::RotaryPositionEmbedding rope{ nullptr };
     torch::nn::MultiheadAttention        attn{ nullptr };
     torch::nn::Linear                    proj{ nullptr };
-    torch::nn::LayerNorm                 norm{ nullptr };
+    torch::nn::Sequential                ffn { nullptr };
 
 public:
     AttentionBlockImpl(
@@ -230,7 +230,12 @@ public:
         this->rope = this->register_module("rope", chobits::nn::RotaryPositionEmbedding(h_dim / num_heads, max_len));
         this->attn = this->register_module("attn", torch::nn::MultiheadAttention(torch::nn::MultiheadAttentionOptions(h_dim, num_heads).bias(false)));
         this->proj = this->register_module("proj", torch::nn::Linear(torch::nn::LinearOptions(h_dim, o_dim).bias(false)));
-        this->norm = this->register_module("norm", torch::nn::LayerNorm(torch::nn::LayerNormOptions(std::vector<int64_t>{ o_dim })));
+        this->ffn  = this->register_module("ffn",  torch::nn::Sequential(
+            torch::nn::LayerNorm(torch::nn::LayerNormOptions(std::vector<int64_t>{ o_dim })),
+            torch::nn::Linear(o_dim, o_dim),
+            layer_act(),
+            torch::nn::Linear(o_dim, o_dim)
+        ));
     }
     ~AttentionBlockImpl() {
     }
@@ -242,7 +247,7 @@ public:
         auto v = this->v->forward(value.permute({ 1, 0, 2 }));
         auto [ q_embed, k_embed ] = this->rope->forward(q, k);
         auto [ o, _ ] = this->attn->forward(q_embed, k_embed, v);
-        return this->norm->forward(query + this->proj->forward(o.permute({ 1, 0, 2 })));
+        return this->ffn->forward(query + this->proj->forward(o.permute({ 1, 0, 2 })));
     }
 
 };
@@ -432,7 +437,7 @@ public:
             auto mixer_o = this->mixer_attn->forward(muxer_o, muxer_o, muxer_o);
             return { audio_o, video_o, mixer_o };
         } else {
-            auto mixer_o = this->mixer_attn->forward(muxer, muxer_o, muxer_o);
+            auto mixer_o = this->mixer_attn->forward(muxer_o, muxer, muxer);
             return { audio_o, video_o, mixer_o };
         }
     }
@@ -502,7 +507,9 @@ public:
             torch::nn::Conv1d(torch::nn::Conv1dOptions(channel[3], channel[4], 3)),
             torch::nn::Flatten(torch::nn::FlattenOptions().start_dim(1)),
             layer_act(),
-            torch::nn::Linear(in_features - 2 * 4, out_features)
+            torch::nn::Linear(in_features - 2 * 4, out_features),
+            layer_act(),
+            torch::nn::Linear(out_features, out_features)
         ));
     }
     ~AudioTailBlockImpl() {

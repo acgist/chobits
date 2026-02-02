@@ -147,7 +147,12 @@ class AttentionBlock(nn.Module):
         self.rope = RotaryPositionEmbedding(h_dim // num_heads, max_len = max_len)
         self.attn = nn.MultiheadAttention(h_dim, num_heads, bias = False, batch_first = False)
         self.proj = nn.Linear(h_dim, o_dim, bias = False)
-        self.norm = nn.LayerNorm(o_dim)
+        self.ffn  = nn.Sequential(
+            nn.LayerNorm(o_dim),
+            nn.Linear(o_dim, o_dim),
+            layer_act(),
+            nn.Linear(o_dim, o_dim),
+        )
 
     def forward(self, query: torch.Tensor, key: torch.Tensor, value: torch.Tensor) -> torch.Tensor:
         q = self.q(query.permute(1, 0, 2))
@@ -155,7 +160,7 @@ class AttentionBlock(nn.Module):
         v = self.v(value.permute(1, 0, 2))
         q_embed, k_embed = self.rope(q, k)
         o, _ = self.attn(q_embed, k_embed, v)
-        return self.norm(query + self.proj(o.permute(1, 0, 2)))
+        return self.ffn(query + self.proj(o.permute(1, 0, 2)))
 
 class AudioHeadBlock(nn.Module):
     def __init__(self):
@@ -268,7 +273,7 @@ class MediaMuxerBlock(nn.Module):
         if muxer is None:
             mixer_o = self.mixer_attn(muxer_o, muxer_o, muxer_o)
         else:
-            mixer_o = self.mixer_attn(muxer, muxer_o, muxer_o)
+            mixer_o = self.mixer_attn(muxer_o, muxer, muxer)
         return (audio_o, video_o, mixer_o)
 
 class MediaMixerBlock(nn.Module):
@@ -315,6 +320,8 @@ class AudioTailBlock(nn.Module):
             nn.Flatten(start_dim = 1),
             layer_act(),
             nn.Linear(in_features - 2 * 4, out_features),
+            layer_act(),
+            nn.Linear(out_features, out_features),
         )
 
     def forward(self, input: torch.Tensor) -> torch.Tensor:
