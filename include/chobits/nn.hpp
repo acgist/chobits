@@ -245,8 +245,9 @@ public:
         auto q = this->q->forward(query.permute({ 1, 0, 2 }));
         auto k = this->k->forward(key  .permute({ 1, 0, 2 }));
         auto v = this->v->forward(value.permute({ 1, 0, 2 }));
-        auto [ q_embed, k_embed ] = this->rope->forward(q, k);
-        auto [ o, _ ] = this->attn->forward(q_embed, k_embed, v);
+        // auto [ q_embed, k_embed ] = this->rope->forward(q, k);
+        // auto [ o, _ ] = this->attn->forward(q_embed, k_embed, v);
+        auto [ o, _ ] = this->attn->forward(q, k, v);
         return this->ffn->forward(query + this->proj->forward(o.permute({ 1, 0, 2 })));
     }
 
@@ -276,8 +277,9 @@ public:
             chobits::nn::ResNet2dBlock( 32,  64, std::vector<int64_t>{ 20, 32 }, std::vector<int64_t>{ 2, 2 }, std::vector<int64_t>{ 2, 2 }, std::vector<int64_t>{ 0, 0 }, std::vector<int64_t>{ 1, 1 }),
             chobits::nn::ResNet2dBlock( 64,  64, std::vector<int64_t>{ 20, 32 }, std::vector<int64_t>{ 1, 1 }, std::vector<int64_t>{ 3, 3 }, std::vector<int64_t>{ 1, 1 }, std::vector<int64_t>{ 1, 1 }),
             chobits::nn::ResNet2dBlock( 64, 128, std::vector<int64_t>{ 10, 16 }, std::vector<int64_t>{ 2, 2 }, std::vector<int64_t>{ 2, 2 }, std::vector<int64_t>{ 0, 0 }, std::vector<int64_t>{ 1, 1 }),
-            chobits::nn::ResNet2dBlock(128, 256, std::vector<int64_t>{ 10, 16 }, std::vector<int64_t>{ 1, 1 }, std::vector<int64_t>{ 3, 3 }, std::vector<int64_t>{ 1, 1 }, std::vector<int64_t>{ 1, 1 }),
-            torch::nn::Flatten(torch::nn::FlattenOptions().start_dim(2))
+            chobits::nn::ResNet2dBlock(128, 128, std::vector<int64_t>{ 10, 16 }, std::vector<int64_t>{ 1, 1 }, std::vector<int64_t>{ 3, 3 }, std::vector<int64_t>{ 1, 1 }, std::vector<int64_t>{ 1, 1 }),
+            torch::nn::Flatten(torch::nn::FlattenOptions().start_dim(2)),
+            chobits::nn::ResNet1dBlock(128, 256, 160, 1, 3, 1, 1)
         ));
         this->attn = this->register_module("attn", chobits::nn::AttentionBlock(160, 160, 160, 160, 512));
     }
@@ -325,29 +327,29 @@ private:
 public:
     VideoHeadBlockImpl() {
         this->head = this->register_module("head", torch::nn::Sequential(
-            torch::nn::Conv2d(torch::nn::Conv2dOptions(1, 32, std::vector<int64_t>{ 5, 5 }).padding(std::vector<int64_t>{ 0, 0 }).dilation(std::vector<int64_t>{ 1, 1 }).stride(std::vector<int64_t>{ 5, 5 })),
+            torch::nn::Conv2d(torch::nn::Conv2dOptions(1, 16, std::vector<int64_t>{ 5, 5 }).padding(std::vector<int64_t>{ 0, 0 }).dilation(std::vector<int64_t>{ 1, 1 }).stride(std::vector<int64_t>{ 5, 5 })),
             torch::nn::LayerNorm(torch::nn::LayerNormOptions(std::vector<int64_t>{ 72, 128 })),
-            chobits::nn::ResNet2dBlock( 32,  32, std::vector<int64_t>{ 72, 128 }, std::vector<int64_t>{ 1, 1 }, std::vector<int64_t>{ 3, 3 }, std::vector<int64_t>{ 1, 1 }, std::vector<int64_t>{ 1, 1 }),
-            chobits::nn::ResNet2dBlock( 32,  64, std::vector<int64_t>{ 18,  32 }, std::vector<int64_t>{ 4, 4 }, std::vector<int64_t>{ 4, 4 }, std::vector<int64_t>{ 0, 0 }, std::vector<int64_t>{ 1, 1 }),
+            chobits::nn::ResNet2dBlock( 16,  16, std::vector<int64_t>{ 72, 128 }, std::vector<int64_t>{ 1, 1 }, std::vector<int64_t>{ 3, 3 }, std::vector<int64_t>{ 1, 1 }, std::vector<int64_t>{ 1, 1 }),
+            chobits::nn::ResNet2dBlock( 16,  64, std::vector<int64_t>{ 18,  32 }, std::vector<int64_t>{ 4, 4 }, std::vector<int64_t>{ 4, 4 }, std::vector<int64_t>{ 0, 0 }, std::vector<int64_t>{ 1, 1 }),
             chobits::nn::ResNet2dBlock( 64,  64, std::vector<int64_t>{ 18,  32 }, std::vector<int64_t>{ 1, 1 }, std::vector<int64_t>{ 3, 3 }, std::vector<int64_t>{ 1, 1 }, std::vector<int64_t>{ 1, 1 }),
-            chobits::nn::ResNet2dBlock( 64, 128, std::vector<int64_t>{  4,   8 }, std::vector<int64_t>{ 4, 4 }, std::vector<int64_t>{ 4, 4 }, std::vector<int64_t>{ 0, 0 }, std::vector<int64_t>{ 1, 1 }),
-            chobits::nn::ResNet2dBlock(128, 128, std::vector<int64_t>{  4,   8 }, std::vector<int64_t>{ 1, 1 }, std::vector<int64_t>{ 3, 3 }, std::vector<int64_t>{ 1, 1 }, std::vector<int64_t>{ 1, 1 }),
+            chobits::nn::ResNet2dBlock( 64, 256, std::vector<int64_t>{  4,   8 }, std::vector<int64_t>{ 4, 4 }, std::vector<int64_t>{ 4, 4 }, std::vector<int64_t>{ 0, 0 }, std::vector<int64_t>{ 1, 1 }),
+            chobits::nn::ResNet2dBlock(256, 256, std::vector<int64_t>{  4,   8 }, std::vector<int64_t>{ 1, 1 }, std::vector<int64_t>{ 3, 3 }, std::vector<int64_t>{ 1, 1 }, std::vector<int64_t>{ 1, 1 }),
             torch::nn::Flatten(torch::nn::FlattenOptions().start_dim(2))
         ));
         this->conv = this->register_module("conv", torch::nn::Sequential(
-            chobits::nn::ResNet1dBlock( 32,  64, 2048, 2, 2, 0, 1),
-            chobits::nn::ResNet1dBlock( 64, 128, 1024, 2, 2, 0, 1),
-            chobits::nn::ResNet1dBlock(128, 256, 1024, 1, 3, 1, 1)
+            chobits::nn::ResNet1dBlock( 32,  64, 2048, 4, 4, 0, 1),
+            chobits::nn::ResNet1dBlock( 64, 128,  512, 4, 4, 0, 1),
+            chobits::nn::ResNet1dBlock(128, 256,  512, 1, 3, 1, 1)
         ));
-        this->attn = this->register_module("attn", AttentionBlock(1024, 1024, 1024, 1024));
+        this->attn = this->register_module("attn", AttentionBlock(512, 512, 512, 512));
     }
     ~VideoHeadBlockImpl() {
     }
 
 public:
     torch::Tensor forward(const torch::Tensor& input) {
-        auto out = this->head->forward(input.view({ -1, 1, input.size(2), input.size(3) })).view({ input.size(0), input.size(1), -1 });
-             out = this->conv->forward(out);
+        auto out = this->head->forward(input.view({ -1, 1, input.size(2), input.size(3) }));
+             out = this->conv->forward(out.view({ input.size(0), input.size(1), -1 }));
         return this->attn->forward(out, out, out);
     }
 
@@ -373,8 +375,9 @@ public:
             chobits::nn::ResNet2dBlock( 32,  64, std::vector<int64_t>{ 36,  64 }, std::vector<int64_t>{ 2, 2 }, std::vector<int64_t>{ 2, 2 }, std::vector<int64_t>{ 0, 0 }, std::vector<int64_t>{ 1, 1 }),
             chobits::nn::ResNet2dBlock( 64,  64, std::vector<int64_t>{ 36,  64 }, std::vector<int64_t>{ 1, 1 }, std::vector<int64_t>{ 3, 3 }, std::vector<int64_t>{ 1, 1 }, std::vector<int64_t>{ 1, 1 }),
             chobits::nn::ResNet2dBlock( 64, 128, std::vector<int64_t>{ 18,  32 }, std::vector<int64_t>{ 2, 2 }, std::vector<int64_t>{ 2, 2 }, std::vector<int64_t>{ 0, 0 }, std::vector<int64_t>{ 1, 1 }),
-            chobits::nn::ResNet2dBlock(128, 256, std::vector<int64_t>{ 18,  32 }, std::vector<int64_t>{ 1, 1 }, std::vector<int64_t>{ 3, 3 }, std::vector<int64_t>{ 1, 1 }, std::vector<int64_t>{ 1, 1 }),
-            torch::nn::Flatten(torch::nn::FlattenOptions().start_dim(2))
+            chobits::nn::ResNet2dBlock(128, 128, std::vector<int64_t>{ 18,  32 }, std::vector<int64_t>{ 1, 1 }, std::vector<int64_t>{ 3, 3 }, std::vector<int64_t>{ 1, 1 }, std::vector<int64_t>{ 1, 1 }),
+            torch::nn::Flatten(torch::nn::FlattenOptions().start_dim(2)),
+            chobits::nn::ResNet1dBlock(128, 256, 576, 1, 3, 1, 1)
         ));
         this->attn = this->register_module("attn", AttentionBlock(576, 576, 576, 576));
     }
@@ -405,10 +408,10 @@ private:
 
 public:
     MediaMuxerBlockImpl(
-        const int audio_in =  160,
-        const int video_in = 1024,
-        const int image_in =  576,
-        const int channels =  256
+        const int audio_in = 160,
+        const int video_in = 512,
+        const int image_in = 576,
+        const int channels = 256
     ) {
         const int muxer_in = audio_in + video_in;
         this->audio_attn = this->register_module("audio_attn", chobits::nn::AttentionBlock(audio_in, video_in, video_in, audio_in));
@@ -458,10 +461,10 @@ private:
 
 public:
     MediaMixerBlockImpl(
-        const int audio_in =  160,
-        const int video_in = 1024,
-        const int image_in =  576,
-        const int channels =  256
+        const int audio_in = 160,
+        const int video_in = 512,
+        const int image_in = 576,
+        const int channels = 256
     ) {
         this->mixer_1 = this->register_module("mixer_1", chobits::nn::MediaMuxerBlock(audio_in, video_in, image_in, channels));
         this->mixer_2 = this->register_module("mixer_2", chobits::nn::MediaMuxerBlock(audio_in, video_in, image_in, channels));
@@ -492,7 +495,7 @@ private:
 
 public:
     AudioTailBlockImpl(
-        const int in_features  = 1184,
+        const int in_features  = 672,
         const int out_features = 800,
         const shp channel      = std::vector<int64_t>{ 256, 64, 16, 4, 1 }
     ) {

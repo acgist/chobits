@@ -1,4 +1,5 @@
 import math
+import time
 import torch
 import torch.nn as nn
 
@@ -158,8 +159,9 @@ class AttentionBlock(nn.Module):
         q = self.q(query.permute(1, 0, 2))
         k = self.k(key  .permute(1, 0, 2))
         v = self.v(value.permute(1, 0, 2))
-        q_embed, k_embed = self.rope(q, k)
-        o, _ = self.attn(q_embed, k_embed, v)
+        # q_embed, k_embed = self.rope(q, k)
+        # o, _ = self.attn(q_embed, k_embed, v)
+        o, _ = self.attn(q, k, v)
         return self.ffn(query + self.proj(o.permute(1, 0, 2)))
 
 class AudioHeadBlock(nn.Module):
@@ -176,8 +178,9 @@ class AudioHeadBlock(nn.Module):
             ResNet2dBlock( 32,  64, [ 20, 32 ], [ 2, 2 ], [ 2, 2 ], [ 0, 0 ], [ 1, 1 ]),
             ResNet2dBlock( 64,  64, [ 20, 32 ], [ 1, 1 ], [ 3, 3 ], [ 1, 1 ], [ 1, 1 ]),
             ResNet2dBlock( 64, 128, [ 10, 16 ], [ 2, 2 ], [ 2, 2 ], [ 0, 0 ], [ 1, 1 ]),
-            ResNet2dBlock(128, 256, [ 10, 16 ], [ 1, 1 ], [ 3, 3 ], [ 1, 1 ], [ 1, 1 ]),
+            ResNet2dBlock(128, 128, [ 10, 16 ], [ 1, 1 ], [ 3, 3 ], [ 1, 1 ], [ 1, 1 ]),
             nn.Flatten(start_dim = 2),
+            ResNet1dBlock(128, 256, 160, 1, 3, 1, 1),
         )
         self.attn = AttentionBlock(160, 160, 160, 160, 512)
 
@@ -201,25 +204,25 @@ class VideoHeadBlock(nn.Module):
     def __init__(self):
         super().__init__()
         self.head = nn.Sequential(
-            nn.Conv2d(1, 32, [ 5, 5 ], padding = [ 0, 0 ], dilation = [ 1, 1 ], stride = [ 5, 5 ]),
+            nn.Conv2d(1, 16, [ 5, 5 ], padding = [ 0, 0 ], dilation = [ 1, 1 ], stride = [ 5, 5 ]),
             nn.LayerNorm([ 72, 128 ]),
-            ResNet2dBlock( 32,  32, [ 72, 128 ], [ 1, 1 ], [ 3, 3 ], [ 1, 1 ], [ 1, 1 ]),
-            ResNet2dBlock( 32,  64, [ 18,  32 ], [ 4, 4 ], [ 4, 4 ], [ 0, 0 ], [ 1, 1 ]),
+            ResNet2dBlock( 16,  16, [ 72, 128 ], [ 1, 1 ], [ 3, 3 ], [ 1, 1 ], [ 1, 1 ]),
+            ResNet2dBlock( 16,  64, [ 18,  32 ], [ 4, 4 ], [ 4, 4 ], [ 0, 0 ], [ 1, 1 ]),
             ResNet2dBlock( 64,  64, [ 18,  32 ], [ 1, 1 ], [ 3, 3 ], [ 1, 1 ], [ 1, 1 ]),
-            ResNet2dBlock( 64, 128, [  4,   8 ], [ 4, 4 ], [ 4, 4 ], [ 0, 0 ], [ 1, 1 ]),
-            ResNet2dBlock(128, 128, [  4,   8 ], [ 1, 1 ], [ 3, 3 ], [ 1, 1 ], [ 1, 1 ]),
+            ResNet2dBlock( 64, 256, [  4,   8 ], [ 4, 4 ], [ 4, 4 ], [ 0, 0 ], [ 1, 1 ]),
+            ResNet2dBlock(256, 256, [  4,   8 ], [ 1, 1 ], [ 3, 3 ], [ 1, 1 ], [ 1, 1 ]),
             nn.Flatten(start_dim = 2),
         )
         self.conv = nn.Sequential(
-            ResNet1dBlock( 32,  64, 2048, 2, 2, 0, 1),
-            ResNet1dBlock( 64, 128, 1024, 2, 2, 0, 1),
-            ResNet1dBlock(128, 256, 1024, 1, 3, 1, 1),
+            ResNet1dBlock( 32,  64, 2048, 4, 4, 0, 1),
+            ResNet1dBlock( 64, 128,  512, 4, 4, 0, 1),
+            ResNet1dBlock(128, 256,  512, 1, 3, 1, 1),
         )
-        self.attn = AttentionBlock(1024, 1024, 1024, 1024)
+        self.attn = AttentionBlock(512, 512, 512, 512)
 
     def forward(self, input: torch.Tensor) -> torch.Tensor:
-        out = self.head(input.view(-1, 1, input.size(2), input.size(3))).view(input.size(0), input.size(1), -1)
-        out = self.conv(out)
+        out = self.head(input.view(-1, 1, input.size(2), input.size(3)))
+        out = self.conv(out.view(input.size(0), input.size(1), -1))
         return self.attn(out, out, out)
 
 class ImageHeadBlock(nn.Module):
@@ -232,8 +235,9 @@ class ImageHeadBlock(nn.Module):
             ResNet2dBlock( 32,  64, [ 36,  64 ], [ 2, 2 ], [ 2, 2 ], [ 0, 0 ], [ 1, 1 ]),
             ResNet2dBlock( 64,  64, [ 36,  64 ], [ 1, 1 ], [ 3, 3 ], [ 1, 1 ], [ 1, 1 ]),
             ResNet2dBlock( 64, 128, [ 18,  32 ], [ 2, 2 ], [ 2, 2 ], [ 0, 0 ], [ 1, 1 ]),
-            ResNet2dBlock(128, 256, [ 18,  32 ], [ 1, 1 ], [ 3, 3 ], [ 1, 1 ], [ 1, 1 ]),
+            ResNet2dBlock(128, 128, [ 18,  32 ], [ 1, 1 ], [ 3, 3 ], [ 1, 1 ], [ 1, 1 ]),
             nn.Flatten(start_dim = 2),
+            ResNet1dBlock(128, 256, 576, 1, 3, 1, 1),
         )
         self.attn = AttentionBlock(576, 576, 576, 576)
 
@@ -244,10 +248,10 @@ class ImageHeadBlock(nn.Module):
 class MediaMuxerBlock(nn.Module):
     def __init__(
         self,
-        audio_in: int =  160,
-        video_in: int = 1024,
-        image_in: int =  576,
-        channels: int =  256,
+        audio_in: int = 160,
+        video_in: int = 512,
+        image_in: int = 576,
+        channels: int = 256,
     ):
         super().__init__()
         muxer_in = audio_in + video_in
@@ -279,10 +283,10 @@ class MediaMuxerBlock(nn.Module):
 class MediaMixerBlock(nn.Module):
     def __init__(
         self,
-        audio_in: int =  160,
-        video_in: int = 1024,
-        image_in: int =  576,
-        channels: int =  256,
+        audio_in: int = 160,
+        video_in: int = 512,
+        image_in: int = 576,
+        channels: int = 256,
     ):
         super().__init__()
         self.muxer_1 = MediaMuxerBlock(audio_in, video_in, image_in, channels)
@@ -303,7 +307,7 @@ class MediaMixerBlock(nn.Module):
 class AudioTailBlock(nn.Module):
     def __init__(
         self,
-        in_features : int = 1184,
+        in_features : int = 672,
         out_features: int = 800,
         channels    : List[int] = [ 256, 64, 16, 4, 1 ],
     ):
@@ -380,9 +384,9 @@ class Chobits(nn.Module):
 
 # model = MediaMuxerBlock()
 # input = (
-#     torch.randn(10, 256,  160),
-#     torch.randn(10, 256, 1024),
-#     torch.randn(10, 256,  576),
+#     torch.randn(10, 256, 160),
+#     torch.randn(10, 256, 512),
+#     torch.randn(10, 256, 576),
 # )
 # audio, video, muxer = model(*input)
 # print(audio.shape)
@@ -391,14 +395,14 @@ class Chobits(nn.Module):
 
 # model = MediaMixerBlock()
 # input = (
-#     torch.randn(10, 256,  160),
-#     torch.randn(10, 256, 1024),
-#     torch.randn(10, 256,  576),
+#     torch.randn(10, 256, 160),
+#     torch.randn(10, 256, 512),
+#     torch.randn(10, 256, 576),
 # )
 # print(model(*input).shape)
 
 # model = AudioTailBlock()
-# input = torch.randn(10, 256, 1184)
+# input = torch.randn(10, 256, 672)
 # print(model(input).shape)
 
 model = Chobits()
@@ -410,7 +414,10 @@ print(model(*input).shape)
 # torch.save(model, "D:/download/chobits.pt")
 
 # JIT保存
+a = time.time()
 torch.jit.save(torch.jit.trace(model, input), "D:/download/chobits.pt")
+z = time.time()
+print(f"函数执行时间: {z - a:.4f} 秒")
 
 # ONNX保存
 # batch = torch.export.Dim("batch", min = 1)
