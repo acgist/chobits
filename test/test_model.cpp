@@ -37,14 +37,6 @@ static void info(std::shared_ptr<torch::nn::Module> layer) {
     std::cout << output.sizes() << std::endl;
 }
 
-[[maybe_unused]] static void test_res_net_2d() {
-    torch::NoGradGuard no_grad_guard;
-    chobits::nn::ResNet2dBlock layer(8, 16, std::vector<int64_t>{ 360, 640 });
-    info(layer.ptr());
-    auto output = layer->forward(torch::randn({ 10, 8, 360, 640 }));
-    std::cout << output.sizes() << std::endl;
-}
-
 [[maybe_unused]] static void test_attention() {
     torch::NoGradGuard no_grad_guard;
     chobits::nn::AttentionBlock layer(800, 800, 800, 800);
@@ -86,9 +78,9 @@ static void info(std::shared_ptr<torch::nn::Module> layer) {
     chobits::nn::MediaMuxerBlock layer;
     info(layer.ptr());
     auto [ audio, video, muxer ] = layer->forward(
-        torch::randn({ 10, 256, 160 }),
-        torch::randn({ 10, 256, 512 }),
-        torch::randn({ 10, 256, 576 })
+        torch::randn({ 10, 256, 256 }),
+        torch::randn({ 10, 256, 256 }),
+        torch::randn({ 10, 256, 256 })
     );
     std::cout << audio.sizes() << std::endl;
     std::cout << video.sizes() << std::endl;
@@ -100,9 +92,9 @@ static void info(std::shared_ptr<torch::nn::Module> layer) {
     chobits::nn::MediaMixerBlock layer;
     info(layer.ptr());
     auto output = layer->forward(
-        torch::randn({ 10, 256, 160 }),
-        torch::randn({ 10, 256, 512 }),
-        torch::randn({ 10, 256, 576 })
+        torch::randn({ 10, 256, 256 }),
+        torch::randn({ 10, 256, 256 }),
+        torch::randn({ 10, 256, 256 })
     );
     std::cout << output.sizes() << std::endl;
 }
@@ -111,7 +103,7 @@ static void info(std::shared_ptr<torch::nn::Module> layer) {
     torch::NoGradGuard no_grad_guard;
     chobits::nn::AudioTailBlock layer;
     info(layer.ptr());
-    auto output = layer->forward(torch::randn({ 10, 256, 672 }));
+    auto output = layer->forward(torch::randn({ 10, 256, 512 }));
     std::cout << output.sizes() << std::endl;
 }
 
@@ -135,7 +127,6 @@ int main() {
     try {
         // test_rotary();
         // test_res_net_1d();
-        // test_res_net_2d();
         // test_attention();
         // test_audio_head();
         // test_video_head();

@@ -141,66 +141,6 @@ public:
 TORCH_MODULE(ResNet1dBlock);
 
 /**
- * 2D残差网络
- */
-class ResNet2dBlockImpl : public torch::nn::Module {
-
-private:
-    torch::nn::Sequential cv1{ nullptr };
-    torch::nn::Sequential cv2{ nullptr };
-    torch::nn::Sequential cv3{ nullptr };
-    torch::nn::Sequential cv4{ nullptr };
-
-public:
-    ResNet2dBlockImpl(
-        const int in_channels,
-        const int out_channels,
-        const shp features,
-        const shp stride   = std::vector<int64_t>{ 1, 1 },
-        const shp kernel   = std::vector<int64_t>{ 3, 3 },
-        const shp padding  = std::vector<int64_t>{ 1, 1 },
-        const shp dilation = std::vector<int64_t>{ 1, 1 }
-    ) {
-        this->cv1 = this->register_module("cv1", torch::nn::Sequential(
-            torch::nn::Conv2d(torch::nn::Conv2dOptions(in_channels * 2, out_channels, kernel).padding(padding).dilation(dilation).bias(false).stride(stride)),
-            torch::nn::LayerNorm(torch::nn::LayerNormOptions(features)),
-            layer_act()
-        ));
-        this->cv2 = this->register_module("cv2", torch::nn::Sequential(
-            torch::nn::Conv2d(torch::nn::Conv2dOptions(in_channels, in_channels, std::vector<int64_t>{ 3, 3 }).padding(std::vector<int64_t>{ 1, 1 }).dilation(std::vector<int64_t>{ 1, 1 })),
-            layer_act(),
-            torch::nn::Conv2d(torch::nn::Conv2dOptions(in_channels, in_channels, std::vector<int64_t>{ 3, 3 }).padding(std::vector<int64_t>{ 1, 1 }).dilation(std::vector<int64_t>{ 1, 1 })),
-            layer_act()
-        ));
-        this->cv3 = this->register_module("cv3", torch::nn::Sequential(
-            torch::nn::Conv2d(torch::nn::Conv2dOptions(in_channels, in_channels, std::vector<int64_t>{ 3, 3 }).padding(std::vector<int64_t>{ 2, 2 }).dilation(std::vector<int64_t>{ 2, 2 })),
-            layer_act(),
-            torch::nn::Conv2d(torch::nn::Conv2dOptions(in_channels, in_channels, std::vector<int64_t>{ 3, 3 }).padding(std::vector<int64_t>{ 2, 2 }).dilation(std::vector<int64_t>{ 2, 2 })),
-            layer_act()
-        ));
-        this->cv4 = this->register_module("cv4", torch::nn::Sequential(
-            torch::nn::Conv2d(torch::nn::Conv2dOptions(in_channels, in_channels, std::vector<int64_t>{ 3, 3 }).padding(std::vector<int64_t>{ 2, 2 }).dilation(std::vector<int64_t>{ 2, 2 })),
-            layer_act(),
-            torch::nn::Conv2d(torch::nn::Conv2dOptions(in_channels, in_channels, std::vector<int64_t>{ 3, 3 }).padding(std::vector<int64_t>{ 2, 2 }).dilation(std::vector<int64_t>{ 2, 2 })),
-            layer_act()
-        ));
-    }
-    ~ResNet2dBlockImpl() {
-    }
-
-public:
-    torch::Tensor forward(const torch::Tensor& input) {
-        auto cv2 = this->cv2->forward(input);
-        auto cv3 = this->cv3->forward(cv2);
-        auto cv4 = this->cv4->forward(input);
-        return this->cv1->forward(torch::cat({ cv4 + cv3, cv2 }, 1));
-    }
-
-};
-
-TORCH_MODULE(ResNet2dBlock);
-
-/**
  * 自注意力
  */
 class AttentionBlockImpl : public torch::nn::Module {
@@ -256,6 +196,48 @@ public:
 TORCH_MODULE(AttentionBlock);
 
 /**
+ * ViT
+ */
+class ViTBlockImpl : public torch::nn::Module {
+
+private:
+    torch::nn::Conv2d           patch{ nullptr };
+    torch::nn::LayerNorm        norm { nullptr };
+    torch::Tensor               embed{ nullptr };
+    chobits::nn::AttentionBlock attn { nullptr };
+
+public:
+    ViTBlockImpl(
+        const int in_channels,
+        const int embed_dim,
+        const shp kernel,
+        const int height,
+        const int width,
+        const int hidden_dim = 512
+    ) {
+        const int embed_seq_len = (height / kernel[0]) * (width / kernel[1]);
+        this->patch = this->register_module   ("patch", torch::nn::Conv2d(torch::nn::Conv2dOptions(in_channels, embed_dim, kernel).padding(std::vector<int64_t>{ 0, 0 }).dilation(std::vector<int64_t>{ 1, 1 }).stride(kernel)));
+        this->embed = this->register_parameter("embed", torch::zeros({ 1, embed_seq_len, embed_dim }));
+        this->norm  = this->register_module   ("norm",  torch::nn::LayerNorm(torch::nn::LayerNormOptions(std::vector<int64_t>{ embed_dim })));
+        this->attn  = this->register_module   ("attn",  chobits::nn::AttentionBlock(embed_dim, embed_dim, embed_dim, embed_dim, hidden_dim));
+    }
+    ~ViTBlockImpl() {
+    }
+
+public:
+    torch::Tensor forward(const torch::Tensor& input) {
+        auto out = this->patch->forward(input).flatten(2);
+             out = out.transpose(1, 2);
+             out = out + this->embed;
+             out = this->norm->forward(out);
+        return this->attn->forward(out, out, out);
+    }
+
+};
+
+TORCH_MODULE(ViTBlock);
+
+/**
  * 音频输入
  */
 class AudioHeadBlockImpl : public torch::nn::Module {
@@ -265,23 +247,17 @@ private:
     const int hop_size = 80;
     const int win_size = 400;
     torch::Tensor window{ nullptr };
-    torch::nn::Sequential       head{ nullptr };
-    chobits::nn::AttentionBlock attn{ nullptr };
+    chobits::nn::ViTBlock      vit  { nullptr };
+    chobits::nn::ViTBlock      svit { nullptr };
+    torch::Tensor              embed{ nullptr };
+    chobits::nn::ResNet1dBlock conv { nullptr };
 
 public:
     AudioHeadBlockImpl() {
-        this->head = this->register_module("head", torch::nn::Sequential(
-            torch::nn::Conv2d(torch::nn::Conv2dOptions(1, 32, std::vector<int64_t>{ 5, 5 }).padding(std::vector<int64_t>{ 0, 0 }).dilation(std::vector<int64_t>{ 1, 1 }).stride(std::vector<int64_t>{ 5, 5 })),
-            torch::nn::LayerNorm(torch::nn::LayerNormOptions(std::vector<int64_t>{ 40, 64 })),
-            chobits::nn::ResNet2dBlock( 32,  32, std::vector<int64_t>{ 40, 64 }, std::vector<int64_t>{ 1, 1 }, std::vector<int64_t>{ 3, 3 }, std::vector<int64_t>{ 1, 1 }, std::vector<int64_t>{ 1, 1 }),
-            chobits::nn::ResNet2dBlock( 32,  64, std::vector<int64_t>{ 20, 32 }, std::vector<int64_t>{ 2, 2 }, std::vector<int64_t>{ 2, 2 }, std::vector<int64_t>{ 0, 0 }, std::vector<int64_t>{ 1, 1 }),
-            chobits::nn::ResNet2dBlock( 64,  64, std::vector<int64_t>{ 20, 32 }, std::vector<int64_t>{ 1, 1 }, std::vector<int64_t>{ 3, 3 }, std::vector<int64_t>{ 1, 1 }, std::vector<int64_t>{ 1, 1 }),
-            chobits::nn::ResNet2dBlock( 64, 128, std::vector<int64_t>{ 10, 16 }, std::vector<int64_t>{ 2, 2 }, std::vector<int64_t>{ 2, 2 }, std::vector<int64_t>{ 0, 0 }, std::vector<int64_t>{ 1, 1 }),
-            chobits::nn::ResNet2dBlock(128, 128, std::vector<int64_t>{ 10, 16 }, std::vector<int64_t>{ 1, 1 }, std::vector<int64_t>{ 3, 3 }, std::vector<int64_t>{ 1, 1 }, std::vector<int64_t>{ 1, 1 }),
-            torch::nn::Flatten(torch::nn::FlattenOptions().start_dim(2)),
-            chobits::nn::ResNet1dBlock(128, 256, 160, 1, 3, 1, 1)
-        ));
-        this->attn = this->register_module("attn", chobits::nn::AttentionBlock(160, 160, 160, 160, 512));
+        this->vit   = this->register_module   ("vit",   chobits::nn::ViTBlock( 1, 256, std::vector<int64_t>{  5,  5 }, 11, 201));
+        this->svit  = this->register_module   ("svit",  chobits::nn::ViTBlock(32, 256, std::vector<int64_t>{ 16, 16 }, 80, 256));
+        this->conv  = this->register_module   ("conv",  chobits::nn::ResNet1dBlock(80, 256, 256, 1, 3, 1, 1));
+        this->embed = this->register_parameter("embed", torch::zeros({ 1, 32, 80, 256 }));
     }
     ~AudioHeadBlockImpl() {
     }
@@ -292,7 +268,7 @@ public:
             this->window = torch::hann_window(this->win_size).to(input.device());
         }
         auto com = torch::stft(
-            input.view({ input.size(0), -1 }),
+            input.view({ -1, input.size(2) }),
             this->n_fft,
             this->hop_size,
             this->win_size,
@@ -305,9 +281,12 @@ public:
         );
         auto mag = torch::abs(com);
 //      auto pha = torch::angle(com);
-             mag = mag.unsqueeze(1).contiguous();
-        auto out = this->head->forward(mag);
-        return this->attn->forward(out, out, out);
+             mag = mag.unsqueeze(1).transpose(2, 3).contiguous();
+        auto out = this->vit->forward(mag);
+             out = out.view({ input.size(0), input.size(1), out.size(1), out.size(2) });
+             out = out + this->embed;
+             out = this->svit->forward(out);
+             return this->conv->forward(out);
     }
 
 };
@@ -320,37 +299,28 @@ TORCH_MODULE(AudioHeadBlock);
 class VideoHeadBlockImpl : public torch::nn::Module {
 
 private:
-    torch::nn::Sequential       head{ nullptr };
-    torch::nn::Sequential       conv{ nullptr };
-    chobits::nn::AttentionBlock attn{ nullptr };
+    chobits::nn::ViTBlock      vit  { nullptr };
+    chobits::nn::ViTBlock      svit { nullptr };
+    torch::Tensor              embed{ nullptr };
+    chobits::nn::ResNet1dBlock conv { nullptr };
 
 public:
     VideoHeadBlockImpl() {
-        this->head = this->register_module("head", torch::nn::Sequential(
-            torch::nn::Conv2d(torch::nn::Conv2dOptions(1, 16, std::vector<int64_t>{ 5, 5 }).padding(std::vector<int64_t>{ 0, 0 }).dilation(std::vector<int64_t>{ 1, 1 }).stride(std::vector<int64_t>{ 5, 5 })),
-            torch::nn::LayerNorm(torch::nn::LayerNormOptions(std::vector<int64_t>{ 72, 128 })),
-            chobits::nn::ResNet2dBlock( 16,  16, std::vector<int64_t>{ 72, 128 }, std::vector<int64_t>{ 1, 1 }, std::vector<int64_t>{ 3, 3 }, std::vector<int64_t>{ 1, 1 }, std::vector<int64_t>{ 1, 1 }),
-            chobits::nn::ResNet2dBlock( 16,  64, std::vector<int64_t>{ 18,  32 }, std::vector<int64_t>{ 4, 4 }, std::vector<int64_t>{ 4, 4 }, std::vector<int64_t>{ 0, 0 }, std::vector<int64_t>{ 1, 1 }),
-            chobits::nn::ResNet2dBlock( 64,  64, std::vector<int64_t>{ 18,  32 }, std::vector<int64_t>{ 1, 1 }, std::vector<int64_t>{ 3, 3 }, std::vector<int64_t>{ 1, 1 }, std::vector<int64_t>{ 1, 1 }),
-            chobits::nn::ResNet2dBlock( 64, 256, std::vector<int64_t>{  4,   8 }, std::vector<int64_t>{ 4, 4 }, std::vector<int64_t>{ 4, 4 }, std::vector<int64_t>{ 0, 0 }, std::vector<int64_t>{ 1, 1 }),
-            chobits::nn::ResNet2dBlock(256, 256, std::vector<int64_t>{  4,   8 }, std::vector<int64_t>{ 1, 1 }, std::vector<int64_t>{ 3, 3 }, std::vector<int64_t>{ 1, 1 }, std::vector<int64_t>{ 1, 1 }),
-            torch::nn::Flatten(torch::nn::FlattenOptions().start_dim(2))
-        ));
-        this->conv = this->register_module("conv", torch::nn::Sequential(
-            chobits::nn::ResNet1dBlock( 32,  64, 2048, 4, 4, 0, 1),
-            chobits::nn::ResNet1dBlock( 64, 128,  512, 4, 4, 0, 1),
-            chobits::nn::ResNet1dBlock(128, 256,  512, 1, 3, 1, 1)
-        ));
-        this->attn = this->register_module("attn", AttentionBlock(512, 512, 512, 512));
+        this->vit   = this->register_module   ("vit",   chobits::nn::ViTBlock( 1, 256, std::vector<int64_t>{ 40, 40 }, 360, 640));
+        this->svit  = this->register_module   ("svit",  chobits::nn::ViTBlock(32, 256, std::vector<int64_t>{ 16, 16 }, 144, 256));
+        this->conv  = this->register_module   ("conv",  chobits::nn::ResNet1dBlock(144, 256, 256, 1, 3, 1, 1));
+        this->embed = this->register_parameter("embed", torch::zeros({ 1, 32, 144, 256 }));
     }
     ~VideoHeadBlockImpl() {
     }
 
 public:
     torch::Tensor forward(const torch::Tensor& input) {
-        auto out = this->head->forward(input.view({ -1, 1, input.size(2), input.size(3) }));
-             out = this->conv->forward(out.view({ input.size(0), input.size(1), -1 }));
-        return this->attn->forward(out, out, out);
+        auto out = this->vit->forward(input.view({ -1, 1, input.size(2), input.size(3) }));
+             out = out.view({ input.size(0), input.size(1), out.size(1), out.size(2) });
+             out = out + this->embed;
+             out = this->svit->forward(out);
+        return this->conv->forward(out);
     }
 
 };
@@ -363,31 +333,21 @@ TORCH_MODULE(VideoHeadBlock);
 class ImageHeadBlockImpl : public torch::nn::Module {
 
 private:
-    torch::nn::Sequential       head{ nullptr };
-    chobits::nn::AttentionBlock attn{ nullptr };
+    chobits::nn::ViTBlock      vit { nullptr };
+    chobits::nn::ResNet1dBlock conv{ nullptr };
 
 public:
     ImageHeadBlockImpl() {
-        this->head = this->register_module("head", torch::nn::Sequential(
-            torch::nn::Conv2d(torch::nn::Conv2dOptions(3, 32, std::vector<int64_t>{ 5, 5 }).padding(std::vector<int64_t>{ 0, 0 }).dilation(std::vector<int64_t>{ 1, 1 }).stride(std::vector<int64_t>{ 5, 5 })),
-            torch::nn::LayerNorm(torch::nn::LayerNormOptions(std::vector<int64_t>{ 72, 128 })),
-            chobits::nn::ResNet2dBlock( 32,  32, std::vector<int64_t>{ 72, 128 }, std::vector<int64_t>{ 1, 1 }, std::vector<int64_t>{ 3, 3 }, std::vector<int64_t>{ 1, 1 }, std::vector<int64_t>{ 1, 1 }),
-            chobits::nn::ResNet2dBlock( 32,  64, std::vector<int64_t>{ 36,  64 }, std::vector<int64_t>{ 2, 2 }, std::vector<int64_t>{ 2, 2 }, std::vector<int64_t>{ 0, 0 }, std::vector<int64_t>{ 1, 1 }),
-            chobits::nn::ResNet2dBlock( 64,  64, std::vector<int64_t>{ 36,  64 }, std::vector<int64_t>{ 1, 1 }, std::vector<int64_t>{ 3, 3 }, std::vector<int64_t>{ 1, 1 }, std::vector<int64_t>{ 1, 1 }),
-            chobits::nn::ResNet2dBlock( 64, 128, std::vector<int64_t>{ 18,  32 }, std::vector<int64_t>{ 2, 2 }, std::vector<int64_t>{ 2, 2 }, std::vector<int64_t>{ 0, 0 }, std::vector<int64_t>{ 1, 1 }),
-            chobits::nn::ResNet2dBlock(128, 128, std::vector<int64_t>{ 18,  32 }, std::vector<int64_t>{ 1, 1 }, std::vector<int64_t>{ 3, 3 }, std::vector<int64_t>{ 1, 1 }, std::vector<int64_t>{ 1, 1 }),
-            torch::nn::Flatten(torch::nn::FlattenOptions().start_dim(2)),
-            chobits::nn::ResNet1dBlock(128, 256, 576, 1, 3, 1, 1)
-        ));
-        this->attn = this->register_module("attn", AttentionBlock(576, 576, 576, 576));
+        this->vit  = this->register_module("vit",  chobits::nn::ViTBlock(3, 256, std::vector<int64_t>{ 40, 40 }, 360, 640));
+        this->conv = this->register_module("conv", chobits::nn::ResNet1dBlock(144, 256, 256, 1, 3, 1, 1));
     }
     ~ImageHeadBlockImpl() {
     }
 
 public:
     torch::Tensor forward(const torch::Tensor& input) {
-        auto out = this->head->forward(input);
-        return this->attn(out, out, out);
+        auto out = this->vit->forward(input);
+        return this->conv->forward(out);
     }
 
 };
@@ -408,9 +368,9 @@ private:
 
 public:
     MediaMuxerBlockImpl(
-        const int audio_in = 160,
-        const int video_in = 512,
-        const int image_in = 576,
+        const int audio_in = 256,
+        const int video_in = 256,
+        const int image_in = 256,
         const int channels = 256
     ) {
         const int muxer_in = audio_in + video_in;
@@ -461,9 +421,9 @@ private:
 
 public:
     MediaMixerBlockImpl(
-        const int audio_in = 160,
-        const int video_in = 512,
-        const int image_in = 576,
+        const int audio_in = 256,
+        const int video_in = 256,
+        const int image_in = 256,
         const int channels = 256
     ) {
         this->mixer_1 = this->register_module("mixer_1", chobits::nn::MediaMuxerBlock(audio_in, video_in, image_in, channels));
@@ -495,7 +455,7 @@ private:
 
 public:
     AudioTailBlockImpl(
-        const int in_features  = 672,
+        const int in_features  = 512,
         const int out_features = 800,
         const shp channel      = std::vector<int64_t>{ 256, 64, 16, 4, 1 }
     ) {
