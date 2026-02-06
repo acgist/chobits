@@ -9,51 +9,14 @@
 
 #include "torch/torch.h"
 
-class ChobitsImpl : public torch::nn::Module {
-
-friend chobits::model::Trainer;
-
-private:
-    chobits::nn::AudioHeadBlock  audio{ nullptr };
-    chobits::nn::VideoHeadBlock  video{ nullptr };
-    chobits::nn::ImageHeadBlock  image{ nullptr };
-    chobits::nn::MediaMixerBlock mixer{ nullptr };
-    chobits::nn::AudioTailBlock  tail { nullptr };
-
-public:
-    ChobitsImpl() {
-    }
-    ~ChobitsImpl() {
-    }
-
-public:
-    void define() {
-        this->audio = this->register_module("audio", chobits::nn::AudioHeadBlock ());
-        this->video = this->register_module("video", chobits::nn::VideoHeadBlock ());
-        this->image = this->register_module("image", chobits::nn::ImageHeadBlock ());
-        this->mixer = this->register_module("mixer", chobits::nn::MediaMixerBlock());
-        this->tail  = this->register_module("tail",  chobits::nn::AudioTailBlock ());
-    }
-    torch::Tensor forward(const torch::Tensor& audio, const torch::Tensor& video) {
-        auto audio_out = this->audio->forward(audio);
-        auto video_out = this->video->forward(video.select(2,  0));
-        auto image_out = this->image->forward(video.select(1, -1));
-        auto mixer_out = this->mixer->forward(audio_out, video_out, image_out);
-        return this->tail->forward(mixer_out);
-    }
-
-};
-
-TORCH_MODULE(Chobits);
-
 struct TrainerState {
-    float learning_rate  = 0.0001;
+    float learning_rate  = 0.00003;
     float clip_grad_norm = 10.0;
-    Chobits           model  = nullptr;
-    torch::DeviceType device = torch::cuda::is_available() ? torch::DeviceType::CUDA : torch::DeviceType::CPU;
+    chobits::nn::Chobits model  = nullptr;
+    torch::DeviceType    device = torch::cuda::is_available() ? torch::DeviceType::CUDA : torch::DeviceType::CPU;
 };
 
-static TrainerState trainer_state{};
+static TrainerState trainer_state{ };
 
 bool chobits::model::Trainer::save(const std::string& path, bool train) {
     if(!trainer_state.model) {
@@ -73,8 +36,7 @@ bool chobits::model::Trainer::save(const std::string& path, bool train) {
 }
 
 bool chobits::model::Trainer::load(const std::string& path, bool train) {
-    trainer_state.model = Chobits();
-    trainer_state.model->define();
+    trainer_state.model = chobits::nn::Chobits();
     if(std::filesystem::exists(path)) {
         try {
             std::printf("加载模型：%s\n", path.c_str());
