@@ -42,6 +42,7 @@ class RoPE(nn.Module):
         query: torch.Tensor,
         key  : torch.Tensor,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
+        # [ S, N, L ] -> [ S, N, H, L ] -> [ N, H, S, L ]
         q = query.view(query.size(0), query.size(1), self.num_heads, self.dim).permute(1, 2, 0, 3)
         k = key  .view(key  .size(0), key  .size(1), self.num_heads, self.dim).permute(1, 2, 0, 3)
         cos = self.cos_cached[:, :, :q.size(2), :].expand_as(q)
@@ -50,6 +51,7 @@ class RoPE(nn.Module):
         k_rotated = self.rotate_half(k)
         q_embed = (q * cos) + (q_rotated * sin)
         k_embed = (k * cos) + (k_rotated * sin)
+        # [ N, H, S, L ] -> [ S, N, H, L ] -> [ S, N, L ]
         return (
             q_embed.permute(2, 0, 1, 3).view(query.size(0), query.size(1), -1),
             k_embed.permute(2, 0, 1, 3).view(key  .size(0), key  .size(1), -1)

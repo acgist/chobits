@@ -74,6 +74,7 @@ public:
         const torch::Tensor& query,
         const torch::Tensor& key
     ) {
+        // [ S, N, L ] -> [ S, N, H, L ] -> [ N, H, S, L ]
         auto q = query.view({ query.size(0), query.size(1), this->num_heads, this->embed_dim }).permute({ 1, 2, 0, 3 });
         auto k = key  .view({ key  .size(0), key  .size(1), this->num_heads, this->embed_dim }).permute({ 1, 2, 0, 3 });
         auto cos = this->cos_cached.index({ torch::indexing::Slice(), torch::indexing::Slice(), torch::indexing::Slice(0, q.size(2)), torch::indexing::Slice() }).expand_as(q);
@@ -82,6 +83,7 @@ public:
         auto k_rotated = this->rotate_half(k);
         auto q_embed = (q * cos) + (q_rotated * sin);
         auto k_embed = (k * cos) + (k_rotated * sin);
+        // [ N, H, S, L ] -> [ S, N, H, L ] -> [ S, N, L ]
         return std::make_tuple(
             q_embed.permute({ 2, 0, 1, 3 }).view({ query.size(0), query.size(1), -1 }),
             k_embed.permute({ 2, 0, 1, 3 }).view({ key  .size(0), key  .size(1), -1 })
@@ -417,9 +419,9 @@ public:
         this->audio_vit_s = this->register_module("audio_vit_s", chobits::nn::ViT(32, 256, std::vector<int64_t>{  2,  2 }, std::vector<int64_t>{  2,  2 },  11, 201));
         this->audio_vit_l = this->register_module("audio_vit_l", chobits::nn::ViT(32, 256, std::vector<int64_t>{  5,  5 }, std::vector<int64_t>{  2,  2 },  11, 201, std::vector<int64_t>{  1,  1 }));
         this->video_vit_s = this->register_module("video_vit_s", chobits::nn::ViT(32, 256, std::vector<int64_t>{ 20, 20 }, std::vector<int64_t>{ 20, 20 }, 360, 640));
-        this->video_vit_l = this->register_module("video_vit_l", chobits::nn::ViT(32, 256, std::vector<int64_t>{ 40, 40 }, std::vector<int64_t>{ 40, 40 }, 360, 640, std::vector<int64_t>{ 10, 10 }));
+        this->video_vit_l = this->register_module("video_vit_l", chobits::nn::ViT(32, 256, std::vector<int64_t>{ 40, 40 }, std::vector<int64_t>{ 20, 20 }, 360, 640, std::vector<int64_t>{ 10, 10 }));
         this->image_vit_s = this->register_module("image_vit_s", chobits::nn::ViT( 3, 256, std::vector<int64_t>{ 20, 20 }, std::vector<int64_t>{ 20, 20 }, 360, 640));
-        this->image_vit_l = this->register_module("image_vit_l", chobits::nn::ViT( 3, 256, std::vector<int64_t>{ 40, 40 }, std::vector<int64_t>{ 40, 40 }, 360, 640, std::vector<int64_t>{ 10, 10 }));
+        this->image_vit_l = this->register_module("image_vit_l", chobits::nn::ViT( 3, 256, std::vector<int64_t>{ 40, 40 }, std::vector<int64_t>{ 20, 20 }, 360, 640, std::vector<int64_t>{ 10, 10 }));
         this->audio_mixer = this->register_module("audio_mixer", chobits::nn::Mixer(256, 256, 500));
         this->video_mixer = this->register_module("video_mixer", chobits::nn::Mixer(256, 256, 576));
         this->image_mixer = this->register_module("image_mixer", chobits::nn::Mixer(256, 256, 576));

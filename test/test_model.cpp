@@ -135,8 +135,8 @@ int main() {
         // test_mixer();
         // test_muxer();
         // test_talk();
-        test_chobits();
-        // test_eval();
+        // test_chobits();
+        test_eval();
     } catch(const std::exception& e) {
         std::printf("异常内容：%s", e.what());
     }
