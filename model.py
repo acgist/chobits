@@ -177,27 +177,30 @@ class Muxer(nn.Module):
 class Talk(nn.Module):
     def __init__(
         self,
-        in_features : int       = 1024,
-        out_features: int       = 800,
-        channels    : List[int] = [ 256, 16, 1 ],
+        h_seq_len : int = 1,
+        i_features: int = 1024,
+        o_features: int = 800,
+        num_heads : int = 8,
     ):
         super().__init__()
-        self.talk = nn.Sequential(
-            nn.Conv1d(channels[0], channels[1], 3),
+        h_dim = i_features * 2
+        self.h_seq_len = h_seq_len
+        self.embed = nn.Parameter(torch.zeros(1, h_seq_len, i_features))
+        self.mha   = MHA(i_features, i_features, i_features, i_features, h_dim, num_heads)
+        self.talk  = nn.Sequential(
+            nn.Linear(i_features, o_features * 2),
             Activation(),
-            nn.Conv1d(channels[1], channels[2], 3),
-            nn.Flatten(start_dim = 1),
-            Activation(),
-            nn.Linear(in_features - 2 * 2, out_features),
-            Activation(),
-            nn.Linear(out_features, out_features),
+            nn.Linear(o_features * 2, o_features),
         )
 
     def forward(
         self,
         input: torch.Tensor
     ) -> torch.Tensor:
-        return torch.tanh(self.talk(input))
+        out = torch.cat((self.embed.expand(input.size(0), -1, -1), input), dim = 1)
+        out = self.mha(out, out, out)
+        out = out[:, 0:self.h_seq_len, :].flatten(1)
+        return torch.tanh(self.talk(out))
     
 class Chobits(nn.Module):
     def __init__(self):

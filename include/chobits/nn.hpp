@@ -273,23 +273,25 @@ TORCH_MODULE(Muxer);
 class TalkImpl : public torch::nn::Module {
 
 private:
+    int64_t h_seq_len = 0;
+    torch::Tensor        embed{ nullptr };
+    chobits::nn::MHA     mha  { nullptr };
     torch::nn::Sequential talk{ nullptr };
 
 public:
     TalkImpl(
-        const int64_t in_features  = 1024,
-        const int64_t out_features = 800,
-        const shape_t channel      = std::vector<int64_t>{ 256, 16, 1 }
-    ) {
-        this->talk = this->register_module("talk", torch::nn::Sequential(
-            torch::nn::Conv1d(torch::nn::Conv1dOptions(channel[0], channel[1], 3)),
+        const int64_t h_seq_len  = 1,
+        const int64_t i_features = 1024,
+        const int64_t o_features = 800,
+        const int64_t num_heads  = 8
+    ) :h_seq_len(h_seq_len) {
+        const int64_t h_dim = i_features * 2;
+        this->embed = this->register_parameter("embed", torch::zeros({ 1, h_seq_len, i_features }));
+        this->mha   = this->register_module   ("mha",   chobits::nn::MHA(i_features, i_features, i_features, i_features, h_dim, num_heads));
+        this->talk  = this->register_module   ("talk",  torch::nn::Sequential(
+            torch::nn::Linear(i_features, o_features * 2),
             chobits::nn::Activation(),
-            torch::nn::Conv1d(torch::nn::Conv1dOptions(channel[1], channel[2], 3)),
-            torch::nn::Flatten(torch::nn::FlattenOptions().start_dim(1)),
-            chobits::nn::Activation(),
-            torch::nn::Linear(in_features - 2 * 2, out_features),
-            chobits::nn::Activation(),
-            torch::nn::Linear(out_features, out_features)
+            torch::nn::Linear(o_features * 2, o_features)
         ));
     }
 
@@ -297,7 +299,10 @@ public:
     torch::Tensor forward(
         const torch::Tensor& input
     ) {
-        return torch::tanh(this->talk->forward(input));
+        auto out = torch::cat({ this->embed.expand({ input.size(0), -1, -1 }), input }, 1);
+             out = this->mha->forward(out, out, out);
+             out = out.index({ torch::indexing::Slice(), torch::indexing::Slice(0, this->h_seq_len), torch::indexing::Slice() });
+        return torch::tanh(this->talk->forward(out));
     }
 
 };
