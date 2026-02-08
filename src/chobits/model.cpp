@@ -142,7 +142,7 @@ void chobits::model::Trainer::info() {
     for(const auto& parameter : trainer_state.model->named_parameters()) {
         ++layer_size;
         total_numel += parameter.value().numel();
-        std::printf("模型参数数量：%32s = %" PRId64 "\n", parameter.key().c_str(), parameter.value().numel());
+        std::printf("模型参数数量：%64s = %" PRId64 "\n", parameter.key().c_str(), parameter.value().numel());
     }
     std::printf("模型层数总量：%d\n", layer_size);
     std::printf("模型参数总量：%" PRId64 "\n", total_numel);

@@ -10,23 +10,11 @@ static void info(std::shared_ptr<torch::nn::Module> layer) {
     int64_t total_numel = 0;
     for(const auto& parameter : layer->named_parameters()) {
         ++layer_size;
-        std::printf("参数数量：%32s = %" PRId64 "\n", parameter.key().c_str(), parameter.value().numel());
+        std::printf("参数数量：%64s = %" PRId64 "\n", parameter.key().c_str(), parameter.value().numel());
         total_numel += parameter.value().numel();
     }
     std::printf("层数总量：%d\n", layer_size);
     std::printf("参数总量：%" PRId64 "\n", total_numel);
-}
-
-[[maybe_unused]] static void test_rope() {
-    torch::NoGradGuard no_grad_guard;
-    chobits::nn::RoPE layer(512 / 8, 8, 256);
-    info(layer.ptr());
-    auto [ q, k ] = layer->forward(
-        torch::randn({ 10, 256, 512 }),
-        torch::randn({ 10, 256, 512 })
-    );
-    std::cout << q.sizes() << std::endl;
-    std::cout << k.sizes() << std::endl;
 }
 
 [[maybe_unused]] static void test_expert() {
@@ -59,20 +47,13 @@ static void info(std::shared_ptr<torch::nn::Module> layer) {
 
 [[maybe_unused]] static void test_vit() {
     torch::NoGradGuard no_grad_guard;
-    chobits::nn::ViT layer(32, 256, std::vector<int64_t>{ 20, 20 }, std::vector<int64_t>{ 20, 20 }, 360, 640);
-    info(layer.ptr());
-    auto output = layer->forward(torch::randn({ 10, 32, 360, 640 }));
-    std::cout << output.sizes() << std::endl;
-}
-
-[[maybe_unused]] static void test_mixer() {
-    torch::NoGradGuard no_grad_guard;
-    chobits::nn::Mixer layer(256, 256, 576);
-    info(layer.ptr());
-    auto output = layer->forward(
-        torch::randn({ 10, 576, 256 }),
-        torch::randn({ 10, 576, 256 })
+    chobits::nn::ViT layer(
+        11, 201, 32, 256, 256, std::vector<int64_t>{ 2, 2 },
+        std::vector<int64_t>{ 2, 2 }, std::vector<int64_t>{ 5, 5 },
+        std::vector<int64_t>{ 0, 0 }, std::vector<int64_t>{ 1, 1 }
     );
+    info(layer.ptr());
+    auto output = layer->forward(torch::randn({ 10, 32, 11, 201 }));
     std::cout << output.sizes() << std::endl;
 }
 
@@ -127,12 +108,10 @@ static void info(std::shared_ptr<torch::nn::Module> layer) {
 
 int main() {
     try {
-        // test_rope();
         // test_expert();
         // test_moe();
         // test_mha();
         // test_vit();
-        // test_mixer();
         // test_muxer();
         // test_talk();
         // test_chobits();
