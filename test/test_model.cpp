@@ -48,7 +48,8 @@ static void info(std::shared_ptr<torch::nn::Module> layer) {
 [[maybe_unused]] static void test_vit() {
     torch::NoGradGuard no_grad_guard;
     chobits::nn::ViT layer(
-        11, 201, 32, 256, 256, std::vector<int64_t>{ 2, 2 },
+        11, 201, 32, 256, 256,
+        std::vector<int64_t>{ 2, 2 },
         std::vector<int64_t>{ 2, 2 }, std::vector<int64_t>{ 5, 5 },
         std::vector<int64_t>{ 0, 0 }, std::vector<int64_t>{ 1, 1 }
     );
@@ -114,8 +115,8 @@ int main() {
         // test_vit();
         // test_muxer();
         // test_talk();
-        // test_chobits();
-        test_eval();
+        test_chobits();
+        // test_eval();
     } catch(const std::exception& e) {
         std::printf("异常内容：%s", e.what());
     }

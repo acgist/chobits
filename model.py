@@ -56,7 +56,9 @@ class MoE(nn.Module):
         final_output = weighted_expert_outs.sum(dim = 1)
         return final_output.view(input.shape)
 
-# MHA MQA GQA MLA
+"""
+MHA MQA GQA MLA
+"""
 class MHA(nn.Module):
     def __init__(
         self,
@@ -144,15 +146,14 @@ class Muxer(nn.Module):
         video_in : int = 512,
         image_in : int = 512,
         num_heads: int = 8,
-        h_dim    : int = 1024,
     ):
         super().__init__()
         muxer_in = audio_in + video_in
-        self.audio_mha = MHA(audio_in, video_in, video_in, audio_in, h_dim, num_heads)
-        self.video_mha = MHA(video_in, audio_in, audio_in, video_in, h_dim, num_heads)
-        self.muxer_mha = MHA(muxer_in, image_in, image_in, muxer_in, h_dim, num_heads)
-        self.mixer_mha = MHA(muxer_in, muxer_in, muxer_in, muxer_in, h_dim, num_heads)
-        self.muxer_ffn = Expert(muxer_in)
+        self.audio_mha = MHA(audio_in, video_in, video_in, audio_in, audio_in * 2, num_heads)
+        self.video_mha = MHA(video_in, audio_in, audio_in, video_in, video_in * 2, num_heads)
+        self.muxer_mha = MHA(muxer_in, muxer_in, muxer_in, muxer_in, muxer_in * 2, num_heads)
+        self.media_mha = MHA(muxer_in, image_in, image_in, muxer_in, muxer_in * 2, num_heads)
+        self.mixer_mha = MHA(muxer_in, muxer_in, muxer_in, muxer_in, muxer_in * 2, num_heads)
 
     def forward(
         self,
@@ -163,15 +164,14 @@ class Muxer(nn.Module):
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         audio_o = self.audio_mha(audio, video, video)
         video_o = self.video_mha(video, audio, audio)
-        muxer_c = self.muxer_ffn(torch.cat([ audio_o, video_o ], dim = -1))
-        muxer_o = self.muxer_mha(muxer_c, image, image)
+        muxer_c = torch.cat([ audio_o, video_o ], dim = -1)
+        muxer_o = self.muxer_mha(muxer_c, muxer_c, muxer_c)
+        media_o = self.media_mha(muxer_o, image,   image  )
         if muxer is None:
-            mixer_o = self.mixer_mha(muxer_o, muxer_o, muxer_o)
+            mixer_o = self.mixer_mha(media_o, media_o, media_o)
             return (audio_o, video_o, mixer_o)
         else:
-            mixer_o = self.mixer_mha(muxer,   muxer_o, muxer_o)
-#           mixer_o = self.mixer_mha(muxer_o, muxer,   muxer  )
-#           mixer_o = self.mixer_mha(muxer_o, muxer_o, muxer_o) + muxer
+            mixer_o = self.mixer_mha(media_o, media_o, media_o) + muxer
             return (audio_o, video_o, mixer_o)
 
 class Talk(nn.Module):
@@ -195,7 +195,7 @@ class Talk(nn.Module):
 
     def forward(
         self,
-        input: torch.Tensor
+        input: torch.Tensor,
     ) -> torch.Tensor:
         out = torch.cat((self.embed.expand(input.size(0), -1, -1), input), dim = 1)
         out = self.mha(out, out, out)
@@ -210,17 +210,20 @@ class Chobits(nn.Module):
         self.win_length = 400
         self.window = torch.hann_window(self.win_length)
         self.audio_vit = ViT(
-            11, 201, 32, 256, 256, [ 2, 2 ],
+            11, 201, 32, 256, 256,
+            [ 2, 2 ],
             [ 2, 2 ], [ 5, 5 ],
             [ 0, 0 ], [ 1, 1 ],
         )
         self.video_vit = ViT(
-            360, 640, 32, 256, 256, [ 20, 20 ],
+            360, 640, 32, 256, 256,
+            [ 20, 20 ],
             [ 20, 20 ], [ 40, 40 ],
             [  0,  0 ], [ 10, 10 ],
         )
         self.image_vit = ViT(
-            360, 640, 3, 256, 256, [ 20, 20 ],
+            360, 640, 3, 256, 256,
+            [ 20, 20 ],
             [ 20, 20 ], [ 40, 40 ],
             [  0,  0 ], [ 10, 10 ],
         )
@@ -274,7 +277,8 @@ class Chobits(nn.Module):
 # print(model(*input).shape)
 
 # model = ViT(
-#     11, 201, 32, 256, 256, [ 2, 2 ],
+#     11, 201, 32, 256, 256,
+#     [ 2, 2 ],
 #     [ 2, 2 ], [ 5, 5 ],
 #     [ 0, 0 ], [ 1, 1 ],
 # )

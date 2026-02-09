@@ -106,17 +106,19 @@ public:
 
 TORCH_MODULE(MoE);
 
-// MHA MQA GQA MLA
+/**
+ * MHA MQA GQA MLA
+ */
 class MHAImpl : public torch::nn::Module {
 
 private:
-    torch::nn::Linear             q     { nullptr };
-    torch::nn::Linear             k     { nullptr };
-    torch::nn::Linear             v     { nullptr };
-    torch::nn::MultiheadAttention attn  { nullptr };
-    torch::nn::Linear             proj  { nullptr };
-    chobits::nn::MoE              ffn   { nullptr };
-//  chobits::nn::Expert           ffn   { nullptr };
+    torch::nn::Linear             q    { nullptr };
+    torch::nn::Linear             k    { nullptr };
+    torch::nn::Linear             v    { nullptr };
+    torch::nn::MultiheadAttention attn { nullptr };
+    torch::nn::Linear             proj { nullptr };
+    chobits::nn::MoE              ffn  { nullptr };
+//  chobits::nn::Expert           ffn  { nullptr };
     torch::nn::LayerNorm          norm1{ nullptr };
     torch::nn::LayerNorm          norm2{ nullptr };
 
@@ -151,9 +153,9 @@ public:
         auto k = this->k->forward(key  .transpose(0, 1));
         auto v = this->v->forward(value.transpose(0, 1));
         auto [ o, _ ] = this->attn->forward(q, k, v);
-        o = query + this->proj->forward(o.transpose(0, 1));
-        o = this->norm1->forward(o);
-        o = o + this->ffn->forward(o);
+             o = query + this->proj->forward(o.transpose(0, 1));
+             o = this->norm1->forward(o);
+             o = o + this->ffn->forward(o);
         return this->norm2->forward(o);
     }
 
@@ -221,26 +223,25 @@ TORCH_MODULE(ViT);
 class MuxerImpl : public torch::nn::Module {
 
 private:
-    chobits::nn::MHA    audio_mha{ nullptr };
-    chobits::nn::MHA    video_mha{ nullptr };
-    chobits::nn::MHA    muxer_mha{ nullptr };
-    chobits::nn::MHA    mixer_mha{ nullptr };
-    chobits::nn::Expert muxer_ffn{ nullptr };
+    chobits::nn::MHA audio_mha{ nullptr };
+    chobits::nn::MHA video_mha{ nullptr };
+    chobits::nn::MHA muxer_mha{ nullptr };
+    chobits::nn::MHA media_mha{ nullptr };
+    chobits::nn::MHA mixer_mha{ nullptr };
 
 public:
     MuxerImpl(
         const int64_t audio_in  = 512,
         const int64_t video_in  = 512,
         const int64_t image_in  = 512,
-        const int64_t num_heads = 8,
-        const int64_t h_dim     = 1024
+        const int64_t num_heads = 8
     ) {
         const int64_t muxer_in = audio_in + video_in;
-        this->audio_mha = this->register_module("audio_mha", chobits::nn::MHA(audio_in, video_in, video_in, audio_in, h_dim, num_heads));
-        this->video_mha = this->register_module("video_mha", chobits::nn::MHA(video_in, audio_in, audio_in, video_in, h_dim, num_heads));
-        this->muxer_mha = this->register_module("muxer_mha", chobits::nn::MHA(muxer_in, image_in, image_in, muxer_in, h_dim, num_heads));
-        this->mixer_mha = this->register_module("mixer_mha", chobits::nn::MHA(muxer_in, muxer_in, muxer_in, muxer_in, h_dim, num_heads));
-        this->muxer_ffn = this->register_module("muxer_ffn", chobits::nn::Expert(muxer_in));
+        this->audio_mha = this->register_module("audio_mha", chobits::nn::MHA(audio_in, video_in, video_in, audio_in, audio_in * 2, num_heads));
+        this->video_mha = this->register_module("video_mha", chobits::nn::MHA(video_in, audio_in, audio_in, video_in, video_in * 2, num_heads));
+        this->muxer_mha = this->register_module("muxer_mha", chobits::nn::MHA(muxer_in, muxer_in, muxer_in, muxer_in, muxer_in * 2, num_heads));
+        this->media_mha = this->register_module("media_mha", chobits::nn::MHA(muxer_in, image_in, image_in, muxer_in, muxer_in * 2, num_heads));
+        this->mixer_mha = this->register_module("mixer_mha", chobits::nn::MHA(muxer_in, muxer_in, muxer_in, muxer_in, muxer_in * 2, num_heads));
     }
     
 public:
@@ -252,15 +253,14 @@ public:
     ) {
         auto audio_o = this->audio_mha->forward(audio, video, video);
         auto video_o = this->video_mha->forward(video, audio, audio);
-        auto muxer_c = this->muxer_ffn->forward(torch::cat({ audio_o, video_o }, -1));
-        auto muxer_o = this->muxer_mha->forward(muxer_c, image, image);
+        auto muxer_c = torch::cat({ audio_o, video_o }, -1);
+        auto muxer_o = this->muxer_mha->forward(muxer_c, muxer_c, muxer_c);
+        auto media_o = this->media_mha->forward(muxer_o, image,   image  );
         if(!muxer.defined()) {
-            auto mixer_o = this->mixer_mha->forward(muxer_o, muxer_o, muxer_o);
+            auto mixer_o = this->mixer_mha->forward(media_o, media_o, media_o);
             return { audio_o, video_o, mixer_o };
         } else {
-            auto mixer_o = this->mixer_mha->forward(muxer,   muxer_o, muxer_o);
-//          auto mixer_o = this->mixer_mha->forward(muxer_o, muxer,   muxer  );
-//          auto mixer_o = this->mixer_mha->forward(muxer_o, muxer_o, muxer_o) + muxer;
+            auto mixer_o = this->mixer_mha->forward(media_o, media_o, media_o) + muxer;
             return { audio_o, video_o, mixer_o };
         }
     }
@@ -301,7 +301,7 @@ public:
     ) {
         auto out = torch::cat({ this->embed.expand({ input.size(0), -1, -1 }), input }, 1);
              out = this->mha->forward(out, out, out);
-             out = out.index({ torch::indexing::Slice(), torch::indexing::Slice(0, this->h_seq_len), torch::indexing::Slice() });
+             out = out.index({ torch::indexing::Slice(), torch::indexing::Slice(0, this->h_seq_len), torch::indexing::Slice() }).flatten(1);
         return torch::tanh(this->talk->forward(out));
     }
 
@@ -327,17 +327,20 @@ private:
 public:
     ChobitsImpl() {
         this->audio_vit = this->register_module("audio_vit", chobits::nn::ViT(
-            11, 201, 32, 256, 256, std::vector<int64_t>{ 2, 2 },
+            11, 201, 32, 256, 256,
+            std::vector<int64_t>{ 2, 2 },
             std::vector<int64_t>{ 2, 2 }, std::vector<int64_t>{ 5, 5 },
             std::vector<int64_t>{ 0, 0 }, std::vector<int64_t>{ 1, 1 }
         ));
         this->video_vit = this->register_module("video_vit", chobits::nn::ViT(
-            360, 640, 32, 256, 256, std::vector<int64_t>{ 20, 20 },
+            360, 640, 32, 256, 256,
+            std::vector<int64_t>{ 20, 20 },
             std::vector<int64_t>{ 20, 20 }, std::vector<int64_t>{ 40, 40 },
             std::vector<int64_t>{  0,  0 }, std::vector<int64_t>{ 10, 10 }
         ));
         this->image_vit = this->register_module("image_vit", chobits::nn::ViT(
-            360, 640, 3, 256, 256, std::vector<int64_t>{ 20, 20 },
+            360, 640, 3, 256, 256,
+            std::vector<int64_t>{ 20, 20 },
             std::vector<int64_t>{ 20, 20 }, std::vector<int64_t>{ 40, 40 },
             std::vector<int64_t>{  0,  0 }, std::vector<int64_t>{ 10, 10 }
         ));

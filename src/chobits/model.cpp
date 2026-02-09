@@ -10,7 +10,7 @@
 #include "torch/torch.h"
 
 struct TrainerState {
-    float learning_rate  = 0.00003;
+    float learning_rate  = 0.0003;
     float clip_grad_norm = 10.0;
     chobits::nn::Chobits model  = nullptr;
     torch::DeviceType    device = torch::cuda::is_available() ? torch::DeviceType::CUDA : torch::DeviceType::CPU;
