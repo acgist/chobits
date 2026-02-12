@@ -81,6 +81,21 @@ void chobits::model::Trainer::train() {
                 loss_val   = 0.0;
                 time_point = std::chrono::system_clock::now();
             }
+            if(epoch % 100) {
+                trainer_state.audio.index({ torch::indexing::Slice(), torch::indexing::Slice(1, torch::indexing::None, chobits::batch_thread), torch::indexing::Slice() }).fill_(0.0);
+                trainer_state.video.index({ torch::indexing::Slice(), torch::indexing::Slice(1, torch::indexing::None, chobits::batch_thread), torch::indexing::Slice() }).fill_(0.0);
+                trainer_state.image.index({ torch::indexing::Slice(), torch::indexing::Slice(1, torch::indexing::None, chobits::batch_thread), torch::indexing::Slice() }).fill_(0.0);
+            }
+            if(epoch % 1000) {
+                trainer_state.audio.index({ torch::indexing::Slice(), torch::indexing::Slice(2, torch::indexing::None, chobits::batch_thread), torch::indexing::Slice() }).fill_(0.0);
+                trainer_state.video.index({ torch::indexing::Slice(), torch::indexing::Slice(2, torch::indexing::None, chobits::batch_thread), torch::indexing::Slice() }).fill_(0.0);
+                trainer_state.image.index({ torch::indexing::Slice(), torch::indexing::Slice(2, torch::indexing::None, chobits::batch_thread), torch::indexing::Slice() }).fill_(0.0);
+            }
+            if(epoch % 10000) {
+                trainer_state.audio.index({ torch::indexing::Slice(), torch::indexing::Slice(3, torch::indexing::None, chobits::batch_thread), torch::indexing::Slice() }).fill_(0.0);
+                trainer_state.video.index({ torch::indexing::Slice(), torch::indexing::Slice(3, torch::indexing::None, chobits::batch_thread), torch::indexing::Slice() }).fill_(0.0);
+                trainer_state.image.index({ torch::indexing::Slice(), torch::indexing::Slice(3, torch::indexing::None, chobits::batch_thread), torch::indexing::Slice() }).fill_(0.0);
+            }
             if(epoch % per_ck_epoch == 0) {
                 scheduler.step();
                 this->save("chobits." + std::to_string(epoch / per_ck_epoch % 10) + ".ckpt", true);

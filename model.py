@@ -148,8 +148,7 @@ class ViT(nn.Module):
         out = torch.cat([ input_s, input_l ], dim = -1)
         out = out + self.pos_embed
         out = self.norm(out)
-        out = self.mha(memory, out, out)
-        return out
+        return self.mha(memory, out, out)
 
 """
 音频视频作为动作传入

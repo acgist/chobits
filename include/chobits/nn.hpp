@@ -223,8 +223,7 @@ public:
         auto out = torch::cat({ input_s, input_l }, -1);
              out = out + this->pos_embed;
              out = this->norm->forward(out);
-             out = this->mha->forward(memory, out, out);
-        return out;
+        return this->mha->forward(memory, out, out);
     }
 
 };
