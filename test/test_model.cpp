@@ -48,27 +48,32 @@ static void info(std::shared_ptr<torch::nn::Module> layer) {
 [[maybe_unused]] static void test_vit() {
     torch::NoGradGuard no_grad_guard;
     chobits::nn::ViT layer(
-        11, 201, 32, 256, 256,
+        11, 201, 32, 128,
         std::vector<int64_t>{ 2, 2 },
         std::vector<int64_t>{ 2, 2 }, std::vector<int64_t>{ 5, 5 },
         std::vector<int64_t>{ 0, 0 }, std::vector<int64_t>{ 1, 1 }
     );
     info(layer.ptr());
-    auto output = layer->forward(torch::randn({ 10, 32, 11, 201 }));
+    auto output = layer->forward(
+        torch::randn({ 10, 32, 11, 201 }),
+        torch::randn({ 10, 128, 256 })
+    );
     std::cout << output.sizes() << std::endl;
 }
 
-[[maybe_unused]] static void test_muxer() {
+[[maybe_unused]] static void test_mixer() {
     torch::NoGradGuard no_grad_guard;
-    chobits::nn::Muxer layer;
+    chobits::nn::Mixer layer;
     info(layer.ptr());
-    auto [ audio, video, muxer ] = layer->forward(
+    auto [ audio, video, image, muxer ] = layer->forward(
+        torch::randn({ 10, 256, 256 }),
         torch::randn({ 10, 256, 512 }),
         torch::randn({ 10, 256, 512 }),
-        torch::randn({ 10, 256, 512 })
+        torch::randn({ 10, 128, 768 })
     );
     std::cout << audio.sizes() << std::endl;
     std::cout << video.sizes() << std::endl;
+    std::cout << image.sizes() << std::endl;
     std::cout << muxer.sizes() << std::endl;
 }
 
@@ -76,7 +81,7 @@ static void info(std::shared_ptr<torch::nn::Module> layer) {
     torch::NoGradGuard no_grad_guard;
     chobits::nn::Talk layer;
     info(layer.ptr());
-    auto output = layer->forward(torch::randn({ 10, 256, 1024 }));
+    auto output = layer->forward(torch::randn({ 10, 256, 768 }));
     std::cout << output.sizes() << std::endl;
 }
 
@@ -84,16 +89,21 @@ static void info(std::shared_ptr<torch::nn::Module> layer) {
     torch::NoGradGuard no_grad_guard;
     chobits::nn::Chobits layer;
     info(layer.ptr());
-    auto output = layer->forward(
+    auto [ audio, video, image, muxer ] = layer->forward(
         torch::randn({ 10, 32, 800 }),
-        torch::randn({ 10, 32, 3, 360, 640 })
+        torch::randn({ 10, 32, 3, 360, 640 }),
+        torch::randn({ 10, 256, 256 }),
+        torch::randn({ 10, 256, 512 }),
+        torch::randn({ 10, 256, 512 })
     );
-    std::cout << output.sizes() << std::endl;
+    std::cout << audio.sizes() << std::endl;
+    std::cout << video.sizes() << std::endl;
+    std::cout << image.sizes() << std::endl;
+    std::cout << muxer.sizes() << std::endl;
 }
 
 [[maybe_unused]] static void test_eval() {
-    chobits::mode_save    = true;
-    chobits::batch_thread = 1;
+    chobits::mode_save = true;
     std::thread media_thread([]() {
         #if _WIN32
         chobits::media::open_file("D:/tmp/video.mp4");
@@ -113,10 +123,10 @@ int main() {
         // test_moe();
         // test_mha();
         // test_vit();
-        // test_muxer();
+        // test_mixer();
         // test_talk();
-        test_chobits();
-        // test_eval();
+        // test_chobits();
+        test_eval();
     } catch(const std::exception& e) {
         std::printf("异常内容：%s", e.what());
     }

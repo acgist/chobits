@@ -10,10 +10,13 @@
 #include "torch/torch.h"
 
 struct TrainerState {
-    float learning_rate  = 0.0003;
+    float learning_rate  = 0.0001;
     float clip_grad_norm = 10.0;
-    chobits::nn::Chobits model  = nullptr;
+    torch::Tensor audio{ nullptr };
+    torch::Tensor video{ nullptr };
+    torch::Tensor image{ nullptr };
     torch::DeviceType    device = torch::cuda::is_available() ? torch::DeviceType::CUDA : torch::DeviceType::CPU;
+    chobits::nn::Chobits model  = nullptr;
 };
 
 static TrainerState trainer_state{ };
@@ -45,6 +48,9 @@ bool chobits::model::Trainer::load(const std::string& path, bool train) {
             std::printf("加载模型失败：%s\n", e.what());
         }
     }
+    trainer_state.audio = torch::zeros({ chobits::batch_size, 256, 256 }).to(trainer_state.device);
+    trainer_state.video = torch::zeros({ chobits::batch_size, 256, 512 }).to(trainer_state.device);
+    trainer_state.image = torch::zeros({ chobits::batch_size, 256, 512 }).to(trainer_state.device);
     trainer_state.model->to(trainer_state.device);
     if(train) {
         trainer_state.model->train();
@@ -59,7 +65,7 @@ void chobits::model::Trainer::train() {
     try {
         trainer_state.model->train();
         auto optimizer  = torch::optim::AdamW(trainer_state.model->parameters(), trainer_state.learning_rate);
-        auto scheduler  = torch::optim::StepLR(optimizer, 10, 0.9999);
+        auto scheduler  = torch::optim::StepLR(optimizer, 10, 0.999);
         auto loss_val   = 0.0F;
         auto time_point = std::chrono::system_clock::now();
         static const int per_op_epoch = 50;
@@ -70,13 +76,13 @@ void chobits::model::Trainer::train() {
                 // torch::nn::utils::clip_grad_norm_(trainer_state.model->parameters(), trainer_state.clip_grad_norm);
                 optimizer.step();
                 optimizer.zero_grad();
-                scheduler.step();
                 auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now() - time_point).count();
                 std::printf("轮次：%" PRIu64 " 损失：%.6f 耗时：%" PRId64 "\n", epoch, loss_val / per_op_epoch, duration);
                 loss_val   = 0.0;
                 time_point = std::chrono::system_clock::now();
             }
             if(epoch % per_ck_epoch == 0) {
+                scheduler.step();
                 this->save("chobits." + std::to_string(epoch / per_ck_epoch % 10) + ".ckpt", true);
             }
         }
@@ -88,7 +94,6 @@ void chobits::model::Trainer::train() {
 }
 
 void chobits::model::Trainer::train(float& loss_val) {
-    // TODO: 预测音频叠加输入还是直接过滤
     auto [success, audio, video, label] = chobits::media::get_data();
     if(!success) {
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
@@ -97,11 +102,14 @@ void chobits::model::Trainer::train(float& loss_val) {
     audio = audio.to(trainer_state.device);
     video = video.to(trainer_state.device);
     label = label.to(trainer_state.device);
-    auto pred = trainer_state.model->forward(audio, video);
+    auto [ audio_m, video_m, image_m, pred ] = trainer_state.model->forward(audio, video, trainer_state.audio, trainer_state.video, trainer_state.image);
+    trainer_state.audio = audio_m;
+    trainer_state.video = video_m;
+    trainer_state.image = image_m;
     auto loss = torch::l1_loss(pred, label);
     loss.backward();
     loss_val += loss.template item<float>();
-    if(chobits::mode_play) {
+    if(chobits::mode_play || chobits::mode_save) {
         torch::NoGradGuard no_grad_guard;
         chobits::media::set_data(pred, video);
     }
@@ -120,8 +128,13 @@ void chobits::model::Trainer::eval() {
             audio = audio.to(trainer_state.device);
             video = video.to(trainer_state.device);
 //          label = label.to(trainer_state.device);
-            auto pred = trainer_state.model->forward(audio, video);
-            chobits::media::set_data(pred, video);
+            auto [ audio_m, video_m, image_m, pred ] = trainer_state.model->forward(audio, video, trainer_state.audio, trainer_state.video, trainer_state.image);
+            trainer_state.audio = audio_m;
+            trainer_state.video = video_m;
+            trainer_state.image = image_m;
+            if(chobits::mode_play || chobits::mode_save) {
+                chobits::media::set_data(pred, video);
+            }
         }
     } catch(const std::exception& e) {
         std::printf("预测异常：%s\n", e.what());

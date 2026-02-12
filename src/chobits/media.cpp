@@ -425,13 +425,15 @@ void chobits::media::set_data(const torch::Tensor& audio, const torch::Tensor& v
     auto audio_tensor = audio.mul(audio_normalization).to(torch::kShort).cpu();
     auto audio_data   = reinterpret_cast<short*>(audio_tensor.data_ptr());
     auto audio_length = audio.size(-1);
-    // video
-    auto video_tensor = video[0][0].permute({ 1, 2, 0 }).contiguous().mul(video_normalization).add(video_normalization).to(torch::kUInt8).cpu();
-    auto video_data   = reinterpret_cast<char*>(video_tensor.data_ptr());
-    auto video_width  = chobits::video_width * 3;
-    // play
-    chobits::player::play_audio(audio_data, audio_length * sizeof(short));
-    chobits::player::play_video(video_data, video_width);
+    if(chobits::mode_play) {
+        // video
+        auto video_tensor = video[0][0].permute({ 1, 2, 0 }).contiguous().mul(video_normalization).add(video_normalization).to(torch::kUInt8).cpu();
+        auto video_data   = reinterpret_cast<char*>(video_tensor.data_ptr());
+        auto video_width  = chobits::video_width * 3;
+        // play
+        chobits::player::play_audio(audio_data, audio_length * sizeof(short));
+        chobits::player::play_video(video_data, video_width);
+    }
     if(chobits::mode_save && chobits::running && stream.is_open()) {
         stream.write(reinterpret_cast<const char*>(audio_data), audio_length * sizeof(short));
     }

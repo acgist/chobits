@@ -18,19 +18,20 @@
         // #if _WIN32
         // chobits::media::open_file("D:/tmp/video.mp4");
         // #else
-        // chobits::media::open_file("video/32429377729-1-192.mp4");
+        // chobits::media::open_file("video.mp4");
         // #endif
         // open_media
         chobits::mode_file = true;
+        chobits::mode_play = true;
         #if _WIN32
         chobits::train_dataset = "D:/tmp/video.mp4";
         #else
-        chobits::train_dataset = "video/32429377729-1-192.mp4";
+        chobits::train_dataset = "video.mp4";
         #endif
         chobits::media::open_media();
     });
     while(chobits::running) {
-        auto [success, audio, video, label] = chobits::media::get_data();
+        auto [ success, audio, video, label ] = chobits::media::get_data();
         std::cout << audio.sizes() << std::endl;
         std::cout << video.sizes() << std::endl;
         std::cout << label.sizes() << std::endl;

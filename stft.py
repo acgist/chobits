@@ -49,14 +49,13 @@ class STFTAudio:
         imag = mag * torch.sin(pha)
         return torch.complex(real, imag)
     
-    def compute_mask(self, stft_mix):
+    def compute_mask(self, stft):
         """掩码计算"""
-        mag_mix, pha_mix = self.mag_pha_decomposition(stft_mix)
-        print(f"mag：{mag_mix.shape} {mag_mix.max()} {mag_mix.min()}")
-        print(f"pha：{pha_mix.shape} {pha_mix.max()} {pha_mix.min()}")
-        pha_mix.fill_(1.0)
-        # return torch.polar(mag_mix, pha_mix)
-        return self.mag_pha_composition(mag_mix, pha_mix)
+        mag, pha = self.mag_pha_decomposition(stft)
+        print(f"mag：{mag.shape} {mag.max()} {mag.min()}")
+        print(f"pha：{pha.shape} {pha.max()} {pha.min()}")
+        # return torch.polar(mag, pha)
+        return self.mag_pha_composition(mag, pha)
     
     def visualize(self, stft, title = "Spectrogram"):
         """可视化频谱图"""
@@ -79,13 +78,13 @@ def main():
     audio = STFTAudio(n_fft = 400, hop_length = 80, win_length = 400)
     waveform, sample_rate = audio.load_audio("D:/tmp/dzht.wav")
     waveform = waveform[:, :80000]
-    # waveform = waveform * 32768.0
+#   waveform = waveform * 32768.0
     print(f"音频数据：{waveform.shape} {sample_rate} {waveform.max()} {waveform.min()}")
-    stft_mix = audio.compute_stft(waveform)
-    audio.visualize(stft_mix)
-    stft_mix = audio.compute_mask(stft_mix)
-    audio.visualize(stft_mix)
-    waveform = audio.compute_istft(stft_mix)
+    stft = audio.compute_stft(waveform)
+    audio.visualize(stft)
+    stft = audio.compute_mask(stft)
+    audio.visualize(stft)
+    waveform = audio.compute_istft(stft)
     print(f"音频数据：{waveform.shape} {sample_rate} {waveform.max()} {waveform.min()}")
     torchaudio.save("D:/tmp/dzht_.wav", waveform, sample_rate)
     print("处理完成")

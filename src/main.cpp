@@ -64,7 +64,7 @@ R"(
     );
     if(argc == 1) {
         chobits::mode_drop = true;
-        chobits::mode_eval = false;
+        chobits::mode_eval = true;
         chobits::mode_file = false;
         chobits::mode_play = true;
     } else {
@@ -84,9 +84,9 @@ R"(
             chobits::mode_eval     = false;
             chobits::mode_file     = true;
             chobits::mode_play     = false;
-            chobits::batch_size    = argc >= 4 ? std::atoi(argv[3]) : 10;
-            chobits::batch_thread  = argc >= 5 ? std::atoi(argv[4]) :  4;
-            chobits::train_epoch   = argc >= 3 ? std::atoi(argv[2]) : 10;
+            chobits::batch_size    = argc >= 4 ? std::atoi(argv[3]) : 4;
+            chobits::batch_thread  = argc >= 5 ? std::atoi(argv[4]) : 4;
+            chobits::train_epoch   = argc >= 3 ? std::atoi(argv[2]) : 1;
             chobits::train_dataset = argv[1];
         }
     }
