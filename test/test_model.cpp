@@ -54,10 +54,7 @@ static void info(std::shared_ptr<torch::nn::Module> layer) {
         std::vector<int64_t>{ 0, 0 }, std::vector<int64_t>{ 1, 1 }
     );
     info(layer.ptr());
-    auto output = layer->forward(
-        torch::randn({ 10, 32, 11, 201 }),
-        torch::randn({ 10, 128, 256 })
-    );
+    auto output = layer->forward(torch::randn({ 10, 32, 11, 201 }));
     std::cout << output.sizes() << std::endl;
 }
 
@@ -69,7 +66,7 @@ static void info(std::shared_ptr<torch::nn::Module> layer) {
         torch::randn({ 10, 256, 256 }),
         torch::randn({ 10, 256, 512 }),
         torch::randn({ 10, 256, 512 }),
-        torch::randn({ 10, 128, 768 })
+        torch::randn({ 10, 128, 256 })
     );
     std::cout << audio.sizes() << std::endl;
     std::cout << video.sizes() << std::endl;
@@ -81,7 +78,7 @@ static void info(std::shared_ptr<torch::nn::Module> layer) {
     torch::NoGradGuard no_grad_guard;
     chobits::nn::Talk layer;
     info(layer.ptr());
-    auto output = layer->forward(torch::randn({ 10, 256, 768 }));
+    auto output = layer->forward(torch::randn({ 10, 256, 256 }));
     std::cout << output.sizes() << std::endl;
 }
 
@@ -89,16 +86,12 @@ static void info(std::shared_ptr<torch::nn::Module> layer) {
     torch::NoGradGuard no_grad_guard;
     chobits::nn::Chobits layer;
     info(layer.ptr());
-    auto [ audio, video, image, muxer ] = layer->forward(
+    auto [ memory, muxer ] = layer->forward(
         torch::randn({ 10, 32, 800 }),
         torch::randn({ 10, 32, 3, 360, 640 }),
-        torch::randn({ 10, 256, 256 }),
-        torch::randn({ 10, 256, 512 }),
-        torch::randn({ 10, 256, 512 })
+        torch::randn({ 10, 128, 256 })
     );
-    std::cout << audio.sizes() << std::endl;
-    std::cout << video.sizes() << std::endl;
-    std::cout << image.sizes() << std::endl;
+    std::cout << memory.sizes() << std::endl;
     std::cout << muxer.sizes() << std::endl;
 }
 

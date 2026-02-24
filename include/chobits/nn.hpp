@@ -30,7 +30,7 @@ public:
     torch::Tensor forward(
         const torch::Tensor& input
     ) {
-        return torch::relu(input);
+        return torch::silu(input);
     }
 
 };
@@ -45,13 +45,11 @@ private:
 public:
     ExpertImpl(
         const int64_t embed_dim,
-        const int64_t scale   = 2,
-        const double  dropout = 0.1
+        const int64_t scale = 2
     ) {
         this->fc = this->register_module("fc", torch::nn::Sequential(
             torch::nn::Linear(torch::nn::LinearOptions(embed_dim, embed_dim * scale)),
             chobits::nn::Activation(),
-            torch::nn::Dropout(torch::nn::DropoutOptions(dropout)),
             torch::nn::Linear(torch::nn::LinearOptions(embed_dim * scale, embed_dim))
         ));
     }
@@ -131,13 +129,12 @@ public:
         const int64_t v_dim,
         const int64_t o_dim,
         const int64_t h_dim     = 1024,
-        const int64_t num_heads = 8,
-        const double  dropout   = 0.1
+        const int64_t num_heads = 8
     ) {
         this->q     = this->register_module("q",     torch::nn::Linear(torch::nn::LinearOptions(q_dim, h_dim).bias(false)));
         this->k     = this->register_module("k",     torch::nn::Linear(torch::nn::LinearOptions(k_dim, h_dim).bias(false)));
         this->v     = this->register_module("v",     torch::nn::Linear(torch::nn::LinearOptions(v_dim, h_dim).bias(false)));
-        this->attn  = this->register_module("attn",  torch::nn::MultiheadAttention(torch::nn::MultiheadAttentionOptions(h_dim, num_heads).bias(false).dropout(dropout)));
+        this->attn  = this->register_module("attn",  torch::nn::MultiheadAttention(torch::nn::MultiheadAttentionOptions(h_dim, num_heads).bias(false)));
         this->proj  = this->register_module("proj",  torch::nn::Linear(torch::nn::LinearOptions(h_dim, o_dim).bias(false)));
         this->ffn   = this->register_module("ffn",   chobits::nn::MoE(o_dim));
 //      this->ffn   = this->register_module("ffn",   chobits::nn::Expert(o_dim));
@@ -151,7 +148,6 @@ public:
         const torch::Tensor& key,
         const torch::Tensor& value
     ) {
-        // [ N S L ] -> [ S N L ]
         auto q = this->q->forward(query.transpose(0, 1));
         auto k = this->k->forward(key  .transpose(0, 1));
         auto v = this->v->forward(value.transpose(0, 1));
@@ -188,11 +184,11 @@ public:
         const shape_t padding_l  = std::vector<int64_t>{ 0, 0 },
         const shape_t dilation_s = std::vector<int64_t>{ 1, 1 },
         const shape_t dilation_l = std::vector<int64_t>{ 1, 1 },
-        const int64_t num_heads  = 8,
         const shape_t stride_h   = std::vector<int64_t>{ 1, 1 },
         const shape_t kernel_h   = std::vector<int64_t>{ 3, 3 },
         const shape_t padding_h  = std::vector<int64_t>{ 1, 1 },
-        const shape_t dilation_h = std::vector<int64_t>{ 1, 1 }
+        const shape_t dilation_h = std::vector<int64_t>{ 1, 1 },
+        const int64_t num_heads  = 8
     ) {
         const int64_t dim     = o_channels;
         const int64_t o_dim   = dim   * 2;
@@ -215,15 +211,14 @@ public:
     
 public:
     torch::Tensor forward(
-        const torch::Tensor& input,
-        const torch::Tensor& memory
+        const torch::Tensor& input
     ) {
         auto input_s = this->patch_s->forward(input).flatten(2).transpose(1, 2);
         auto input_l = this->patch_l->forward(input).flatten(2).transpose(1, 2);
         auto out = torch::cat({ input_s, input_l }, -1);
              out = out + this->pos_embed;
              out = this->norm->forward(out);
-        return this->mha->forward(memory, out, out);
+        return this->mha->forward(out, out, out);
     }
 
 };
@@ -241,7 +236,7 @@ private:
     torch::Tensor    audio_embed{ nullptr };
     torch::Tensor    video_embed{ nullptr };
     torch::Tensor    image_embed{ nullptr };
-    chobits::nn::MHA muxer_mha  { nullptr };
+    chobits::nn::MHA video_mha  { nullptr };
     chobits::nn::MHA image_mha  { nullptr };
     chobits::nn::MHA mixer_mha  { nullptr };
 
@@ -252,13 +247,13 @@ public:
         const int64_t image_dim = 512,
         const int64_t num_heads = 8
     ) {
-        const int64_t muxer_dim = audio_dim + video_dim;
+        const int64_t h_dim = std::max(std::max(audio_dim, video_dim), image_dim) * 2;
         this->audio_embed = this->register_parameter("audio_embed", torch::zeros({ 1, 1, audio_dim }));
         this->video_embed = this->register_parameter("video_embed", torch::zeros({ 1, 1, video_dim }));
         this->image_embed = this->register_parameter("image_embed", torch::zeros({ 1, 1, image_dim }));
-        this->muxer_mha = this->register_module("muxer_mha", chobits::nn::MHA(muxer_dim, muxer_dim, muxer_dim, muxer_dim, muxer_dim * 2, num_heads));
-        this->image_mha = this->register_module("image_mha", chobits::nn::MHA(muxer_dim, image_dim, image_dim, muxer_dim, muxer_dim * 2, num_heads));
-        this->mixer_mha = this->register_module("mixer_mha", chobits::nn::MHA(muxer_dim, muxer_dim, muxer_dim, muxer_dim, muxer_dim * 2, num_heads));
+        this->video_mha = this->register_module("video_mha", chobits::nn::MHA(audio_dim, video_dim, video_dim, audio_dim, h_dim, num_heads));
+        this->image_mha = this->register_module("image_mha", chobits::nn::MHA(audio_dim, image_dim, image_dim, audio_dim, h_dim, num_heads));
+        this->mixer_mha = this->register_module("mixer_mha", chobits::nn::MHA(audio_dim, audio_dim, audio_dim, audio_dim, h_dim, num_heads));
     }
     
 public:
@@ -271,8 +266,7 @@ public:
         auto audio_o = audio + this->audio_embed;
         auto video_o = video + this->video_embed;
         auto image_o = image + this->image_embed;
-        auto muxer_c = torch::cat({ audio_o, video_o }, -1);
-        auto muxer_o = this->muxer_mha->forward(muxer_c, muxer_c, muxer_c);
+        auto muxer_o = this->video_mha->forward(audio_o, video_o, video_o);
              muxer_o = this->image_mha->forward(muxer_o, image_o, image_o);
         if(!memory.defined()) {
             auto mixer_o = this->mixer_mha->forward(muxer_o, muxer_o, muxer_o);
@@ -296,7 +290,7 @@ private:
 
 public:
     TalkImpl(
-        const int64_t i_features = 768,
+        const int64_t i_features = 256,
         const int64_t o_features = 800,
         const int64_t num_heads  = 8
     ) {
@@ -368,12 +362,10 @@ public:
     }
 
 public:
-    std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor> forward(
+    std::tuple<torch::Tensor, torch::Tensor> forward(
         const torch::Tensor& audio,
         const torch::Tensor& video,
-        const torch::Tensor& audio_memory,
-        const torch::Tensor& video_memory,
-        const torch::Tensor& image_memory
+        const torch::Tensor& memory
     ) {
         if(!this->window.defined()) {
             this->window = torch::hann_window(this->win_size).to(audio.device());
@@ -398,13 +390,10 @@ public:
              m = m.view({ audio.size(0), audio.size(1), m.size(1), m.size(2) }).transpose(2, 3).contiguous();
         auto v = video.select(2,  0);
         auto i = video.select(1, -1);
-        auto audio_o = this->audio_vit->forward(m, audio_memory);
-        auto video_o = this->video_vit->forward(v, video_memory);
-        auto image_o = this->image_vit->forward(i, image_memory);
-        auto mixer_o = torch::Tensor{ nullptr };
-        auto audio_m = audio_o.clone().detach();
-        auto video_m = video_o.clone().detach();
-        auto image_m = image_o.clone().detach();
+        auto audio_o = this->audio_vit->forward(m);
+        auto video_o = this->video_vit->forward(v);
+        auto image_o = this->image_vit->forward(i);
+        auto mixer_o = memory;
         for (auto iter = this->mixer->begin(); iter != this->mixer->end(); ++iter) {
             auto [ audio_x, video_x, image_x, mixer_x ] = (*iter)->as<chobits::nn::Mixer>()->forward(audio_o, video_o, image_o, mixer_o);
             audio_o = audio_x;
@@ -413,7 +402,7 @@ public:
             mixer_o = mixer_x;
         }
         auto out = this->talk->forward(mixer_o);
-        return { audio_m, video_m, image_m, out };
+        return { mixer_o.clone().detach(), out };
     }
 
 };

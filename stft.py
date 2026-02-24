@@ -15,7 +15,7 @@ class STFTAudio:
         return torchaudio.load(audio_path)
     
     def compute_stft(self, waveform):
-        """计算STFT"""
+        """STFT"""
         return torch.stft(
             waveform,
             n_fft          = self.n_fft,
@@ -27,7 +27,7 @@ class STFTAudio:
         )
     
     def compute_istft(self, stft):
-        """恢复音频"""
+        """ISTFT"""
         return torch.istft(
             stft,
             n_fft      = self.n_fft,
@@ -37,33 +37,33 @@ class STFTAudio:
             center     = True,
         )
     
+    def mag_pha_composition(self, mag, pha):
+        """合成幅度和相位"""
+        real = mag * torch.cos(pha)
+        imag = mag * torch.sin(pha)
+        return torch.complex(real, imag)
+#       return torch.polar(mag, pha)
+    
     def mag_pha_decomposition(self, stft):
         """分解幅度和相位"""
         mag = torch.abs(stft)
         pha = torch.angle(stft)
         return mag, pha
     
-    def mag_pha_composition(self, mag, pha):
-        """合成幅度和相位"""
-        real = mag * torch.cos(pha)
-        imag = mag * torch.sin(pha)
-        return torch.complex(real, imag)
-    
     def compute_mask(self, stft):
         """掩码计算"""
         mag, pha = self.mag_pha_decomposition(stft)
         print(f"mag：{mag.shape} {mag.max()} {mag.min()}")
         print(f"pha：{pha.shape} {pha.max()} {pha.min()}")
-        # return torch.polar(mag, pha)
         return self.mag_pha_composition(mag, pha)
     
     def visualize(self, stft, title = "Spectrogram"):
         """可视化频谱图"""
-        mag = torch.abs(stft).squeeze()
-#       pha = torch.angle(stft).squeeze()
+        mag, pha = self.mag_pha_decomposition(stft)
         plt.figure(figsize = (12, 6))
         plt.imshow(
-            (20 * torch.log10(mag + 1e-8)).numpy()[0],
+#           mag.squeeze().numpy()[0],
+            (20 * torch.log10(mag.squeeze() + 1e-8)).numpy()[0],
             aspect = "auto",
             origin = "lower",
         )
