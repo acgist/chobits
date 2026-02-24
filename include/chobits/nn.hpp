@@ -236,28 +236,31 @@ private:
     torch::Tensor    audio_embed{ nullptr };
     torch::Tensor    video_embed{ nullptr };
     torch::Tensor    image_embed{ nullptr };
+    chobits::nn::MHA audio_mha  { nullptr };
     chobits::nn::MHA video_mha  { nullptr };
     chobits::nn::MHA image_mha  { nullptr };
     chobits::nn::MHA mixer_mha  { nullptr };
 
 public:
     MixerImpl(
-        const int64_t audio_dim = 256,
-        const int64_t video_dim = 512,
-        const int64_t image_dim = 512,
-        const int64_t num_heads = 8
+        const int64_t audio_dim  = 256,
+        const int64_t video_dim  = 512,
+        const int64_t image_dim  = 512,
+        const int64_t memory_dim = 256,
+        const int64_t num_heads  = 8
     ) {
-        const int64_t h_dim = std::max(std::max(audio_dim, video_dim), image_dim) * 2;
+        const int64_t h_dim = std::max(std::max(std::max(audio_dim, video_dim), image_dim), memory_dim) * 2;
         this->audio_embed = this->register_parameter("audio_embed", torch::zeros({ 1, 1, audio_dim }));
         this->video_embed = this->register_parameter("video_embed", torch::zeros({ 1, 1, video_dim }));
         this->image_embed = this->register_parameter("image_embed", torch::zeros({ 1, 1, image_dim }));
-        this->video_mha = this->register_module("video_mha", chobits::nn::MHA(audio_dim, video_dim, video_dim, audio_dim, h_dim, num_heads));
-        this->image_mha = this->register_module("image_mha", chobits::nn::MHA(audio_dim, image_dim, image_dim, audio_dim, h_dim, num_heads));
-        this->mixer_mha = this->register_module("mixer_mha", chobits::nn::MHA(audio_dim, audio_dim, audio_dim, audio_dim, h_dim, num_heads));
+        this->audio_mha = this->register_module("audio_mha", chobits::nn::MHA(memory_dim, audio_dim,  audio_dim,  memory_dim, h_dim, num_heads));
+        this->video_mha = this->register_module("video_mha", chobits::nn::MHA(memory_dim, video_dim,  video_dim,  memory_dim, h_dim, num_heads));
+        this->image_mha = this->register_module("image_mha", chobits::nn::MHA(memory_dim, image_dim,  image_dim,  memory_dim, h_dim, num_heads));
+        this->mixer_mha = this->register_module("mixer_mha", chobits::nn::MHA(memory_dim, memory_dim, memory_dim, memory_dim, h_dim, num_heads));
     }
     
 public:
-    std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor> forward(
+    torch::Tensor forward(
         const torch::Tensor& audio,
         const torch::Tensor& video,
         const torch::Tensor& image,
@@ -266,15 +269,11 @@ public:
         auto audio_o = audio + this->audio_embed;
         auto video_o = video + this->video_embed;
         auto image_o = image + this->image_embed;
-        auto muxer_o = this->video_mha->forward(audio_o, video_o, video_o);
-             muxer_o = this->image_mha->forward(muxer_o, image_o, image_o);
-        if(!memory.defined()) {
-            auto mixer_o = this->mixer_mha->forward(muxer_o, muxer_o, muxer_o);
-            return { audio_o, video_o, image_o, mixer_o };
-        } else {
-            auto mixer_o = this->mixer_mha->forward(memory, muxer_o, muxer_o);
-            return { audio_o, video_o, image_o, mixer_o };
-        }
+        auto out     = memory;
+             out = this->audio_mha->forward(out, audio_o, audio_o);
+             out = this->video_mha->forward(out, video_o, video_o);
+             out = this->image_mha->forward(out, image_o, image_o);
+        return this->mixer_mha->forward(out, out, out);
     }
 
 };
@@ -395,10 +394,7 @@ public:
         auto image_o = this->image_vit->forward(i);
         auto mixer_o = memory;
         for (auto iter = this->mixer->begin(); iter != this->mixer->end(); ++iter) {
-            auto [ audio_x, video_x, image_x, mixer_x ] = (*iter)->as<chobits::nn::Mixer>()->forward(audio_o, video_o, image_o, mixer_o);
-            audio_o = audio_x;
-            video_o = video_x;
-            image_o = image_x;
+            auto mixer_x = (*iter)->as<chobits::nn::Mixer>()->forward(audio_o, video_o, image_o, mixer_o);
             mixer_o = mixer_x;
         }
         auto out = this->talk->forward(mixer_o);

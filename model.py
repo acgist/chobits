@@ -153,19 +153,21 @@ class ViT(nn.Module):
 class Mixer(nn.Module):
     def __init__(
         self,
-        audio_dim: int = 256,
-        video_dim: int = 512,
-        image_dim: int = 512,
-        num_heads: int = 8,
+        audio_dim : int = 256,
+        video_dim : int = 512,
+        image_dim : int = 512,
+        memory_dim: int = 256,
+        num_heads : int = 8,
     ):
         super().__init__()
-        h_dim = max(audio_dim, video_dim, image_dim) * 2
+        h_dim = max(audio_dim, video_dim, image_dim, memory_dim) * 2
         self.audio_embed = nn.Parameter(torch.zeros(1, 1, audio_dim))
         self.video_embed = nn.Parameter(torch.zeros(1, 1, video_dim))
         self.image_embed = nn.Parameter(torch.zeros(1, 1, image_dim))
-        self.video_mha = MHA(audio_dim, video_dim, video_dim, audio_dim, h_dim, num_heads)
-        self.image_mha = MHA(audio_dim, image_dim, image_dim, audio_dim, h_dim, num_heads)
-        self.mixer_mha = MHA(audio_dim, audio_dim, audio_dim, audio_dim, h_dim, num_heads)
+        self.audio_mha = MHA(memory_dim, audio_dim,  audio_dim,  memory_dim, h_dim, num_heads)
+        self.video_mha = MHA(memory_dim, video_dim,  video_dim,  memory_dim, h_dim, num_heads)
+        self.image_mha = MHA(memory_dim, image_dim,  image_dim,  memory_dim, h_dim, num_heads)
+        self.mixer_mha = MHA(memory_dim, memory_dim, memory_dim, memory_dim, h_dim, num_heads)
 
     def forward(
         self,
@@ -173,18 +175,15 @@ class Mixer(nn.Module):
         video : torch.Tensor,
         image : torch.Tensor,
         memory: torch.Tensor,
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    ) -> torch.Tensor:
         audio_o = audio + self.audio_embed
         video_o = video + self.video_embed
         image_o = image + self.image_embed
-        muxer_o = self.video_mha(audio_o, video_o, video_o)
-        muxer_o = self.image_mha(muxer_o, image_o, image_o)
-        if memory is None:
-            mixer_o = self.mixer_mha(muxer_o, muxer_o, muxer_o)
-            return (audio_o, video_o, image_o, mixer_o)
-        else:
-            mixer_o = self.mixer_mha(memory, muxer_o, muxer_o)
-            return (audio_o, video_o, image_o, mixer_o)
+        out = memory
+        out = self.audio_mha(out, audio_o, audio_o)
+        out = self.video_mha(out, video_o, video_o)
+        out = self.image_mha(out, image_o, image_o)
+        return self.mixer_mha(out, out, out)
 
 class Talk(nn.Module):
     def __init__(
@@ -270,10 +269,7 @@ class Chobits(nn.Module):
         image_o = self.image_vit(i)
         mixer_o = memory
         for layer in self.mixer:
-            audio_x, video_x, image_x, mixer_x = layer(audio_o, video_o, image_o, mixer_o)
-            audio_o = audio_x
-            video_o = video_x
-            image_o = image_x
+            mixer_x = layer(audio_o, video_o, image_o, mixer_o)
             mixer_o = mixer_x
         out = self.talk(mixer_o)
         return (mixer_o.clone().detach(), out)

@@ -62,16 +62,13 @@ static void info(std::shared_ptr<torch::nn::Module> layer) {
     torch::NoGradGuard no_grad_guard;
     chobits::nn::Mixer layer;
     info(layer.ptr());
-    auto [ audio, video, image, muxer ] = layer->forward(
+    auto output = layer->forward(
         torch::randn({ 10, 256, 256 }),
         torch::randn({ 10, 256, 512 }),
         torch::randn({ 10, 256, 512 }),
         torch::randn({ 10, 128, 256 })
     );
-    std::cout << audio.sizes() << std::endl;
-    std::cout << video.sizes() << std::endl;
-    std::cout << image.sizes() << std::endl;
-    std::cout << muxer.sizes() << std::endl;
+    std::cout << output.sizes() << std::endl;
 }
 
 [[maybe_unused]] static void test_talk() {
@@ -118,8 +115,8 @@ int main() {
         // test_vit();
         // test_mixer();
         // test_talk();
-        // test_chobits();
-        test_eval();
+        test_chobits();
+        // test_eval();
     } catch(const std::exception& e) {
         std::printf("异常内容：%s", e.what());
     }
