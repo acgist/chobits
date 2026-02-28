@@ -9,15 +9,12 @@
 
 #include "torch/torch.h"
 
-struct TrainerState {
+static struct TrainerState {
     float learning_rate  = 0.0001;
-    float clip_grad_norm = 10.0;
-    torch::Tensor memory{ nullptr };
+    float clip_grad_norm = 1.0;
     torch::DeviceType    device = torch::cuda::is_available() ? torch::DeviceType::CUDA : torch::DeviceType::CPU;
     chobits::nn::Chobits model  = nullptr;
-};
-
-static TrainerState trainer_state{ };
+} trainer_state;
 
 bool chobits::model::Trainer::save(const std::string& path, bool train) {
     if(!trainer_state.model) {
@@ -45,8 +42,10 @@ bool chobits::model::Trainer::load(const std::string& path, bool train) {
         } catch(const std::exception& e) {
             std::printf("加载模型失败：%s\n", e.what());
         }
+    } else {
+        std::printf("初始化模型的参数");
+        trainer_state.model->init();
     }
-    trainer_state.memory = torch::zeros({ chobits::batch_size, 128, 256 }).to(trainer_state.device);
     trainer_state.model->to(trainer_state.device);
     if(train) {
         trainer_state.model->train();
@@ -64,27 +63,18 @@ void chobits::model::Trainer::train() {
         auto scheduler  = torch::optim::StepLR(optimizer, 10, 0.999);
         auto loss_val   = 0.0F;
         auto time_point = std::chrono::system_clock::now();
-        static const int per_op_epoch = 50;
+        static const int per_op_epoch = 10;
         static const int per_ck_epoch = 10000;
         for (size_t epoch = 1; epoch <= 31'536'000'000ULL && chobits::running; ++epoch) {
             this->train(loss_val);
             if(epoch % per_op_epoch == 0) {
-                // torch::nn::utils::clip_grad_norm_(trainer_state.model->parameters(), trainer_state.clip_grad_norm);
+                torch::nn::utils::clip_grad_norm_(trainer_state.model->parameters(), trainer_state.clip_grad_norm);
                 optimizer.step();
                 optimizer.zero_grad();
                 auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now() - time_point).count();
                 std::printf("轮次：%" PRIu64 " 损失：%.6f 耗时：%" PRId64 "\n", epoch, loss_val / per_op_epoch, duration);
                 loss_val   = 0.0;
                 time_point = std::chrono::system_clock::now();
-            }
-            if(epoch % 600) {
-                trainer_state.memory.index({ torch::indexing::Slice(), torch::indexing::Slice(1, torch::indexing::None, chobits::batch_thread), torch::indexing::Slice() }).fill_(0.0);
-            }
-            if(epoch % 6000) {
-                trainer_state.memory.index({ torch::indexing::Slice(), torch::indexing::Slice(2, torch::indexing::None, chobits::batch_thread), torch::indexing::Slice() }).fill_(0.0);
-            }
-            if(epoch % 60000) {
-                trainer_state.memory.index({ torch::indexing::Slice(), torch::indexing::Slice(3, torch::indexing::None, chobits::batch_thread), torch::indexing::Slice() }).fill_(0.0);
             }
             if(epoch % per_ck_epoch == 0) {
                 scheduler.step();
@@ -107,9 +97,8 @@ void chobits::model::Trainer::train(float& loss_val) {
     audio = audio.to(trainer_state.device);
     video = video.to(trainer_state.device);
     label = label.to(trainer_state.device);
-    auto [ memory, pred ] = trainer_state.model->forward(audio, video, trainer_state.memory);
-    trainer_state.memory = memory;
-    auto loss = torch::l1_loss(pred, label);
+    auto pred = trainer_state.model->forward(audio, video);
+    auto loss = torch::mse_loss(pred, label, torch::Reduction::Mean);
     loss.backward();
     loss_val += loss.template item<float>();
     if(chobits::mode_play || chobits::mode_save) {
@@ -131,8 +120,7 @@ void chobits::model::Trainer::eval() {
             audio = audio.to(trainer_state.device);
             video = video.to(trainer_state.device);
 //          label = label.to(trainer_state.device);
-            auto [ memory, pred ] = trainer_state.model->forward(audio, video, trainer_state.memory);
-            trainer_state.memory = memory;
+            auto pred = trainer_state.model->forward(audio, video);
             if(chobits::mode_play || chobits::mode_save) {
                 chobits::media::set_data(pred, video);
             }

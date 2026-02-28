@@ -24,13 +24,17 @@ using shape_t = std::vector<int64_t>;
 
 namespace chobits::nn {
 
+static void init_weight(std::shared_ptr<torch::nn::Module> layer);
+
 class ActivationImpl : public torch::nn::Module {
 
 public:
     torch::Tensor forward(
         const torch::Tensor& input
     ) {
-        return torch::silu(input);
+//      return torch::relu(input);
+//      return torch::silu(input);
+        return torch::leaky_relu(input);
     }
 
 };
@@ -59,6 +63,10 @@ public:
         const torch::Tensor& input
     ) {
         return this->fc->forward(input);
+    }
+
+    void init() {
+        init_weight(this->fc.ptr());
     }
 
 };
@@ -99,28 +107,29 @@ public:
         auto stacked_expert_outs  = torch::stack(expert_outs, 1);
         auto weighted_expert_outs = stacked_expert_outs * gate_weights.unsqueeze(-1);
         auto final_output = weighted_expert_outs.sum(1);
-        return final_output.view(input.sizes());
+        return final_output.view(input.sizes()) + input;
+    }
+
+    void init() {
+        init_weight(this->gate.ptr());
+        init_weight(this->experts.ptr());
     }
 
 };
 
 TORCH_MODULE(MoE);
 
-/**
- * MHA MQA GQA MLA
- */
 class MHAImpl : public torch::nn::Module {
 
 private:
-    torch::nn::Linear             q    { nullptr };
-    torch::nn::Linear             k    { nullptr };
-    torch::nn::Linear             v    { nullptr };
-    torch::nn::MultiheadAttention attn { nullptr };
-    torch::nn::Linear             proj { nullptr };
-    chobits::nn::MoE              ffn  { nullptr };
-//  chobits::nn::Expert           ffn  { nullptr };
-    torch::nn::LayerNorm          norm1{ nullptr };
-    torch::nn::LayerNorm          norm2{ nullptr };
+    torch::nn::Linear             q   { nullptr };
+    torch::nn::Linear             k   { nullptr };
+    torch::nn::Linear             v   { nullptr };
+    torch::nn::MultiheadAttention attn{ nullptr };
+    torch::nn::Linear             proj{ nullptr };
+    chobits::nn::MoE              ffn { nullptr };
+//  chobits::nn::Expert           ffn { nullptr };
+    torch::nn::LayerNorm          norm{ nullptr };
 
 public:
     MHAImpl(
@@ -131,15 +140,14 @@ public:
         const int64_t h_dim     = 1024,
         const int64_t num_heads = 8
     ) {
-        this->q     = this->register_module("q",     torch::nn::Linear(torch::nn::LinearOptions(q_dim, h_dim).bias(false)));
-        this->k     = this->register_module("k",     torch::nn::Linear(torch::nn::LinearOptions(k_dim, h_dim).bias(false)));
-        this->v     = this->register_module("v",     torch::nn::Linear(torch::nn::LinearOptions(v_dim, h_dim).bias(false)));
-        this->attn  = this->register_module("attn",  torch::nn::MultiheadAttention(torch::nn::MultiheadAttentionOptions(h_dim, num_heads).bias(false)));
-        this->proj  = this->register_module("proj",  torch::nn::Linear(torch::nn::LinearOptions(h_dim, o_dim).bias(false)));
-        this->ffn   = this->register_module("ffn",   chobits::nn::MoE(o_dim));
-//      this->ffn   = this->register_module("ffn",   chobits::nn::Expert(o_dim));
-        this->norm1 = this->register_module("norm1", torch::nn::LayerNorm(torch::nn::LayerNormOptions(std::vector<int64_t>{ o_dim })));
-        this->norm2 = this->register_module("norm2", torch::nn::LayerNorm(torch::nn::LayerNormOptions(std::vector<int64_t>{ o_dim })));
+        this->q    = this->register_module("q",    torch::nn::Linear(torch::nn::LinearOptions(q_dim, h_dim).bias(false)));
+        this->k    = this->register_module("k",    torch::nn::Linear(torch::nn::LinearOptions(k_dim, h_dim).bias(false)));
+        this->v    = this->register_module("v",    torch::nn::Linear(torch::nn::LinearOptions(v_dim, h_dim).bias(false)));
+        this->attn = this->register_module("attn", torch::nn::MultiheadAttention(torch::nn::MultiheadAttentionOptions(h_dim, num_heads).bias(false)));
+        this->proj = this->register_module("proj", torch::nn::Linear(torch::nn::LinearOptions(h_dim, o_dim).bias(false)));
+        this->ffn  = this->register_module("ffn",  chobits::nn::MoE(o_dim));
+//      this->ffn  = this->register_module("ffn",  chobits::nn::Expert(o_dim));
+        this->norm = this->register_module("norm", torch::nn::LayerNorm(torch::nn::LayerNormOptions(std::vector<int64_t>{ o_dim })));
     }
 
 public:
@@ -148,14 +156,23 @@ public:
         const torch::Tensor& key,
         const torch::Tensor& value
     ) {
-        auto q = this->q->forward(query.transpose(0, 1));
-        auto k = this->k->forward(key  .transpose(0, 1));
-        auto v = this->v->forward(value.transpose(0, 1));
+        auto q = this->q->forward(query).transpose(0, 1);
+        auto k = this->k->forward(key  ).transpose(0, 1);
+        auto v = this->v->forward(value).transpose(0, 1);
         auto [ o, _ ] = this->attn->forward(q, k, v);
-             o = query + this->proj->forward(o.transpose(0, 1));
-             o = this->norm1->forward(o);
-             o = o + this->ffn->forward(o);
-        return this->norm2->forward(o);
+             o = query + this->proj->forward(o).transpose(0, 1);
+             o = this->norm->forward(o);
+        return this->ffn->forward(o);
+    }
+
+    void init() {
+        init_weight(this->q.ptr());
+        init_weight(this->k.ptr());
+        init_weight(this->v.ptr());
+        init_weight(this->attn.ptr());
+        init_weight(this->proj.ptr());
+        init_weight(this->ffn.ptr());
+        init_weight(this->norm.ptr());
     }
 
 };
@@ -165,11 +182,12 @@ TORCH_MODULE(MHA);
 class ViTImpl : public torch::nn::Module {
 
 private:
-    torch::nn::Sequential patch_s  { nullptr };
-    torch::nn::Sequential patch_l  { nullptr };
-    torch::Tensor         pos_embed{ nullptr };
-    torch::nn::LayerNorm  norm     { nullptr };
-    chobits::nn::MHA      mha      { nullptr };
+    torch::Tensor         embed_s{ nullptr };
+    torch::Tensor         embed_l{ nullptr };
+    torch::nn::Sequential patch_s{ nullptr };
+    torch::nn::Sequential patch_l{ nullptr };
+    torch::nn::LayerNorm  norm   { nullptr };
+    chobits::nn::MHA      mha    { nullptr };
 
 public:
     ViTImpl(
@@ -194,6 +212,8 @@ public:
         const int64_t o_dim   = dim   * 2;
         const int64_t h_dim   = o_dim * 2;
         const int64_t seq_len = (h / stride[0]) * (w / stride[1]);
+        this->embed_s = this->register_parameter("embed_s", torch::zeros({ 1, seq_len, dim }));
+        this->embed_l = this->register_parameter("embed_l", torch::zeros({ 1, seq_len, dim }));
         this->patch_s = this->register_module("patch_s", torch::nn::Sequential(
             torch::nn::Conv2d(torch::nn::Conv2dOptions(i_channels, o_channels, kernel_s).padding(padding_s).dilation(dilation_s).stride(stride)),
             chobits::nn::Activation(),
@@ -204,9 +224,8 @@ public:
             chobits::nn::Activation(),
             torch::nn::Conv2d(torch::nn::Conv2dOptions(o_channels, o_channels, kernel_h).padding(padding_h).dilation(dilation_h).stride(stride_h))
         ));
-        this->pos_embed = this->register_parameter("pos_embed", torch::zeros({ 1, seq_len, o_dim }));
-        this->norm      = this->register_module   ("norm",      torch::nn::LayerNorm(torch::nn::LayerNormOptions(std::vector<int64_t>{ o_dim })));
-        this->mha       = this->register_module   ("mha",       chobits::nn::MHA(o_dim, o_dim, o_dim, o_dim, h_dim, num_heads));
+        this->norm = this->register_module("norm", torch::nn::LayerNorm(torch::nn::LayerNormOptions(std::vector<int64_t>{ o_dim })));
+        this->mha  = this->register_module("mha",  chobits::nn::MHA(o_dim, o_dim, o_dim, o_dim, h_dim, num_heads));
     }
     
 public:
@@ -215,65 +234,68 @@ public:
     ) {
         auto input_s = this->patch_s->forward(input).flatten(2).transpose(1, 2);
         auto input_l = this->patch_l->forward(input).flatten(2).transpose(1, 2);
+             input_s = input_s + this->embed_s;
+             input_l = input_l + this->embed_l;
         auto out = torch::cat({ input_s, input_l }, -1);
-             out = out + this->pos_embed;
              out = this->norm->forward(out);
         return this->mha->forward(out, out, out);
+    }
+
+    void init() {
+        init_weight(this->patch_s.ptr());
+        init_weight(this->patch_l.ptr());
+        init_weight(this->norm.ptr());
+        init_weight(this->mha.ptr());
     }
 
 };
 
 TORCH_MODULE(ViT);
 
-/**
- * 音频视频作为动作传入
- * 图片作为一种知识传入
- * 可以添加文字等等知识
- */
 class MixerImpl : public torch::nn::Module {
 
 private:
-    torch::Tensor    audio_embed{ nullptr };
-    torch::Tensor    video_embed{ nullptr };
-    torch::Tensor    image_embed{ nullptr };
-    chobits::nn::MHA audio_mha  { nullptr };
-    chobits::nn::MHA video_mha  { nullptr };
-    chobits::nn::MHA image_mha  { nullptr };
-    chobits::nn::MHA mixer_mha  { nullptr };
+    chobits::nn::MHA audio_mha{ nullptr };
+    chobits::nn::MHA video_mha{ nullptr };
+    chobits::nn::MHA muxer_mha{ nullptr };
+    chobits::nn::MHA mixer_mha{ nullptr };
 
 public:
     MixerImpl(
-        const int64_t audio_dim  = 256,
-        const int64_t video_dim  = 512,
-        const int64_t image_dim  = 512,
-        const int64_t memory_dim = 256,
-        const int64_t num_heads  = 8
+        const int64_t audio_dim = 256,
+        const int64_t video_dim = 512,
+        const int64_t h_dim     = 1024,
+        const int64_t num_heads = 8
     ) {
-        const int64_t h_dim = std::max(std::max(std::max(audio_dim, video_dim), image_dim), memory_dim) * 2;
-        this->audio_embed = this->register_parameter("audio_embed", torch::zeros({ 1, 1, audio_dim }));
-        this->video_embed = this->register_parameter("video_embed", torch::zeros({ 1, 1, video_dim }));
-        this->image_embed = this->register_parameter("image_embed", torch::zeros({ 1, 1, image_dim }));
-        this->audio_mha = this->register_module("audio_mha", chobits::nn::MHA(memory_dim, audio_dim,  audio_dim,  memory_dim, h_dim, num_heads));
-        this->video_mha = this->register_module("video_mha", chobits::nn::MHA(memory_dim, video_dim,  video_dim,  memory_dim, h_dim, num_heads));
-        this->image_mha = this->register_module("image_mha", chobits::nn::MHA(memory_dim, image_dim,  image_dim,  memory_dim, h_dim, num_heads));
-        this->mixer_mha = this->register_module("mixer_mha", chobits::nn::MHA(memory_dim, memory_dim, memory_dim, memory_dim, h_dim, num_heads));
+        this->audio_mha = this->register_module("audio_mha", chobits::nn::MHA(audio_dim, video_dim, video_dim, audio_dim, h_dim, num_heads));
+        this->video_mha = this->register_module("video_mha", chobits::nn::MHA(video_dim, audio_dim, audio_dim, video_dim, h_dim, num_heads));
+        this->muxer_mha = this->register_module("muxer_mha", chobits::nn::MHA(audio_dim, video_dim, video_dim, audio_dim, h_dim, num_heads));
+        this->mixer_mha = this->register_module("mixer_mha", chobits::nn::MHA(audio_dim, audio_dim, audio_dim, audio_dim, h_dim, num_heads));
     }
     
 public:
-    torch::Tensor forward(
+    std::tuple<torch::Tensor, torch::Tensor, torch::Tensor> forward(
         const torch::Tensor& audio,
         const torch::Tensor& video,
-        const torch::Tensor& image,
-        const torch::Tensor& memory
+        const torch::Tensor& input
     ) {
-        auto audio_o = audio + this->audio_embed;
-        auto video_o = video + this->video_embed;
-        auto image_o = image + this->image_embed;
-        auto out     = memory;
-             out = this->audio_mha->forward(out, audio_o, audio_o);
-             out = this->video_mha->forward(out, video_o, video_o);
-             out = this->image_mha->forward(out, image_o, image_o);
-        return this->mixer_mha->forward(out, out, out);
+        auto audio_o = this->audio_mha->forward(audio,   video,   video  );
+        auto video_o = this->video_mha->forward(video,   audio,   audio  );
+        auto muxer_o = this->muxer_mha->forward(audio_o, video_o, video_o);
+        if(input.defined()) {
+            auto mixer_o = this->mixer_mha->forward(muxer_o, input, input);
+            return { audio_o, video_o, mixer_o };
+        } else {
+            auto mixer_o = this->mixer_mha->forward(muxer_o, muxer_o, muxer_o);
+            return { audio_o, video_o, mixer_o };
+        }
+    }
+
+    void init() {
+        init_weight(this->audio_mha.ptr());
+        init_weight(this->video_mha.ptr());
+        init_weight(this->muxer_mha.ptr());
+        init_weight(this->mixer_mha.ptr());
     }
 
 };
@@ -293,10 +315,10 @@ public:
         const int64_t o_features = 800,
         const int64_t num_heads  = 8
     ) {
-        this->embed = this->register_parameter("embed", torch::zeros({ 1, 1, i_features }));
+        this->embed = this->register_parameter("embed", torch::zeros({ 1, 4, i_features }));
         this->mha   = this->register_module   ("mha",   chobits::nn::MHA(i_features, i_features, i_features, i_features, i_features * 2, num_heads));
         this->talk  = this->register_module   ("talk",  torch::nn::Sequential(
-            torch::nn::Linear(i_features, o_features * 2),
+            torch::nn::Linear(i_features * 4, o_features * 2),
             chobits::nn::Activation(),
             torch::nn::Linear(o_features * 2, o_features)
         ));
@@ -308,8 +330,13 @@ public:
     ) {
         auto out = torch::cat({ this->embed.expand({ input.size(0), -1, -1 }), input }, 1);
              out = this->mha->forward(out, out, out);
-             out = out.index({ torch::indexing::Slice(), torch::indexing::Slice(0, 1), torch::indexing::Slice() }).flatten(1);
+             out = out.index({ torch::indexing::Slice(), torch::indexing::Slice(0, 4), torch::indexing::Slice() }).flatten(1);
         return torch::tanh(this->talk->forward(out));
+    }
+
+    void init() {
+        init_weight(this->mha.ptr());
+        init_weight(this->talk.ptr());
     }
 
 };
@@ -321,7 +348,6 @@ class ChobitsImpl : public torch::nn::Module {
 friend chobits::model::Trainer;
 
 private:
-    const int64_t seq_len  = 1;
     const int64_t n_fft    = 400;
     const int64_t hop_size = 80;
     const int64_t win_size = 400;
@@ -329,7 +355,8 @@ private:
     chobits::nn::ViT      audio_vit{ nullptr };
     chobits::nn::ViT      video_vit{ nullptr };
     chobits::nn::ViT      image_vit{ nullptr };
-    torch::nn::ModuleList mixer    {         };
+    chobits::nn::MHA      video_mha{ nullptr };
+    torch::nn::ModuleList mixers   {         };
     chobits::nn::Talk     talk     { nullptr };
 
 public:
@@ -352,19 +379,19 @@ public:
             std::vector<int64_t>{ 20, 20 }, std::vector<int64_t>{ 40, 40 },
             std::vector<int64_t>{  0,  0 }, std::vector<int64_t>{ 10, 10 }
         ));
-        torch::nn::ModuleList mixer;
+        torch::nn::ModuleList mixers;
         for (int i = 0; i < 3; ++i) {
-            mixer->push_back(chobits::nn::Mixer(256, 512, 512));
+            mixers->push_back(chobits::nn::Mixer(256, 512, 512));
         }
-        this->mixer = this->register_module("mixer", mixer);
-        this->talk  = this->register_module("talk",  chobits::nn::Talk());
+        this->video_mha = this->register_module("video_mha", chobits::nn::MHA(512, 512, 512, 512, 1024, 8));
+        this->mixers    = this->register_module("mixers",    mixers);
+        this->talk      = this->register_module("talk",      chobits::nn::Talk());
     }
 
 public:
-    std::tuple<torch::Tensor, torch::Tensor> forward(
+    torch::Tensor forward(
         const torch::Tensor& audio,
-        const torch::Tensor& video,
-        const torch::Tensor& memory
+        const torch::Tensor& video
     ) {
         if(!this->window.defined()) {
             this->window = torch::hann_window(this->win_size).to(audio.device());
@@ -392,18 +419,61 @@ public:
         auto audio_o = this->audio_vit->forward(m);
         auto video_o = this->video_vit->forward(v);
         auto image_o = this->image_vit->forward(i);
-        auto mixer_o = memory;
-        for (auto iter = this->mixer->begin(); iter != this->mixer->end(); ++iter) {
-            auto mixer_x = (*iter)->as<chobits::nn::Mixer>()->forward(audio_o, video_o, image_o, mixer_o);
+             video_o = this->video_mha->forward(video_o, image_o, image_o);
+        torch::Tensor mixer_o{ nullptr };
+        for (auto iter = this->mixers->begin(); iter != this->mixers->end(); ++iter) {
+            auto [ audio_x, video_x, mixer_x ] = (*iter)->as<chobits::nn::Mixer>()->forward(audio_o, video_o, mixer_o);
+            audio_o = audio_x;
+            video_o = video_x;
             mixer_o = mixer_x;
         }
-        auto out = this->talk->forward(mixer_o);
-        return { mixer_o.clone().detach(), out };
+        return this->talk->forward(mixer_o);
+    }
+
+    void init() {
+        init_weight(this->audio_vit.ptr());
+        init_weight(this->video_vit.ptr());
+        init_weight(this->image_vit.ptr());
+        init_weight(this->video_mha.ptr());
+        init_weight(this->mixers.ptr());
+        init_weight(this->talk.ptr());
     }
 
 };
 
 TORCH_MODULE(Chobits);
+
+static void init_weight(std::shared_ptr<torch::nn::Module> module) {
+    if(auto* layer = module->as<torch::nn::Conv2d>()) {
+        layer->reset_parameters();
+    } else if(auto* layer = module->as<torch::nn::Linear>()) {
+        layer->reset_parameters();
+    } else if(auto* layer = module->as<torch::nn::LayerNorm>()) {
+        layer->reset_parameters();
+    } else if(auto* layer = module->as<torch::nn::MultiheadAttention>()) {
+        layer->_reset_parameters();
+    } else if(auto* layer = module->as<chobits::nn::MoE>()) {
+        layer->init();
+    } else if(auto* layer = module->as<chobits::nn::MHA>()) {
+        layer->init();
+    } else if(auto* layer = module->as<chobits::nn::ViT>()) {
+        layer->init();
+    } else if(auto* layer = module->as<chobits::nn::Talk>()) {
+        layer->init();
+    } else if(auto* layer = module->as<chobits::nn::Mixer>()) {
+        layer->init();
+    } else if(auto* layer = module->as<chobits::nn::Expert>()) {
+        layer->init();
+    } else if(auto* layer = module->as<torch::nn::Sequential>()) {
+        for(auto value : layer->children()) {
+            init_weight(value);
+        }
+    } else if(auto* layer = module->as<torch::nn::ModuleList>()) {
+        for(auto value : layer->children()) {
+            init_weight(value);
+        }
+    }
+}
 
 } // END OF chobits::nn
 

@@ -17,17 +17,10 @@ static void info(std::shared_ptr<torch::nn::Module> layer) {
     std::printf("参数总量：%" PRId64 "\n", total_numel);
 }
 
-[[maybe_unused]] static void test_expert() {
-    torch::NoGradGuard no_grad_guard;
-    chobits::nn::Expert layer(512);
-    info(layer.ptr());
-    auto output = layer->forward(torch::randn({ 10, 256, 512 }));
-    std::cout << output.sizes() << std::endl;
-}
-
 [[maybe_unused]] static void test_moe() {
     torch::NoGradGuard no_grad_guard;
     chobits::nn::MoE layer(512);
+    layer->init();
     info(layer.ptr());
     auto output = layer->forward(torch::randn({ 10, 256, 512 }));
     std::cout << output.sizes() << std::endl;
@@ -36,6 +29,7 @@ static void info(std::shared_ptr<torch::nn::Module> layer) {
 [[maybe_unused]] static void test_mha() {
     torch::NoGradGuard no_grad_guard;
     chobits::nn::MHA layer(512, 512, 512, 512);
+    layer->init();
     info(layer.ptr());
     auto output = layer->forward(
         torch::randn({ 10, 256, 512 }),
@@ -53,6 +47,7 @@ static void info(std::shared_ptr<torch::nn::Module> layer) {
         std::vector<int64_t>{ 2, 2 }, std::vector<int64_t>{ 5, 5 },
         std::vector<int64_t>{ 0, 0 }, std::vector<int64_t>{ 1, 1 }
     );
+    layer->init();
     info(layer.ptr());
     auto output = layer->forward(torch::randn({ 10, 32, 11, 201 }));
     std::cout << output.sizes() << std::endl;
@@ -61,19 +56,22 @@ static void info(std::shared_ptr<torch::nn::Module> layer) {
 [[maybe_unused]] static void test_mixer() {
     torch::NoGradGuard no_grad_guard;
     chobits::nn::Mixer layer;
+    layer->init();
     info(layer.ptr());
-    auto output = layer->forward(
+    auto [ audio, video, output ] = layer->forward(
         torch::randn({ 10, 256, 256 }),
         torch::randn({ 10, 256, 512 }),
-        torch::randn({ 10, 256, 512 }),
-        torch::randn({ 10, 128, 256 })
+        torch::randn({ 10, 256, 256 })
     );
+    std::cout << audio.sizes() << std::endl;
+    std::cout << video.sizes() << std::endl;
     std::cout << output.sizes() << std::endl;
 }
 
 [[maybe_unused]] static void test_talk() {
     torch::NoGradGuard no_grad_guard;
     chobits::nn::Talk layer;
+    layer->init();
     info(layer.ptr());
     auto output = layer->forward(torch::randn({ 10, 256, 256 }));
     std::cout << output.sizes() << std::endl;
@@ -82,14 +80,13 @@ static void info(std::shared_ptr<torch::nn::Module> layer) {
 [[maybe_unused]] static void test_chobits() {
     torch::NoGradGuard no_grad_guard;
     chobits::nn::Chobits layer;
+    layer->init();
     info(layer.ptr());
-    auto [ memory, muxer ] = layer->forward(
+    auto output = layer->forward(
         torch::randn({ 10, 32, 800 }),
-        torch::randn({ 10, 32, 3, 360, 640 }),
-        torch::randn({ 10, 128, 256 })
+        torch::randn({ 10, 32, 3, 360, 640 })
     );
-    std::cout << memory.sizes() << std::endl;
-    std::cout << muxer.sizes() << std::endl;
+    std::cout << output.sizes() << std::endl;
 }
 
 [[maybe_unused]] static void test_eval() {
@@ -109,14 +106,13 @@ static void info(std::shared_ptr<torch::nn::Module> layer) {
 
 int main() {
     try {
-        // test_expert();
         // test_moe();
         // test_mha();
         // test_vit();
         // test_mixer();
         // test_talk();
-        test_chobits();
-        // test_eval();
+        // test_chobits();
+        test_eval();
     } catch(const std::exception& e) {
         std::printf("异常内容：%s", e.what());
     }

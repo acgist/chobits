@@ -9,7 +9,9 @@ class Activation(nn.Module):
         self,
         input: torch.Tensor,
     ) -> torch.Tensor:
-        return F.silu(input)
+#       return F.relu(input)
+#       return F.silu(input)
+        return F.leaky_relu(input)
 
 class Expert(nn.Module):
     def __init__(
@@ -54,11 +56,8 @@ class MoE(nn.Module):
         stacked_expert_outs  = torch.stack(expert_outs, dim = 1)
         weighted_expert_outs = stacked_expert_outs * gate_weights.unsqueeze(-1)
         final_output = weighted_expert_outs.sum(dim = 1)
-        return final_output.view(input.shape)
+        return final_output.view(input.shape) + input
 
-"""
-MHA MQA GQA MLA
-"""
 class MHA(nn.Module):
     def __init__(
         self,
@@ -70,15 +69,14 @@ class MHA(nn.Module):
         num_heads: int = 8,
     ):
         super().__init__()
-        self.q     = nn.Linear(q_dim, h_dim, bias = False)
-        self.k     = nn.Linear(k_dim, h_dim, bias = False)
-        self.v     = nn.Linear(v_dim, h_dim, bias = False)
-        self.attn  = nn.MultiheadAttention(h_dim, num_heads, bias = False, batch_first = False)
-        self.proj  = nn.Linear(h_dim, o_dim, bias = False)
-        self.ffn   = MoE(o_dim)
-#       self.ffn   = Expert(o_dim)
-        self.norm1 = nn.LayerNorm(o_dim)
-        self.norm2 = nn.LayerNorm(o_dim)
+        self.q    = nn.Linear(q_dim, h_dim, bias = False)
+        self.k    = nn.Linear(k_dim, h_dim, bias = False)
+        self.v    = nn.Linear(v_dim, h_dim, bias = False)
+        self.attn = nn.MultiheadAttention(h_dim, num_heads, bias = False, batch_first = False)
+        self.proj = nn.Linear(h_dim, o_dim, bias = False)
+        self.ffn  = MoE(o_dim)
+#       self.ffn  = Expert(o_dim)
+        self.norm = nn.LayerNorm(o_dim)
 
     def forward(
         self,
@@ -86,14 +84,13 @@ class MHA(nn.Module):
         key  : torch.Tensor,
         value: torch.Tensor,
     ) -> torch.Tensor:
-        q = self.q(query.transpose(0, 1))
-        k = self.k(key  .transpose(0, 1))
-        v = self.v(value.transpose(0, 1))
+        q = self.q(query).transpose(0, 1)
+        k = self.k(key  ).transpose(0, 1)
+        v = self.v(value).transpose(0, 1)
         o, _ = self.attn(q, k, v)
-        o = query + self.proj(o.transpose(0, 1))
-        o = self.norm1(o)
-        o = o + self.ffn(o)
-        return self.norm2(o)
+        o = query + self.proj(o).transpose(0, 1)
+        o = self.norm(o)
+        return self.ffn(o)
 
 class ViT(nn.Module):
     def __init__(
@@ -120,6 +117,8 @@ class ViT(nn.Module):
         o_dim   = dim   * 2
         h_dim   = o_dim * 2
         seq_len = (h // stride[0]) * (w // stride[1])
+        self.embed_s = torch.zeros(1, seq_len, dim)
+        self.embed_l = torch.zeros(1, seq_len, dim)
         self.patch_s = nn.Sequential(
             nn.Conv2d(i_channels, o_channels, kernel_s, padding = padding_s, dilation = dilation_s, stride = stride),
             Activation(),
@@ -130,9 +129,8 @@ class ViT(nn.Module):
             Activation(),
             nn.Conv2d(o_channels, o_channels, kernel_h, padding = padding_h, dilation = dilation_h, stride = stride_h),
         )
-        self.pos_embed = nn.Parameter(torch.zeros(1, seq_len, o_dim))
-        self.norm      = nn.LayerNorm(o_dim)
-        self.mha       = MHA(o_dim, o_dim, o_dim, o_dim, h_dim, num_heads)
+        self.norm = nn.LayerNorm(o_dim)
+        self.mha  = MHA(o_dim, o_dim, o_dim, o_dim, h_dim, num_heads)
 
     def forward(
         self,
@@ -140,50 +138,41 @@ class ViT(nn.Module):
     ) -> torch.Tensor:
         input_s = self.patch_s(input).flatten(2).transpose(1, 2)
         input_l = self.patch_l(input).flatten(2).transpose(1, 2)
+        input_s = input_s + self.embed_s
+        input_l = input_l + self.embed_l
         out = torch.cat([ input_s, input_l ], dim = -1)
-        out = out + self.pos_embed
         out = self.norm(out)
         return self.mha(out, out, out)
 
-"""
-音频视频作为动作传入
-图片作为一种知识传入
-可以添加文字等等知识
-"""
 class Mixer(nn.Module):
     def __init__(
         self,
-        audio_dim : int = 256,
-        video_dim : int = 512,
-        image_dim : int = 512,
-        memory_dim: int = 256,
-        num_heads : int = 8,
+        audio_dim: int = 256,
+        video_dim: int = 512,
+        h_dim    : int = 1024,
+        num_heads: int = 8,
     ):
         super().__init__()
-        h_dim = max(audio_dim, video_dim, image_dim, memory_dim) * 2
-        self.audio_embed = nn.Parameter(torch.zeros(1, 1, audio_dim))
-        self.video_embed = nn.Parameter(torch.zeros(1, 1, video_dim))
-        self.image_embed = nn.Parameter(torch.zeros(1, 1, image_dim))
-        self.audio_mha = MHA(memory_dim, audio_dim,  audio_dim,  memory_dim, h_dim, num_heads)
-        self.video_mha = MHA(memory_dim, video_dim,  video_dim,  memory_dim, h_dim, num_heads)
-        self.image_mha = MHA(memory_dim, image_dim,  image_dim,  memory_dim, h_dim, num_heads)
-        self.mixer_mha = MHA(memory_dim, memory_dim, memory_dim, memory_dim, h_dim, num_heads)
+        self.audio_mha = MHA(audio_dim, video_dim, video_dim, audio_dim, h_dim, num_heads)
+        self.video_mha = MHA(video_dim, audio_dim, audio_dim, video_dim, h_dim, num_heads)
+        self.muxer_mha = MHA(audio_dim, video_dim, video_dim, audio_dim, h_dim, num_heads)
+        self.mixer_mha = MHA(audio_dim, audio_dim, audio_dim, audio_dim, h_dim, num_heads)
 
     def forward(
         self,
-        audio : torch.Tensor,
-        video : torch.Tensor,
-        image : torch.Tensor,
-        memory: torch.Tensor,
-    ) -> torch.Tensor:
-        audio_o = audio + self.audio_embed
-        video_o = video + self.video_embed
-        image_o = image + self.image_embed
-        out = memory
-        out = self.audio_mha(out, audio_o, audio_o)
-        out = self.video_mha(out, video_o, video_o)
-        out = self.image_mha(out, image_o, image_o)
-        return self.mixer_mha(out, out, out)
+        audio: torch.Tensor,
+        video: torch.Tensor,
+        input: torch.Tensor,
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        audio_o = self.audio_mha(audio,   video,   video  )
+        video_o = self.video_mha(video,   audio,   audio  )
+        muxer_o = self.muxer_mha(audio_o, video_o, video_o)
+        if input is not None:
+            mixer_o = self.mixer_mha(muxer_o, input, input)
+            return (audio_o, video_o, mixer_o)
+        else:
+            mixer_o = self.mixer_mha(muxer_o, muxer_o, muxer_o)
+            return (audio_o, video_o, mixer_o)
 
 class Talk(nn.Module):
     def __init__(
@@ -193,10 +182,10 @@ class Talk(nn.Module):
         num_heads : int = 8,
     ):
         super().__init__()
-        self.embed = nn.Parameter(torch.zeros(1, 1, i_features))
+        self.embed = torch.zeros(1, 4, i_features)
         self.mha   = MHA(i_features, i_features, i_features, i_features, i_features * 2, num_heads)
         self.talk  = nn.Sequential(
-            nn.Linear(i_features, o_features * 2),
+            nn.Linear(i_features * 4, o_features * 2),
             Activation(),
             nn.Linear(o_features * 2, o_features),
         )
@@ -207,13 +196,12 @@ class Talk(nn.Module):
     ) -> torch.Tensor:
         out = torch.cat((self.embed.expand(input.size(0), -1, -1), input), dim = 1)
         out = self.mha(out, out, out)
-        out = out[:, 0:1, :].flatten(1)
+        out = out[:, 0:4, :].flatten(1)
         return torch.tanh(self.talk(out))
     
 class Chobits(nn.Module):
     def __init__(self):
         super().__init__()
-        self.seq_len  = 1
         self.n_fft    = 400
         self.hop_size = 80
         self.win_size = 400
@@ -236,15 +224,15 @@ class Chobits(nn.Module):
             [ 20, 20 ], [ 40, 40 ],
             [  0,  0 ], [ 10, 10 ],
         )
-        self.mixer = nn.ModuleList([Mixer(256, 512, 512) for _ in range(3)])
-        self.talk  = Talk()
+        self.video_mha = MHA(512, 512, 512, 512, 1024, 8)
+        self.mixers    = nn.ModuleList([Mixer(256, 512) for _ in range(3)])
+        self.talk      = Talk()
 
     def forward(
         self,
-        audio : torch.Tensor,
-        video : torch.Tensor,
-        memory: torch.Tensor,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        audio: torch.Tensor,
+        video: torch.Tensor,
+    ) -> torch.Tensor:
         if self.window is None:
             self.window = torch.hann_window(self.win_size).to(audio.device)
         com = torch.stft(
@@ -267,17 +255,14 @@ class Chobits(nn.Module):
         audio_o = self.audio_vit(m)
         video_o = self.video_vit(v)
         image_o = self.image_vit(i)
-        mixer_o = memory
-        for layer in self.mixer:
-            mixer_x = layer(audio_o, video_o, image_o, mixer_o)
+        video_o = self.video_mha(video_o, image_o, image_o)
+        mixer_o = None
+        for mixer in self.mixers:
+            audio_x, video_x, mixer_x = mixer(audio_o, video_o, mixer_o)
+            audio_o = audio_x
+            video_o = video_x
             mixer_o = mixer_x
-        out = self.talk(mixer_o)
-        return (mixer_o.clone().detach(), out)
-
-# model = Expert(512)
-# model.eval()
-# input = torch.randn(10, 256, 512)
-# print(model(input).shape)
+        return self.talk(mixer_o)
 
 # model = MoE(512)
 # model.eval()
@@ -309,13 +294,12 @@ class Chobits(nn.Module):
 #     torch.randn(10, 256, 256),
 #     torch.randn(10, 256, 512),
 #     torch.randn(10, 256, 512),
-#     torch.randn(10, 128, 256),
+#     torch.randn(10, 256, 256),
 # )
-# audio, video, image, muxer = model(*input)
+# audio, video, output = model(*input)
 # print(audio.shape)
 # print(video.shape)
-# print(image.shape)
-# print(muxer.shape)
+# print(output.shape)
 
 # model = Talk()
 # model.eval()
@@ -327,11 +311,8 @@ model.eval()
 input = (
     torch.randn(10, 32, 800),
     torch.randn(10, 32, 3, 360, 640),
-    torch.randn(10, 128, 256),
 )
-memory, out = model(*input)
-print(memory.shape)
-print(out.shape)
+print(model(*input).shape)
 
 # 直接保存
 # torch.save(model, "D:/download/chobits.pt")
