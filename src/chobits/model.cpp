@@ -98,12 +98,12 @@ void chobits::model::Trainer::train(float& loss_val) {
     video = video.to(trainer_state.device);
     label = label.to(trainer_state.device);
     auto pred = trainer_state.model->forward(audio, video);
-    auto loss = torch::mse_loss(pred, label, torch::Reduction::Mean);
+    auto loss = torch::l1_loss(pred, label, torch::Reduction::Mean);
     loss.backward();
     loss_val += loss.template item<float>();
     if(chobits::mode_play || chobits::mode_save) {
         torch::NoGradGuard no_grad_guard;
-        chobits::media::set_data(pred, video);
+        chobits::media::set_data(pred[0], video);
     }
 }
 
@@ -122,7 +122,7 @@ void chobits::model::Trainer::eval() {
 //          label = label.to(trainer_state.device);
             auto pred = trainer_state.model->forward(audio, video);
             if(chobits::mode_play || chobits::mode_save) {
-                chobits::media::set_data(pred, video);
+                chobits::media::set_data(pred[0], video);
             }
         }
     } catch(const std::exception& e) {

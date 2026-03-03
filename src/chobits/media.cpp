@@ -61,6 +61,9 @@ static void sws_free(SwsContext** sws);
 static bool audio_to_tensor(std::vector<torch::Tensor>& audio,                                    SwrContext* swr, AVFrame* frame);
 static bool video_to_tensor(std::vector<torch::Tensor>& audio, std::vector<torch::Tensor>& video, SwsContext* sws, AVFrame* frame);
 
+static bool open_audio_file(const std::string& file);
+static bool open_video_file(const std::string& file);
+
 static std::vector<std::string> list_train_dataset();
 
 bool chobits::media::open_media() {
@@ -106,6 +109,93 @@ bool chobits::media::open_media() {
 }
 
 bool chobits::media::open_file(const std::string& file) {
+    if(file.ends_with(".mp3") || file.ends_with(".wav")) {
+        return open_audio_file(file);
+    } else {
+        return open_video_file(file);
+    }
+}
+
+static bool open_audio_file(const std::string& file) {
+    int ret = 0;
+    AVFormatContext* format_ctx = avformat_alloc_context();
+    ret = avformat_open_input(&format_ctx, file.c_str(), nullptr, nullptr);
+    if(ret != 0) {
+        avformat_close_input(&format_ctx);
+        std::printf("打开输入文件失败：%d - %s\n", ret, file.c_str());
+        return false;
+    }
+    // av_dump_format(format_ctx, 0, format_ctx->url, 0);
+    int audio_index = -1;
+    for(uint32_t i = 0; i < format_ctx->nb_streams; ++i) {
+        auto stream = format_ctx->streams[i];
+        if(stream->codecpar->codec_type == AVMEDIA_TYPE_AUDIO) {
+            audio_index = stream->index;
+        } else {
+            // -
+        }
+    }
+    if(audio_index < 0) {
+        avformat_close_input(&format_ctx);
+        std::printf("查找媒体轨道失败：%d - %s\n", audio_index, file.c_str());
+        return false;
+    }
+    std::printf("打开输入文件成功：%d - %s\n", audio_index, file.c_str());
+    const AVStream* audio_stream    = format_ctx->streams[audio_index];
+    const AVCodec * audio_codec     = avcodec_find_decoder(audio_stream->codecpar->codec_id);
+    AVCodecContext* audio_codec_ctx = avcodec_alloc_context3(audio_codec);
+    ret = avcodec_parameters_to_context(audio_codec_ctx, audio_stream->codecpar);
+    ret = avcodec_open2(audio_codec_ctx, audio_codec, nullptr);
+    if(ret != 0) {
+        avcodec_free_context(&audio_codec_ctx);
+        avformat_close_input(&format_ctx);
+        std::printf("打开音频解码器失败：%d\n", ret);
+        return false;
+    }
+    double audio_time  = 0;
+    double audio_base  = av_q2d(audio_stream->time_base);
+    uint64_t audio_pos = 0;
+    uint64_t audio_frame_count = 0;
+    AVFrame * frame  = av_frame_alloc();
+    AVPacket* packet = av_packet_alloc();
+    SwrContext* audio_swr = nullptr;
+    init_context();
+    std::vector<torch::Tensor>& audio = dataset.audio[dataset_index];
+    std::vector<torch::Tensor>& video = dataset.video[dataset_index];
+    while(chobits::running && av_read_frame(format_ctx, packet) == 0) {
+        if(packet->stream_index == audio_index) {
+            if(avcodec_send_packet(audio_codec_ctx, packet) == 0) {
+                while(chobits::running && avcodec_receive_frame(audio_codec_ctx, frame) == 0) {
+                    ++audio_frame_count;
+                    if(audio_pos == 0) {
+                        audio_pos = frame->pts;
+                    }
+                    audio_time = (frame->pts - audio_pos) * audio_base;
+                    if(audio_swr == nullptr) {
+                        audio_swr = init_audio_swr(audio_codec_ctx, frame);
+                    }
+                    if(audio_swr != nullptr) {
+                        audio_to_tensor(audio, audio_swr, frame);
+                        video.push_back(torch::empty({ 0 }));
+                    }
+                    av_frame_unref(frame);
+                }
+            }
+        } else {
+            // -
+        }
+        av_packet_unref(packet);
+    }
+    swr_free(&audio_swr);
+    av_frame_free(&frame);
+    av_packet_free(&packet);
+    avcodec_free_context(&audio_codec_ctx);
+    avformat_close_input(&format_ctx);
+    std::printf("文件处理完成：%" PRIu64 " - %.2f - %s\n", audio_frame_count, audio_time, file.c_str());
+    return true;
+}
+
+static bool open_video_file(const std::string& file) {
     int ret = 0;
     AVFormatContext* format_ctx = avformat_alloc_context();
     ret = avformat_open_input(&format_ctx, file.c_str(), nullptr, nullptr);
@@ -220,6 +310,14 @@ bool chobits::media::open_file(const std::string& file) {
     avcodec_free_context(&video_codec_ctx);
     avformat_close_input(&format_ctx);
     std::printf("文件处理完成：%" PRIu64 " - %" PRIu64 " - %.2f - %.2f - %s\n", audio_frame_count, video_frame_count, audio_time, video_time, file.c_str());
+    while(audio.size() != video.size()) {
+        if(audio.size() > video.size()) {
+            video.push_back(torch::zeros({ 3, chobits::video_height, chobits::video_width }));
+        } else {
+            auto pcm_size = int(dataset.audio_size / sizeof(short));
+            audio.push_back(torch::zeros({ pcm_size }));
+        }
+    }
     return true;
 }
 
@@ -649,7 +747,12 @@ static std::vector<std::string> list_train_dataset() {
         const auto iterator = std::filesystem::directory_iterator(chobits::train_dataset);
         for(const auto& entry : iterator) {
             const auto& file = entry.path().string();
-            if(std::filesystem::is_regular_file(file) && (file.ends_with(".mp4") || file.ends_with(".mkv"))) {
+            if(std::filesystem::is_regular_file(file) && (
+                file.ends_with(".mp3") ||
+                file.ends_with(".wav") ||
+                file.ends_with(".mp4") ||
+                file.ends_with(".mkv")
+            )) {
                 files.push_back(file);
             }
         }

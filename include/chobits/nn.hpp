@@ -33,13 +33,49 @@ public:
         const torch::Tensor& input
     ) {
 //      return torch::relu(input);
-//      return torch::silu(input);
-        return torch::leaky_relu(input);
+        return torch::silu(input);
+//      return torch::leaky_relu(input);
     }
 
 };
 
 TORCH_MODULE(Activation);
+
+class QueryImpl : public torch::nn::Module {
+
+private:
+    torch::nn::Sequential conv{ nullptr };
+
+public:
+    QueryImpl(
+        const int64_t i_channels,
+        const int64_t o_channels,
+        const int64_t dim,
+        const int64_t kernel  = 3,
+        const int64_t padding = 1
+    ) {
+        this->conv = this->register_module("conv", torch::nn::Sequential(
+            torch::nn::Conv1d(torch::nn::Conv1dOptions(i_channels, o_channels, kernel).padding(padding)),
+            chobits::nn::Activation(),
+            torch::nn::Conv1d(torch::nn::Conv1dOptions(o_channels, o_channels, kernel).padding(padding)),
+            torch::nn::LayerNorm(torch::nn::LayerNormOptions(std::vector<int64_t>{ dim }))
+        ));
+    }
+
+public:
+    torch::Tensor forward(
+        const torch::Tensor& input
+    ) {
+        return this->conv->forward(input);
+    }
+
+    void init() {
+        init_weight(this->conv.ptr());
+    }
+
+};
+
+TORCH_MODULE(Query);
 
 class ExpertImpl : public torch::nn::Module {
 
@@ -77,6 +113,7 @@ class MoEImpl : public torch::nn::Module {
 
 private:
     torch::nn::Linear     gate   { nullptr };
+    torch::nn::LayerNorm  norm   { nullptr };
     torch::nn::ModuleList experts{         };
 
 public:
@@ -89,6 +126,7 @@ public:
             experts->push_back(chobits::nn::Expert(embed_dim));
         }
         this->gate    = this->register_module("gate",    torch::nn::Linear(embed_dim, num_experts));
+        this->norm    = this->register_module("norm",    torch::nn::LayerNorm(torch::nn::LayerNormOptions(std::vector<int64_t>{ embed_dim })));
         this->experts = this->register_module("experts", experts);
     }
 
@@ -107,11 +145,12 @@ public:
         auto stacked_expert_outs  = torch::stack(expert_outs, 1);
         auto weighted_expert_outs = stacked_expert_outs * gate_weights.unsqueeze(-1);
         auto final_output = weighted_expert_outs.sum(1);
-        return final_output.view(input.sizes()) + input;
+        return this->norm->forward(final_output.view(input.sizes()) + input);
     }
 
     void init() {
         init_weight(this->gate.ptr());
+        init_weight(this->norm.ptr());
         init_weight(this->experts.ptr());
     }
 
@@ -187,12 +226,14 @@ private:
     torch::nn::Sequential patch_s{ nullptr };
     torch::nn::Sequential patch_l{ nullptr };
     torch::nn::LayerNorm  norm   { nullptr };
+    chobits::nn::Query    query  { nullptr };
     chobits::nn::MHA      mha    { nullptr };
 
 public:
     ViTImpl(
         const int64_t h,
         const int64_t w,
+        const int64_t channels,
         const int64_t i_channels,
         const int64_t o_channels,
         const shape_t stride,
@@ -224,8 +265,9 @@ public:
             chobits::nn::Activation(),
             torch::nn::Conv2d(torch::nn::Conv2dOptions(o_channels, o_channels, kernel_h).padding(padding_h).dilation(dilation_h).stride(stride_h))
         ));
-        this->norm = this->register_module("norm", torch::nn::LayerNorm(torch::nn::LayerNormOptions(std::vector<int64_t>{ o_dim })));
-        this->mha  = this->register_module("mha",  chobits::nn::MHA(o_dim, o_dim, o_dim, o_dim, h_dim, num_heads));
+        this->norm  = this->register_module("norm",  torch::nn::LayerNorm(torch::nn::LayerNormOptions(std::vector<int64_t>{ o_dim })));
+        this->query = this->register_module("query", chobits::nn::Query(seq_len, channels, o_dim));
+        this->mha   = this->register_module("mha",   chobits::nn::MHA(o_dim, o_dim, o_dim, o_dim, h_dim, num_heads));
     }
     
 public:
@@ -238,13 +280,15 @@ public:
              input_l = input_l + this->embed_l;
         auto out = torch::cat({ input_s, input_l }, -1);
              out = this->norm->forward(out);
-        return this->mha->forward(out, out, out);
+        auto query = this->query->forward(out);
+        return this->mha->forward(query, out, out);
     }
 
     void init() {
         init_weight(this->patch_s.ptr());
         init_weight(this->patch_l.ptr());
         init_weight(this->norm.ptr());
+        init_weight(this->query.ptr());
         init_weight(this->mha.ptr());
     }
 
@@ -257,8 +301,6 @@ class MixerImpl : public torch::nn::Module {
 private:
     chobits::nn::MHA audio_mha{ nullptr };
     chobits::nn::MHA video_mha{ nullptr };
-    chobits::nn::MHA muxer_mha{ nullptr };
-    chobits::nn::MHA mixer_mha{ nullptr };
 
 public:
     MixerImpl(
@@ -269,33 +311,21 @@ public:
     ) {
         this->audio_mha = this->register_module("audio_mha", chobits::nn::MHA(audio_dim, video_dim, video_dim, audio_dim, h_dim, num_heads));
         this->video_mha = this->register_module("video_mha", chobits::nn::MHA(video_dim, audio_dim, audio_dim, video_dim, h_dim, num_heads));
-        this->muxer_mha = this->register_module("muxer_mha", chobits::nn::MHA(audio_dim, video_dim, video_dim, audio_dim, h_dim, num_heads));
-        this->mixer_mha = this->register_module("mixer_mha", chobits::nn::MHA(audio_dim, audio_dim, audio_dim, audio_dim, h_dim, num_heads));
     }
     
 public:
-    std::tuple<torch::Tensor, torch::Tensor, torch::Tensor> forward(
+    std::tuple<torch::Tensor, torch::Tensor> forward(
         const torch::Tensor& audio,
-        const torch::Tensor& video,
-        const torch::Tensor& input
+        const torch::Tensor& video
     ) {
-        auto audio_o = this->audio_mha->forward(audio,   video,   video  );
-        auto video_o = this->video_mha->forward(video,   audio,   audio  );
-        auto muxer_o = this->muxer_mha->forward(audio_o, video_o, video_o);
-        if(input.defined()) {
-            auto mixer_o = this->mixer_mha->forward(muxer_o, input, input);
-            return { audio_o, video_o, mixer_o };
-        } else {
-            auto mixer_o = this->mixer_mha->forward(muxer_o, muxer_o, muxer_o);
-            return { audio_o, video_o, mixer_o };
-        }
+        auto audio_o = this->audio_mha->forward(audio, video, video);
+        auto video_o = this->video_mha->forward(video, audio, audio);
+        return { audio_o, video_o };
     }
 
     void init() {
         init_weight(this->audio_mha.ptr());
         init_weight(this->video_mha.ptr());
-        init_weight(this->muxer_mha.ptr());
-        init_weight(this->mixer_mha.ptr());
     }
 
 };
@@ -305,38 +335,40 @@ TORCH_MODULE(Mixer);
 class TalkImpl : public torch::nn::Module {
 
 private:
-    torch::Tensor         embed{ nullptr };
+    chobits::nn::Query    query{ nullptr };
     chobits::nn::MHA      mha  { nullptr };
-    torch::nn::Sequential talk { nullptr };
+    torch::nn::Sequential out  { nullptr };
 
 public:
     TalkImpl(
+        const int64_t channels   = 512,
         const int64_t i_features = 256,
         const int64_t o_features = 800,
         const int64_t num_heads  = 8
     ) {
-        this->embed = this->register_parameter("embed", torch::zeros({ 1, 4, i_features }));
-        this->mha   = this->register_module   ("mha",   chobits::nn::MHA(i_features, i_features, i_features, i_features, i_features * 2, num_heads));
-        this->talk  = this->register_module   ("talk",  torch::nn::Sequential(
+        this->query = this->register_module("query", chobits::nn::Query(channels, 4, i_features));
+        this->mha   = this->register_module("mha",   chobits::nn::MHA(i_features, i_features, i_features, i_features, i_features * 2, num_heads));
+        this->out   = this->register_module("out",   torch::nn::Sequential(
             torch::nn::Linear(i_features * 4, o_features * 2),
-            chobits::nn::Activation(),
+            torch::nn::Tanh(),
             torch::nn::Linear(o_features * 2, o_features)
         ));
     }
 
 public:
     torch::Tensor forward(
-        const torch::Tensor& input
+        const torch::Tensor& audio
     ) {
-        auto out = torch::cat({ this->embed.expand({ input.size(0), -1, -1 }), input }, 1);
-             out = this->mha->forward(out, out, out);
-             out = out.index({ torch::indexing::Slice(), torch::indexing::Slice(0, 4), torch::indexing::Slice() }).flatten(1);
-        return torch::tanh(this->talk->forward(out));
+        auto query = this->query->forward(audio);
+        auto out   = this->mha->forward(query, audio, audio);
+             out   = out.flatten(1);
+        return torch::tanh(this->out->forward(out));
     }
 
     void init() {
+        init_weight(this->query.ptr());
         init_weight(this->mha.ptr());
-        init_weight(this->talk.ptr());
+        init_weight(this->out.ptr());
     }
 
 };
@@ -355,35 +387,37 @@ private:
     chobits::nn::ViT      audio_vit{ nullptr };
     chobits::nn::ViT      video_vit{ nullptr };
     chobits::nn::ViT      image_vit{ nullptr };
-    chobits::nn::MHA      video_mha{ nullptr };
+    chobits::nn::MHA      image_mha{ nullptr };
+    chobits::nn::MHA      mixer_mha{ nullptr };
     torch::nn::ModuleList mixers   {         };
     chobits::nn::Talk     talk     { nullptr };
 
 public:
     ChobitsImpl() {
         this->audio_vit = this->register_module("audio_vit", chobits::nn::ViT(
-            11, 201, 32, 128,
+            11, 201, 512, 32, 128,
             std::vector<int64_t>{ 2, 2 },
             std::vector<int64_t>{ 2, 2 }, std::vector<int64_t>{ 5, 5 },
             std::vector<int64_t>{ 0, 0 }, std::vector<int64_t>{ 1, 1 }
         ));
         this->video_vit = this->register_module("video_vit", chobits::nn::ViT(
-            360, 640, 32, 256,
+            360, 640, 512, 32, 256,
             std::vector<int64_t>{ 20, 20 },
             std::vector<int64_t>{ 20, 20 }, std::vector<int64_t>{ 40, 40 },
             std::vector<int64_t>{  0,  0 }, std::vector<int64_t>{ 10, 10 }
         ));
         this->image_vit = this->register_module("image_vit", chobits::nn::ViT(
-            360, 640, 3, 256,
+            360, 640, 512, 3, 256,
             std::vector<int64_t>{ 20, 20 },
             std::vector<int64_t>{ 20, 20 }, std::vector<int64_t>{ 40, 40 },
             std::vector<int64_t>{  0,  0 }, std::vector<int64_t>{ 10, 10 }
         ));
         torch::nn::ModuleList mixers;
         for (int i = 0; i < 3; ++i) {
-            mixers->push_back(chobits::nn::Mixer(256, 512, 512));
+            mixers->push_back(chobits::nn::Mixer(256, 512, 1024, 8));
         }
-        this->video_mha = this->register_module("video_mha", chobits::nn::MHA(512, 512, 512, 512, 1024, 8));
+        this->image_mha = this->register_module("image_mha", chobits::nn::MHA(512, 512, 512, 512, 1024, 8));
+        this->mixer_mha = this->register_module("mixer_mha", chobits::nn::MHA(256, 512, 512, 256, 1024, 8));
         this->mixers    = this->register_module("mixers",    mixers);
         this->talk      = this->register_module("talk",      chobits::nn::Talk());
     }
@@ -414,27 +448,29 @@ public:
 //      auto p = torch::angle(com);
              m = torch::log10(m + 1e-8) / 8;
              m = m.view({ audio.size(0), audio.size(1), m.size(1), m.size(2) }).transpose(2, 3).contiguous();
-        auto v = video.select(2,  0);
-        auto i = video.select(1, -1);
         auto audio_o = this->audio_vit->forward(m);
-        auto video_o = this->video_vit->forward(v);
-        auto image_o = this->image_vit->forward(i);
-             video_o = this->video_mha->forward(video_o, image_o, image_o);
-        torch::Tensor mixer_o{ nullptr };
-        for (auto iter = this->mixers->begin(); iter != this->mixers->end(); ++iter) {
-            auto [ audio_x, video_x, mixer_x ] = (*iter)->as<chobits::nn::Mixer>()->forward(audio_o, video_o, mixer_o);
-            audio_o = audio_x;
-            video_o = video_x;
-            mixer_o = mixer_x;
+        if(video.numel() != 0) {
+            auto v = video.select(2,  0);
+            auto i = video.select(1, -1);
+            auto video_o = this->video_vit->forward(v);
+            auto image_o = this->image_vit->forward(i);
+                 video_o = this->image_mha->forward(video_o, image_o, image_o);
+            for (auto iter = this->mixers->begin(); iter != this->mixers->end(); ++iter) {
+                auto [ audio_x, video_x ] = (*iter)->as<chobits::nn::Mixer>()->forward(audio_o, video_o);
+                audio_o = audio_x;
+                video_o = video_x;
+            }
+            audio_o = this->mixer_mha->forward(audio_o, video_o, video_o);
         }
-        return this->talk->forward(mixer_o);
+        return this->talk->forward(audio_o);
     }
 
     void init() {
         init_weight(this->audio_vit.ptr());
         init_weight(this->video_vit.ptr());
         init_weight(this->image_vit.ptr());
-        init_weight(this->video_mha.ptr());
+        init_weight(this->image_mha.ptr());
+        init_weight(this->mixer_mha.ptr());
         init_weight(this->mixers.ptr());
         init_weight(this->talk.ptr());
     }
@@ -445,6 +481,8 @@ TORCH_MODULE(Chobits);
 
 static void init_weight(std::shared_ptr<torch::nn::Module> module) {
     if(auto* layer = module->as<torch::nn::Conv2d>()) {
+        layer->reset_parameters();
+    } else if(auto* layer = module->as<torch::nn::Conv1d>()) {
         layer->reset_parameters();
     } else if(auto* layer = module->as<torch::nn::Linear>()) {
         layer->reset_parameters();
@@ -459,6 +497,8 @@ static void init_weight(std::shared_ptr<torch::nn::Module> module) {
     } else if(auto* layer = module->as<chobits::nn::ViT>()) {
         layer->init();
     } else if(auto* layer = module->as<chobits::nn::Talk>()) {
+        layer->init();
+    } else if(auto* layer = module->as<chobits::nn::Query>()) {
         layer->init();
     } else if(auto* layer = module->as<chobits::nn::Mixer>()) {
         layer->init();

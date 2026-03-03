@@ -24,9 +24,11 @@
         chobits::mode_file = true;
         chobits::mode_play = true;
         #if _WIN32
-        chobits::train_dataset = "D:/tmp/video.mp4";
+        // chobits::train_dataset = "D:/tmp/video.mp4";
+        chobits::train_dataset = "D:/tmp/audio.wav";
         #else
-        chobits::train_dataset = "video.mp4";
+        // chobits::train_dataset = "video.mp4";
+        chobits::train_dataset = "audio.wav";
         #endif
         chobits::media::open_media();
     });
@@ -36,7 +38,7 @@
         std::cout << video.sizes() << std::endl;
         std::cout << label.sizes() << std::endl;
         if(success) {
-            chobits::media::set_data(audio[0], video);
+            chobits::media::set_data(audio[0][0], video);
         } else {
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
         }

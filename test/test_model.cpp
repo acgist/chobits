@@ -42,7 +42,7 @@ static void info(std::shared_ptr<torch::nn::Module> layer) {
 [[maybe_unused]] static void test_vit() {
     torch::NoGradGuard no_grad_guard;
     chobits::nn::ViT layer(
-        11, 201, 32, 128,
+        11, 201, 512, 32, 128,
         std::vector<int64_t>{ 2, 2 },
         std::vector<int64_t>{ 2, 2 }, std::vector<int64_t>{ 5, 5 },
         std::vector<int64_t>{ 0, 0 }, std::vector<int64_t>{ 1, 1 }
@@ -58,14 +58,12 @@ static void info(std::shared_ptr<torch::nn::Module> layer) {
     chobits::nn::Mixer layer;
     layer->init();
     info(layer.ptr());
-    auto [ audio, video, output ] = layer->forward(
-        torch::randn({ 10, 256, 256 }),
-        torch::randn({ 10, 256, 512 }),
-        torch::randn({ 10, 256, 256 })
+    auto [ audio, video ] = layer->forward(
+        torch::randn({ 10, 128, 256 }),
+        torch::randn({ 10, 256, 512 })
     );
     std::cout << audio.sizes() << std::endl;
     std::cout << video.sizes() << std::endl;
-    std::cout << output.sizes() << std::endl;
 }
 
 [[maybe_unused]] static void test_talk() {
@@ -73,7 +71,7 @@ static void info(std::shared_ptr<torch::nn::Module> layer) {
     chobits::nn::Talk layer;
     layer->init();
     info(layer.ptr());
-    auto output = layer->forward(torch::randn({ 10, 256, 256 }));
+    auto output = layer->forward(torch::randn({ 10, 512, 256 }));
     std::cout << output.sizes() << std::endl;
 }
 
@@ -84,6 +82,7 @@ static void info(std::shared_ptr<torch::nn::Module> layer) {
     info(layer.ptr());
     auto output = layer->forward(
         torch::randn({ 10, 32, 800 }),
+//      torch::empty({ 0 })
         torch::randn({ 10, 32, 3, 360, 640 })
     );
     std::cout << output.sizes() << std::endl;
@@ -93,9 +92,11 @@ static void info(std::shared_ptr<torch::nn::Module> layer) {
     chobits::mode_save = true;
     std::thread media_thread([]() {
         #if _WIN32
-        chobits::media::open_file("D:/tmp/video.mp4");
+        // chobits::media::open_file("D:/tmp/video.mp4");
+        chobits::media::open_file("D:/tmp/audio.wav");
         #else
-        chobits::media::open_file("video.mp4");
+        // chobits::media::open_file("video.mp4");
+        chobits::media::open_file("audio.wav");
         #endif
     });
     chobits::model::Trainer trainer;
