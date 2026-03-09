@@ -39,17 +39,27 @@ static void info(std::shared_ptr<torch::nn::Module> layer) {
     std::cout << output.sizes() << std::endl;
 }
 
-[[maybe_unused]] static void test_vit() {
+[[maybe_unused]] static void test_ast() {
     torch::NoGradGuard no_grad_guard;
-    chobits::nn::ViT layer(
-        11, 201, 512, 32, 128,
-        std::vector<int64_t>{ 2, 2 },
-        std::vector<int64_t>{ 2, 2 }, std::vector<int64_t>{ 5, 5 },
-        std::vector<int64_t>{ 0, 0 }, std::vector<int64_t>{ 1, 1 }
+    chobits::nn::AsT layer(
+        32 * 800, 512, 1, 256,
+        100, 200
     );
     layer->init();
     info(layer.ptr());
-    auto output = layer->forward(torch::randn({ 10, 32, 11, 201 }));
+    auto output = layer->forward(torch::randn({ 10, 1, 32 * 800 }));
+    std::cout << output.sizes() << std::endl;
+}
+
+[[maybe_unused]] static void test_vit() {
+    torch::NoGradGuard no_grad_guard;
+    chobits::nn::ViT layer(
+        360, 640, 512, 32, 512,
+        std::vector<int64_t>{ 20, 20 }, std::vector<int64_t>{ 40, 40 }
+    );
+    layer->init();
+    info(layer.ptr());
+    auto output = layer->forward(torch::randn({ 10, 32, 360, 640 }));
     std::cout << output.sizes() << std::endl;
 }
 
@@ -82,7 +92,6 @@ static void info(std::shared_ptr<torch::nn::Module> layer) {
     info(layer.ptr());
     auto output = layer->forward(
         torch::randn({ 10, 32, 800 }),
-//      torch::empty({ 0 })
         torch::randn({ 10, 32, 3, 360, 640 })
     );
     std::cout << output.sizes() << std::endl;
@@ -91,6 +100,7 @@ static void info(std::shared_ptr<torch::nn::Module> layer) {
 [[maybe_unused]] static void test_eval() {
     chobits::mode_save = true;
     std::thread media_thread([]() {
+        chobits::train_media = "audio";
         #if _WIN32
         // chobits::media::open_file("D:/tmp/video.mp4");
         chobits::media::open_file("D:/tmp/audio.wav");
@@ -109,6 +119,7 @@ int main() {
     try {
         // test_moe();
         // test_mha();
+        // test_ast();
         // test_vit();
         // test_mixer();
         // test_talk();

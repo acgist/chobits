@@ -41,6 +41,105 @@ public:
 
 TORCH_MODULE(Activation);
 
+class PatchImpl : public torch::nn::Module {
+
+private:
+    torch::Tensor         embed{ nullptr };
+    torch::nn::LayerNorm  norm { nullptr };
+    torch::nn::Sequential conv { nullptr };
+
+public:
+    PatchImpl(
+        const int64_t h,
+        const int64_t w,
+        const int64_t i_channels,
+        const int64_t o_channels,
+        const shape_t kernel_p,
+        const shape_t stride_p,
+        const shape_t padding_p  = std::vector<int64_t>{ 0, 0 },
+        const shape_t dilation_p = std::vector<int64_t>{ 1, 1 },
+        const shape_t kernel_h   = std::vector<int64_t>{ 3, 3 },
+        const shape_t stride_h   = std::vector<int64_t>{ 1, 1 },
+        const shape_t padding_h  = std::vector<int64_t>{ 1, 1 },
+        const shape_t dilation_h = std::vector<int64_t>{ 1, 1 }
+    ) {
+        const int64_t seq_len = (h / stride_p[0]) * (w / stride_p[1]);
+        this->embed = this->register_parameter("embed", torch::zeros({ 1, seq_len, o_channels }));
+        this->norm  = this->register_module("norm",     torch::nn::LayerNorm(torch::nn::LayerNormOptions(std::vector<int64_t>{ o_channels })));
+        this->conv  = this->register_module("conv",     torch::nn::Sequential(
+            torch::nn::Conv2d(torch::nn::Conv2dOptions(i_channels, o_channels, kernel_p).padding(padding_p).dilation(dilation_p).stride(stride_p)),
+            chobits::nn::Activation(),
+            torch::nn::Conv2d(torch::nn::Conv2dOptions(o_channels, o_channels, kernel_h).padding(padding_h).dilation(dilation_h).stride(stride_h))
+        ));
+    }
+
+public:
+    torch::Tensor forward(
+        const torch::Tensor& input
+    ) {
+        auto out = this->conv->forward(input).flatten(2).transpose(1, 2);
+             out = out + this->embed;
+        return this->norm->forward(out);
+    }
+
+    void init() {
+        init_weight(this->conv.ptr());
+        init_weight(this->norm.ptr());
+    }
+
+};
+
+TORCH_MODULE(Patch);
+
+class Patch1dImpl : public torch::nn::Module {
+
+private:
+    torch::Tensor         embed{ nullptr };
+    torch::nn::LayerNorm  norm { nullptr };
+    torch::nn::Sequential conv { nullptr };
+
+public:
+    Patch1dImpl(
+        const int64_t l,
+        const int64_t i_channels,
+        const int64_t o_channels,
+        const int64_t kernel_p,
+        const int64_t stride_p,
+        const int64_t padding_p  = 0,
+        const int64_t dilation_p = 1,
+        const int64_t kernel_h   = 3,
+        const int64_t stride_h   = 1,
+        const int64_t padding_h  = 1,
+        const int64_t dilation_h = 1
+    ) {
+        const int64_t seq_len = l / stride_p;
+        this->embed = this->register_parameter("embed", torch::zeros({ 1, seq_len, o_channels }));
+        this->norm  = this->register_module("norm",     torch::nn::LayerNorm(torch::nn::LayerNormOptions(std::vector<int64_t>{ o_channels })));
+        this->conv  = this->register_module("conv",     torch::nn::Sequential(
+            torch::nn::Conv1d(torch::nn::Conv1dOptions(i_channels, o_channels, kernel_p).padding(padding_p).dilation(dilation_p).stride(stride_p)),
+            chobits::nn::Activation(),
+            torch::nn::Conv1d(torch::nn::Conv1dOptions(o_channels, o_channels, kernel_h).padding(padding_h).dilation(dilation_h).stride(stride_h))
+        ));
+    }
+
+public:
+    torch::Tensor forward(
+        const torch::Tensor& input
+    ) {
+        auto out = this->conv->forward(input).transpose(1, 2);
+             out = out + this->embed;
+        return this->norm->forward(out);
+    }
+
+    void init() {
+        init_weight(this->conv.ptr());
+        init_weight(this->norm.ptr());
+    }
+
+};
+
+TORCH_MODULE(Patch1d);
+
 class QueryImpl : public torch::nn::Module {
 
 private:
@@ -218,16 +317,66 @@ public:
 
 TORCH_MODULE(MHA);
 
+class AsTImpl : public torch::nn::Module {
+
+private:
+    chobits::nn::Patch1d   patch_s{ nullptr };
+    chobits::nn::Patch1d   patch_l{ nullptr };
+    chobits::nn::Query     query  { nullptr };
+    chobits::nn::MHA       mha    { nullptr };
+    chobits::nn::MHA       out    { nullptr };
+
+public:
+    AsTImpl(
+        const int64_t l,
+        const int64_t channels,
+        const int64_t i_channels,
+        const int64_t o_channels,
+        const int64_t kernel_s,
+        const int64_t kernel_l,
+        const int64_t num_heads = 8
+    ) {
+        const int64_t o_dim   = o_channels;
+        const int64_t h_dim   = o_dim * 2;
+        const int64_t seq_len = l / kernel_s;
+        this->patch_s = this->register_module("patch_s", chobits::nn::Patch1d(l, i_channels, o_channels, kernel_s, kernel_s));
+        this->patch_l = this->register_module("patch_l", chobits::nn::Patch1d(l, i_channels, o_channels, kernel_l, kernel_l));
+        this->query = this->register_module("query", chobits::nn::Query(seq_len, channels, o_dim));
+        this->mha   = this->register_module("mha",   chobits::nn::MHA(o_dim, o_dim, o_dim, o_dim, h_dim, num_heads));
+        this->out   = this->register_module("out",   chobits::nn::MHA(o_dim, o_dim, o_dim, o_dim, h_dim, num_heads));
+    }
+    
+public:
+    torch::Tensor forward(
+        const torch::Tensor& input
+    ) {
+        auto input_s = this->patch_s->forward(input);
+        auto input_l = this->patch_l->forward(input);
+        auto out     = this->mha->forward(input_s, input_l, input_l);
+        auto query   = this->query->forward(out);
+        return this->out->forward(query, out, out);
+    }
+
+    void init() {
+        init_weight(this->patch_s.ptr());
+        init_weight(this->patch_l.ptr());
+        init_weight(this->query.ptr());
+        init_weight(this->mha.ptr());
+        init_weight(this->out.ptr());
+    }
+
+};
+
+TORCH_MODULE(AsT);
+
 class ViTImpl : public torch::nn::Module {
 
 private:
-    torch::Tensor         embed_s{ nullptr };
-    torch::Tensor         embed_l{ nullptr };
-    torch::nn::Sequential patch_s{ nullptr };
-    torch::nn::Sequential patch_l{ nullptr };
-    torch::nn::LayerNorm  norm   { nullptr };
-    chobits::nn::Query    query  { nullptr };
-    chobits::nn::MHA      mha    { nullptr };
+    chobits::nn::Patch   patch_s{ nullptr };
+    chobits::nn::Patch   patch_l{ nullptr };
+    chobits::nn::Query   query  { nullptr };
+    chobits::nn::MHA     mha    { nullptr };
+    chobits::nn::MHA     out    { nullptr };
 
 public:
     ViTImpl(
@@ -236,60 +385,37 @@ public:
         const int64_t channels,
         const int64_t i_channels,
         const int64_t o_channels,
-        const shape_t stride,
         const shape_t kernel_s,
         const shape_t kernel_l,
-        const shape_t padding_s  = std::vector<int64_t>{ 0, 0 },
-        const shape_t padding_l  = std::vector<int64_t>{ 0, 0 },
-        const shape_t dilation_s = std::vector<int64_t>{ 1, 1 },
-        const shape_t dilation_l = std::vector<int64_t>{ 1, 1 },
-        const shape_t stride_h   = std::vector<int64_t>{ 1, 1 },
-        const shape_t kernel_h   = std::vector<int64_t>{ 3, 3 },
-        const shape_t padding_h  = std::vector<int64_t>{ 1, 1 },
-        const shape_t dilation_h = std::vector<int64_t>{ 1, 1 },
-        const int64_t num_heads  = 8
+        const int64_t num_heads = 8
     ) {
-        const int64_t dim     = o_channels;
-        const int64_t o_dim   = dim   * 2;
+        const int64_t o_dim   = o_channels;
         const int64_t h_dim   = o_dim * 2;
-        const int64_t seq_len = (h / stride[0]) * (w / stride[1]);
-        this->embed_s = this->register_parameter("embed_s", torch::zeros({ 1, seq_len, dim }));
-        this->embed_l = this->register_parameter("embed_l", torch::zeros({ 1, seq_len, dim }));
-        this->patch_s = this->register_module("patch_s", torch::nn::Sequential(
-            torch::nn::Conv2d(torch::nn::Conv2dOptions(i_channels, o_channels, kernel_s).padding(padding_s).dilation(dilation_s).stride(stride)),
-            chobits::nn::Activation(),
-            torch::nn::Conv2d(torch::nn::Conv2dOptions(o_channels, o_channels, kernel_h).padding(padding_h).dilation(dilation_h).stride(stride_h))
-        ));
-        this->patch_l = this->register_module("patch_l", torch::nn::Sequential(
-            torch::nn::Conv2d(torch::nn::Conv2dOptions(i_channels, o_channels, kernel_l).padding(padding_l).dilation(dilation_l).stride(stride)),
-            chobits::nn::Activation(),
-            torch::nn::Conv2d(torch::nn::Conv2dOptions(o_channels, o_channels, kernel_h).padding(padding_h).dilation(dilation_h).stride(stride_h))
-        ));
-        this->norm  = this->register_module("norm",  torch::nn::LayerNorm(torch::nn::LayerNormOptions(std::vector<int64_t>{ o_dim })));
+        const int64_t seq_len = (h / kernel_s[0]) * (w / kernel_s[1]);
+        this->patch_s = this->register_module("patch_s", chobits::nn::Patch(h, w, i_channels, o_channels, kernel_s, kernel_s));
+        this->patch_l = this->register_module("patch_l", chobits::nn::Patch(h, w, i_channels, o_channels, kernel_l, kernel_l));
         this->query = this->register_module("query", chobits::nn::Query(seq_len, channels, o_dim));
         this->mha   = this->register_module("mha",   chobits::nn::MHA(o_dim, o_dim, o_dim, o_dim, h_dim, num_heads));
+        this->out   = this->register_module("out",   chobits::nn::MHA(o_dim, o_dim, o_dim, o_dim, h_dim, num_heads));
     }
     
 public:
     torch::Tensor forward(
         const torch::Tensor& input
     ) {
-        auto input_s = this->patch_s->forward(input).flatten(2).transpose(1, 2);
-        auto input_l = this->patch_l->forward(input).flatten(2).transpose(1, 2);
-             input_s = input_s + this->embed_s;
-             input_l = input_l + this->embed_l;
-        auto out = torch::cat({ input_s, input_l }, -1);
-             out = this->norm->forward(out);
-        auto query = this->query->forward(out);
-        return this->mha->forward(query, out, out);
+        auto input_s = this->patch_s->forward(input);
+        auto input_l = this->patch_l->forward(input);
+        auto out     = this->mha->forward(input_s, input_l, input_l);
+        auto query   = this->query->forward(out);
+        return this->out->forward(query, out, out);
     }
 
     void init() {
         init_weight(this->patch_s.ptr());
         init_weight(this->patch_l.ptr());
-        init_weight(this->norm.ptr());
         init_weight(this->query.ptr());
         init_weight(this->mha.ptr());
+        init_weight(this->out.ptr());
     }
 
 };
@@ -380,11 +506,7 @@ class ChobitsImpl : public torch::nn::Module {
 friend chobits::model::Trainer;
 
 private:
-    const int64_t n_fft    = 400;
-    const int64_t hop_size = 80;
-    const int64_t win_size = 400;
-    torch::Tensor         window   { nullptr };
-    chobits::nn::ViT      audio_vit{ nullptr };
+    chobits::nn::AsT      audio_ast{ nullptr };
     chobits::nn::ViT      video_vit{ nullptr };
     chobits::nn::ViT      image_vit{ nullptr };
     chobits::nn::MHA      image_mha{ nullptr };
@@ -394,23 +516,17 @@ private:
 
 public:
     ChobitsImpl() {
-        this->audio_vit = this->register_module("audio_vit", chobits::nn::ViT(
-            11, 201, 512, 32, 128,
-            std::vector<int64_t>{ 2, 2 },
-            std::vector<int64_t>{ 2, 2 }, std::vector<int64_t>{ 5, 5 },
-            std::vector<int64_t>{ 0, 0 }, std::vector<int64_t>{ 1, 1 }
+        this->audio_ast = this->register_module("audio_ast", chobits::nn::AsT(
+            32 * 800, 512, 1, 256,
+            100, 200
         ));
         this->video_vit = this->register_module("video_vit", chobits::nn::ViT(
-            360, 640, 512, 32, 256,
-            std::vector<int64_t>{ 20, 20 },
-            std::vector<int64_t>{ 20, 20 }, std::vector<int64_t>{ 40, 40 },
-            std::vector<int64_t>{  0,  0 }, std::vector<int64_t>{ 10, 10 }
+            360, 640, 512, 32, 512,
+            std::vector<int64_t>{ 20, 20 }, std::vector<int64_t>{ 40, 40 }
         ));
         this->image_vit = this->register_module("image_vit", chobits::nn::ViT(
-            360, 640, 512, 3, 256,
-            std::vector<int64_t>{ 20, 20 },
-            std::vector<int64_t>{ 20, 20 }, std::vector<int64_t>{ 40, 40 },
-            std::vector<int64_t>{  0,  0 }, std::vector<int64_t>{ 10, 10 }
+            360, 640, 512, 3, 512,
+            std::vector<int64_t>{ 20, 20 }, std::vector<int64_t>{ 40, 40 }
         ));
         torch::nn::ModuleList mixers;
         for (int i = 0; i < 3; ++i) {
@@ -424,49 +540,33 @@ public:
 
 public:
     torch::Tensor forward(
+        const torch::Tensor& audio
+    ) {
+        auto audio_o = this->audio_ast->forward(audio.view({ audio.size(0), 1, -1 }));
+        return this->talk->forward(audio_o);
+    }
+    
+    torch::Tensor forward(
         const torch::Tensor& audio,
         const torch::Tensor& video
     ) {
-        if(!this->window.defined()) {
-            this->window = torch::hann_window(this->win_size).to(audio.device());
+        auto audio_o = this->audio_ast->forward(audio.view({ audio.size(0), 1, -1 }));
+        auto video_i = video.select(2, -1);
+        auto image_i = video.select(1, -1);
+        auto video_o = this->video_vit->forward(video_i);
+        auto image_o = this->image_vit->forward(image_i);
+             video_o = this->image_mha->forward(video_o, image_o, image_o);
+        for (auto iter = this->mixers->begin(); iter != this->mixers->end(); ++iter) {
+            auto [ audio_x, video_x ] = (*iter)->as<chobits::nn::Mixer>()->forward(audio_o, video_o);
+            audio_o = audio_x;
+            video_o = video_x;
         }
-        auto com = torch::stft(
-            audio.view({ -1, audio.size(2) }),
-            this->n_fft,
-            this->hop_size,
-            this->win_size,
-            this->window,
-            true,
-            "reflect",
-            false,
-            std::nullopt,
-            true
-        );
-        // mag理论范围：0~200
-        auto m = torch::abs(com);
-        // pha理论范围：-PI~PI
-//      auto p = torch::angle(com);
-             m = torch::log10(m + 1e-8) / 8;
-             m = m.view({ audio.size(0), audio.size(1), m.size(1), m.size(2) }).transpose(2, 3).contiguous();
-        auto audio_o = this->audio_vit->forward(m);
-        if(video.numel() != 0) {
-            auto v = video.select(2,  0);
-            auto i = video.select(1, -1);
-            auto video_o = this->video_vit->forward(v);
-            auto image_o = this->image_vit->forward(i);
-                 video_o = this->image_mha->forward(video_o, image_o, image_o);
-            for (auto iter = this->mixers->begin(); iter != this->mixers->end(); ++iter) {
-                auto [ audio_x, video_x ] = (*iter)->as<chobits::nn::Mixer>()->forward(audio_o, video_o);
-                audio_o = audio_x;
-                video_o = video_x;
-            }
-            audio_o = this->mixer_mha->forward(audio_o, video_o, video_o);
-        }
+        audio_o = this->mixer_mha->forward(audio_o, video_o, video_o);
         return this->talk->forward(audio_o);
     }
 
     void init() {
-        init_weight(this->audio_vit.ptr());
+        init_weight(this->audio_ast.ptr());
         init_weight(this->video_vit.ptr());
         init_weight(this->image_vit.ptr());
         init_weight(this->image_mha.ptr());
@@ -494,9 +594,13 @@ static void init_weight(std::shared_ptr<torch::nn::Module> module) {
         layer->init();
     } else if(auto* layer = module->as<chobits::nn::MHA>()) {
         layer->init();
+    } else if(auto* layer = module->as<chobits::nn::AsT>()) {
+        layer->init();
     } else if(auto* layer = module->as<chobits::nn::ViT>()) {
         layer->init();
     } else if(auto* layer = module->as<chobits::nn::Talk>()) {
+        layer->init();
+    } else if(auto* layer = module->as<chobits::nn::Patch>()) {
         layer->init();
     } else if(auto* layer = module->as<chobits::nn::Query>()) {
         layer->init();

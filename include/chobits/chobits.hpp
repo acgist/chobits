@@ -32,6 +32,7 @@ extern int         batch_size;    // 训练批次大小
 extern int         batch_length;  // 训练批次长度
 extern int         batch_thread;  // 文件加载线程
 extern int         train_epoch;   // 训练批次轮数
+extern std::string train_media;   // 训练媒体类型
 extern std::string train_dataset; // 训练数据集
 
 extern int per_wind_second;   // 音频每秒窗口

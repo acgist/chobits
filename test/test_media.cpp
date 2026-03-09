@@ -23,6 +23,7 @@
         // open_media
         chobits::mode_file = true;
         chobits::mode_play = true;
+        chobits::train_media = "audio";
         #if _WIN32
         // chobits::train_dataset = "D:/tmp/video.mp4";
         chobits::train_dataset = "D:/tmp/audio.wav";

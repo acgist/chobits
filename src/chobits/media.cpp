@@ -58,7 +58,7 @@ static std::string device_name(AVMediaType type, const char* format_name);
 
 static void sws_free(SwsContext** sws);
 
-static bool audio_to_tensor(std::vector<torch::Tensor>& audio,                                    SwrContext* swr, AVFrame* frame);
+static bool audio_to_tensor(std::vector<torch::Tensor>& audio, std::vector<torch::Tensor>& video, SwrContext* swr, AVFrame* frame);
 static bool video_to_tensor(std::vector<torch::Tensor>& audio, std::vector<torch::Tensor>& video, SwsContext* sws, AVFrame* frame);
 
 static bool open_audio_file(const std::string& file);
@@ -109,10 +109,13 @@ bool chobits::media::open_media() {
 }
 
 bool chobits::media::open_file(const std::string& file) {
-    if(file.ends_with(".mp3") || file.ends_with(".wav")) {
+    if(chobits::train_media == "audio") {
         return open_audio_file(file);
-    } else {
+    } else if(chobits::train_media == "video") {
         return open_video_file(file);
+    } else {
+        // -
+        return false;
     }
 }
 
@@ -175,8 +178,7 @@ static bool open_audio_file(const std::string& file) {
                         audio_swr = init_audio_swr(audio_codec_ctx, frame);
                     }
                     if(audio_swr != nullptr) {
-                        audio_to_tensor(audio, audio_swr, frame);
-                        video.push_back(torch::empty({ 0 }));
+                        audio_to_tensor(audio, video, audio_swr, frame);
                     }
                     av_frame_unref(frame);
                 }
@@ -275,7 +277,7 @@ static bool open_video_file(const std::string& file) {
                         audio_swr = init_audio_swr(audio_codec_ctx, frame);
                     }
                     if(audio_swr != nullptr) {
-                        audio_to_tensor(audio, audio_swr, frame);
+                        audio_to_tensor(audio, video, audio_swr, frame);
                     }
                     av_frame_unref(frame);
                 }
@@ -378,7 +380,7 @@ bool chobits::media::open_device() {
     init_context();
     std::vector<torch::Tensor>& audio = dataset.audio[dataset_index];
     std::vector<torch::Tensor>& video = dataset.video[dataset_index];
-    std::thread audio_thread([&audio, audio_format_ctx, &audio_frame_count]() {
+    std::thread audio_thread([&audio, &video, audio_format_ctx, &audio_frame_count]() {
         int ret = 0;
         const AVStream* audio_stream    = audio_format_ctx->streams[0];
         const AVCodec * audio_codec     = avcodec_find_decoder(audio_stream->codecpar->codec_id);
@@ -402,7 +404,7 @@ bool chobits::media::open_device() {
                             audio_swr = init_audio_swr(audio_codec_ctx, frame);
                         }
                         if(audio_swr != nullptr) {
-                            audio_to_tensor(audio, audio_swr, frame);
+                            audio_to_tensor(audio, video, audio_swr, frame);
                         }
                         av_frame_unref(frame);
                     }
@@ -487,10 +489,22 @@ std::tuple<bool, at::Tensor, at::Tensor, at::Tensor> chobits::media::get_data() 
                 !(
                     chobits::running &&
                     (
-                        dataset.audio.size() < batch_thread ||
-                        dataset.video.size() < batch_thread ||
-                        std::any_of(dataset.audio.begin(), dataset.audio.end(), [batch_length](const auto& audio) { return audio.size() < batch_length; }) ||
-                        std::any_of(dataset.video.begin(), dataset.video.end(), [batch_length](const auto& video) { return video.size() < batch_length; })
+                        (
+                            chobits::train_media == "audio" &&
+                            (
+                                dataset.audio.size() < batch_thread ||
+                                std::any_of(dataset.audio.begin(), dataset.audio.end(), [batch_length](const auto& audio) { return audio.size() < batch_length; })
+                            )
+                        ) ||
+                        (
+                            chobits::train_media == "video" &&
+                            (
+                                dataset.audio.size() < batch_thread ||
+                                dataset.video.size() < batch_thread ||
+                                std::any_of(dataset.audio.begin(), dataset.audio.end(), [batch_length](const auto& audio) { return audio.size() < batch_length; }) ||
+                                std::any_of(dataset.video.begin(), dataset.video.end(), [batch_length](const auto& video) { return video.size() < batch_length; })
+                            )
+                        )
                     )
                 );
         });
@@ -502,20 +516,33 @@ std::tuple<bool, at::Tensor, at::Tensor, at::Tensor> chobits::media::get_data() 
                 auto& dataset_audio = dataset.audio[index];
                 auto& dataset_video = dataset.video[index];
                 audio.push_back(torch::stack(std::vector<torch::Tensor>(dataset_audio.begin(), dataset_audio.begin() + chobits::batch_length)));
-                video.push_back(torch::stack(std::vector<torch::Tensor>(dataset_video.begin(), dataset_video.begin() + chobits::batch_length)));
+                if(chobits::train_media == "video") {
+                    video.push_back(torch::stack(std::vector<torch::Tensor>(dataset_video.begin(), dataset_video.begin() + chobits::batch_length)));
+                }
                 label.push_back(dataset_audio[chobits::batch_length]);
                 dataset_audio.erase(dataset_audio.begin());
-                dataset_video.erase(dataset_video.begin());
+                if(chobits::train_media == "video") {
+                    dataset_video.erase(dataset_video.begin());
+                }
             }
         }
     }
     dataset.condition.notify_all();
-    return {
-        true,
-        torch::stack(audio),
-        torch::stack(video),
-        torch::stack(label)
-    };
+    if(chobits::train_media == "video") {
+        return {
+            true,
+            torch::stack(audio),
+            torch::stack(video),
+            torch::stack(label)
+        };
+    } else {
+        return {
+            true,
+            torch::stack(audio),
+            {},
+            torch::stack(label)
+        };
+    }
 }
 
 void chobits::media::set_data(const torch::Tensor& audio, const torch::Tensor& video) {
@@ -524,13 +551,18 @@ void chobits::media::set_data(const torch::Tensor& audio, const torch::Tensor& v
     auto audio_data   = reinterpret_cast<short*>(audio_tensor.data_ptr());
     auto audio_length = audio.size(-1);
     if(chobits::mode_play) {
-        // video
-        auto video_tensor = video[0][0].permute({ 1, 2, 0 }).contiguous().mul(video_normalization).add(video_normalization).to(torch::kUInt8).cpu();
-        auto video_data   = reinterpret_cast<char*>(video_tensor.data_ptr());
-        auto video_width  = chobits::video_width * 3;
-        // play
-        chobits::player::play_audio(audio_data, audio_length * sizeof(short));
-        chobits::player::play_video(video_data, video_width);
+        if(chobits::train_media == "video") {
+            // video
+            auto video_tensor = video[0][0].permute({ 1, 2, 0 }).contiguous().mul(video_normalization).add(video_normalization).to(torch::kUInt8).cpu();
+            auto video_data   = reinterpret_cast<char*>(video_tensor.data_ptr());
+            auto video_width  = chobits::video_width * 3;
+            // play
+            chobits::player::play_audio(audio_data, audio_length * sizeof(short));
+            chobits::player::play_video(video_data, video_width);
+        } else {
+            // play
+            chobits::player::play_audio(audio_data, audio_length * sizeof(short));
+        }
     }
     if(chobits::mode_save && chobits::running && stream.is_open()) {
         stream.write(reinterpret_cast<const char*>(audio_data), audio_length * sizeof(short));
@@ -634,7 +666,7 @@ static void sws_free(SwsContext** sws) {
     *sws = nullptr;
 }
 
-static bool audio_to_tensor(std::vector<torch::Tensor>& audio, SwrContext* swr, AVFrame* frame) {
+static bool audio_to_tensor(std::vector<torch::Tensor>& audio, std::vector<torch::Tensor>& video, SwrContext* swr, AVFrame* frame) {
     thread_local static size_t remain = 0;
     thread_local static std::vector<uint8_t> audio_buffer(2 * chobits::audio_nb_channels * audio_bytes_per_sample * chobits::audio_sample_rate);
     uint8_t* buffer = audio_buffer.data() + remain;
@@ -652,12 +684,12 @@ static bool audio_to_tensor(std::vector<torch::Tensor>& audio, SwrContext* swr, 
     if(remain >= dataset.audio_size) {
         std::unique_lock<std::mutex> lock(dataset.mutex);
         while(remain >= dataset.audio_size) {
-            if(audio.size() > dataset.cache_size) {
+            if(audio.size() > dataset.cache_size && video.size() > dataset.cache_size) {
                 if(chobits::mode_drop) {
                     std::printf("丢弃音频数据：%" PRIu64 "\n", audio.size());
                 } else {
-                    dataset.condition.wait(lock, [&audio]() {
-                        return !(chobits::running && audio.size() > dataset.cache_size);
+                    dataset.condition.wait(lock, [&audio, &video]() {
+                        return !(chobits::running && audio.size() > dataset.cache_size && video.size() > dataset.cache_size);
                     });
                     insert = true;
                 }
@@ -698,12 +730,12 @@ static bool video_to_tensor(std::vector<torch::Tensor>& audio, std::vector<torch
     {
         std::unique_lock<std::mutex> lock(dataset.mutex);
         if(audio.size() >= video.size()) {
-            if(video.size() > dataset.cache_size) {
+            if(audio.size() > dataset.cache_size && video.size() > dataset.cache_size) {
                 if(chobits::mode_drop) {
                     std::printf("丢弃视频数据：%" PRIu64 "\n", video.size());
                 } else {
-                    dataset.condition.wait(lock, [&video]() {
-                        return !(chobits::running && video.size() > dataset.cache_size);
+                    dataset.condition.wait(lock, [&audio, &video]() {
+                        return !(chobits::running && video.size() > dataset.cache_size && video.size() > dataset.cache_size);
                     });
                     insert = true;
                 }
@@ -747,13 +779,28 @@ static std::vector<std::string> list_train_dataset() {
         const auto iterator = std::filesystem::directory_iterator(chobits::train_dataset);
         for(const auto& entry : iterator) {
             const auto& file = entry.path().string();
-            if(std::filesystem::is_regular_file(file) && (
-                file.ends_with(".mp3") ||
-                file.ends_with(".wav") ||
-                file.ends_with(".mp4") ||
-                file.ends_with(".mkv")
-            )) {
-                files.push_back(file);
+            if(std::filesystem::is_regular_file(file)) {
+                if(
+                    chobits::train_media == "audio" &&
+                    (
+                        file.ends_with(".mp3") ||
+                        file.ends_with(".wav") ||
+                        file.ends_with(".mp4") ||
+                        file.ends_with(".mkv")
+                    )
+                ) {
+                    files.push_back(file);
+                } else if(
+                    chobits::train_media == "video" &&
+                    (
+                        file.ends_with(".mp4") ||
+                        file.ends_with(".mkv")
+                    )
+                ) {
+                    files.push_back(file);
+                } else {
+                    // -
+                }
             }
         }
     } else if(std::filesystem::is_regular_file(chobits::train_dataset)) {

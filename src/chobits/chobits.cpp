@@ -17,7 +17,8 @@ int         chobits::batch_size    = 1;
 int         chobits::batch_length  = 32;
 int         chobits::batch_thread  = 1;
 int         chobits::train_epoch   = 1;
-std::string chobits::train_dataset = "";
+std::string chobits::train_media   = "video";
+std::string chobits::train_dataset = "./";
 
 int chobits::per_wind_second   = 10;
 int chobits::audio_sample_rate = 8000;

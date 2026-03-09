@@ -13,6 +13,73 @@ class Activation(nn.Module):
         return F.silu(input)
 #       return F.leaky_relu(input)
 
+class Patch(nn.Module):
+    def __init__(
+        self,
+        h         : int,
+        w         : int,
+        i_channels: int,
+        o_channels: int,
+        kernel_p  : List[int],
+        stride_p  : List[int],
+        padding_p : List[int] = [ 0, 0 ],
+        dilation_p: List[int] = [ 1, 1 ],
+        kernel_h  : List[int] = [ 3, 3 ],
+        stride_h  : List[int] = [ 1, 1 ],
+        padding_h : List[int] = [ 1, 1 ],
+        dilation_h: List[int] = [ 1, 1 ],
+    ):
+        super().__init__()
+        seq_len = (h // stride_p[0]) * (w // stride_p[1])
+        self.embed = torch.zeros(1, seq_len, o_channels)
+        self.norm  = nn.LayerNorm(o_channels)
+        self.conv  = nn.Sequential(
+            nn.Conv2d(i_channels, o_channels, kernel_p, stride = stride_p, padding = padding_p, dilation = dilation_p),
+            Activation(),
+            nn.Conv2d(o_channels, o_channels, kernel_h, stride = stride_h, padding = padding_h, dilation = dilation_h),
+        )
+
+    def forward(
+        self,
+        input: torch.Tensor,
+    ) -> torch.Tensor:
+        out = self.conv(input).flatten(2).transpose(1, 2)
+        out = out + self.embed
+        return self.norm(out)
+
+class Patch1d(nn.Module):
+    def __init__(
+        self,
+        l         : int,
+        i_channels: int,
+        o_channels: int,
+        kernel_p  : int,
+        stride_p  : int,
+        padding_p : int = 0,
+        dilation_p: int = 1,
+        kernel_h  : int = 3,
+        stride_h  : int = 1,
+        padding_h : int = 1,
+        dilation_h: int = 1,
+    ):
+        super().__init__()
+        seq_len = l // kernel_p
+        self.embed = torch.zeros(1, seq_len, o_channels)
+        self.norm  = nn.LayerNorm(o_channels)
+        self.conv  = nn.Sequential(
+            nn.Conv1d(i_channels, o_channels, kernel_p, stride = stride_p, padding = padding_p, dilation = dilation_p),
+            Activation(),
+            nn.Conv1d(o_channels, o_channels, kernel_h, stride = stride_h, padding = padding_h, dilation = dilation_h),
+        )
+
+    def forward(
+        self,
+        input: torch.Tensor,
+    ) -> torch.Tensor:
+        out = self.conv(input).transpose(1, 2)
+        out = out + self.embed
+        return self.norm(out)
+    
 class Query(nn.Module):
     def __init__(
         self,
@@ -116,6 +183,37 @@ class MHA(nn.Module):
         o = self.norm(o)
         return self.ffn(o)
 
+class AsT(nn.Module):
+    def __init__(
+        self,
+        l         : int,
+        channels  : int,
+        i_channels: int,
+        o_channels: int,
+        kernel_s  : int,
+        kernel_l  : int,
+        num_heads : int = 8,
+    ):
+        super().__init__()
+        o_dim   = o_channels
+        h_dim   = o_dim * 2
+        seq_len = l // kernel_s
+        self.patch_s = Patch1d(l, i_channels, o_channels, kernel_s, kernel_s)
+        self.patch_l = Patch1d(l, i_channels, o_channels, kernel_l, kernel_l)
+        self.query = Query(seq_len, channels, o_dim)
+        self.mha   = MHA(o_dim, o_dim, o_dim, o_dim, h_dim, num_heads)
+        self.out   = MHA(o_dim, o_dim, o_dim, o_dim, h_dim, num_heads)
+
+    def forward(
+        self,
+        input: torch.Tensor,
+    ) -> torch.Tensor:
+        input_s = self.patch_s(input)
+        input_l = self.patch_l(input)
+        out     = self.mha(input_s, input_l, input_l)
+        query   = self.query(out)
+        return self.out(query, out, out)
+
 class ViT(nn.Module):
     def __init__(
         self,
@@ -124,52 +222,29 @@ class ViT(nn.Module):
         channels  : int,
         i_channels: int,
         o_channels: int,
-        stride    : List[int],
         kernel_s  : List[int],
         kernel_l  : List[int],
-        padding_s : List[int] = [ 0, 0 ],
-        padding_l : List[int] = [ 0, 0 ],
-        dilation_s: List[int] = [ 1, 1 ],
-        dilation_l: List[int] = [ 1, 1 ],
-        stride_h  : List[int] = [ 1, 1 ],
-        kernel_h  : List[int] = [ 3, 3 ],
-        padding_h : List[int] = [ 1, 1 ],
-        dilation_h: List[int] = [ 1, 1 ],
-        num_heads : int       = 8,
+        num_heads : int = 8,
     ):
         super().__init__()
-        dim     = o_channels
-        o_dim   = dim   * 2
+        o_dim   = o_channels
         h_dim   = o_dim * 2
-        seq_len = (h // stride[0]) * (w // stride[1])
-        self.embed_s = torch.zeros(1, seq_len, dim)
-        self.embed_l = torch.zeros(1, seq_len, dim)
-        self.patch_s = nn.Sequential(
-            nn.Conv2d(i_channels, o_channels, kernel_s, padding = padding_s, dilation = dilation_s, stride = stride),
-            Activation(),
-            nn.Conv2d(o_channels, o_channels, kernel_h, padding = padding_h, dilation = dilation_h, stride = stride_h),
-        )
-        self.patch_l = nn.Sequential(
-            nn.Conv2d(i_channels, o_channels, kernel_l, padding = padding_l, dilation = dilation_l, stride = stride),
-            Activation(),
-            nn.Conv2d(o_channels, o_channels, kernel_h, padding = padding_h, dilation = dilation_h, stride = stride_h),
-        )
-        self.norm = nn.LayerNorm(o_dim)
-        self.conv = Query(seq_len, channels, o_dim)
-        self.mha  = MHA(o_dim, o_dim, o_dim, o_dim, h_dim, num_heads)
+        seq_len = (h // kernel_s[0]) * (w // kernel_s[1])
+        self.patch_s = Patch(h, w, i_channels, o_channels, kernel_s, kernel_s)
+        self.patch_l = Patch(h, w, i_channels, o_channels, kernel_l, kernel_l)
+        self.query = Query(seq_len, channels, o_dim)
+        self.mha   = MHA(o_dim, o_dim, o_dim, o_dim, h_dim, num_heads)
+        self.out   = MHA(o_dim, o_dim, o_dim, o_dim, h_dim, num_heads)
 
     def forward(
         self,
         input: torch.Tensor,
     ) -> torch.Tensor:
-        input_s = self.patch_s(input).flatten(2).transpose(1, 2)
-        input_l = self.patch_l(input).flatten(2).transpose(1, 2)
-        input_s = input_s + self.embed_s
-        input_l = input_l + self.embed_l
-        out = torch.cat([ input_s, input_l ], dim = -1)
-        out = self.norm(out)
-        query = self.conv(out)
-        return self.mha(query, out, out)
+        input_s = self.patch_s(input)
+        input_l = self.patch_l(input)
+        out     = self.mha(input_s, input_l, input_l)
+        query   = self.query(out)
+        return self.out(query, out, out)
 
 class Mixer(nn.Module):
     def __init__(
@@ -201,9 +276,9 @@ class Talk(nn.Module):
         num_heads : int = 8,
     ):
         super().__init__()
-        self.conv = Query(channels, 4, i_features)
-        self.mha  = MHA(i_features, i_features, i_features, i_features, i_features * 2, num_heads)
-        self.out  = nn.Sequential(
+        self.query = Query(channels, 4, i_features)
+        self.mha   = MHA(i_features, i_features, i_features, i_features, i_features * 2, num_heads)
+        self.out   = nn.Sequential(
             nn.Linear(i_features * 4, o_features * 2),
             nn.Tanh(),
             nn.Linear(o_features * 2, o_features),
@@ -213,7 +288,7 @@ class Talk(nn.Module):
         self,
         audio: torch.Tensor,
     ) -> torch.Tensor:
-        query = self.conv(audio)
+        query = self.query(audio)
         out = self.mha(query, audio, audio)
         out = out.flatten(1)
         return torch.tanh(self.out(out))
@@ -221,27 +296,17 @@ class Talk(nn.Module):
 class Chobits(nn.Module):
     def __init__(self):
         super().__init__()
-        self.n_fft    = 400
-        self.hop_size = 80
-        self.win_size = 400
-        self.window   = None
-        self.audio_vit = ViT(
-            11, 201, 512, 32, 128,
-            [ 2, 2 ],
-            [ 2, 2 ], [ 5, 5 ],
-            [ 0, 0 ], [ 1, 1 ],
+        self.audio_ast = AsT(
+            32 * 800, 512, 1, 256,
+            100, 200,
         )
         self.video_vit = ViT(
-            360, 640, 512, 32, 256,
-            [ 20, 20 ],
+            360, 640, 512, 32, 512,
             [ 20, 20 ], [ 40, 40 ],
-            [  0,  0 ], [ 10, 10 ],
         )
         self.image_vit = ViT(
-            360, 640, 512, 3, 256,
-            [ 20, 20 ],
+            360, 640, 512, 3, 512,
             [ 20, 20 ], [ 40, 40 ],
-            [  0,  0 ], [ 10, 10 ],
         )
         self.image_mha = MHA(512, 512, 512, 512, 1024, 8)
         self.mixer_mha = MHA(256, 512, 512, 256, 1024, 8)
@@ -253,35 +318,17 @@ class Chobits(nn.Module):
         audio: torch.Tensor,
         video: torch.Tensor,
     ) -> torch.Tensor:
-        if self.window is None:
-            self.window = torch.hann_window(self.win_size).to(audio.device)
-        com = torch.stft(
-            audio.view(-1, audio.size(2)),
-            n_fft          = self.n_fft,
-            hop_length     = self.hop_size,
-            win_length     = self.win_size,
-            window         = self.window,
-            center         = True,
-            return_complex = True,
-        )
-        # mag理论范围：0~200
-        m = torch.abs(com)
-        # pha理论范围：-PI~PI
-#       p = torch.angle(com)
-        m = torch.log10(m + 1e-8) / 8
-        m = m.view(audio.size(0), audio.size(1), m.size(1), m.size(2)).transpose(2, 3).contiguous()
-        audio_o = self.audio_vit(m)
-        if video.numel() != 0:
-            v = video.select(2,  0)
-            i = video.select(1, -1)
-            video_o = self.video_vit(v)
-            image_o = self.image_vit(i)
-            video_o = self.image_mha(video_o, image_o, image_o)
-            for mixer in self.mixers:
-                audio_x, video_x = mixer(audio_o, video_o)
-                audio_o = audio_x
-                video_o = video_x
-            audio_o = self.mixer_mha(audio_o, video_o, video_o)
+        audio_o = self.audio_ast(audio.view(audio.size(0), 1, -1))
+        video_i = video.select(2,  0)
+        image_i = video.select(1, -1)
+        video_o = self.video_vit(video_i)
+        image_o = self.image_vit(image_i)
+        video_o = self.image_mha(video_o, image_o, image_o)
+        for mixer in self.mixers:
+            audio_x, video_x = mixer(audio_o, video_o)
+            audio_o = audio_x
+            video_o = video_x
+        audio_o = self.mixer_mha(audio_o, video_o, video_o)
         return self.talk(audio_o)
 
 # model = MoE(512)
@@ -298,14 +345,20 @@ class Chobits(nn.Module):
 # )
 # print(model(*input).shape)
 
-# model = ViT(
-#     11, 201, 512, 32, 128,
-#     [ 2, 2 ],
-#     [ 2, 2 ], [ 5, 5 ],
-#     [ 0, 0 ], [ 1, 1 ],
+# model = AsT(
+#     32 * 800, 512, 1, 256,
+#     100, 200
 # )
 # model.eval()
-# input = torch.randn(10, 32, 11, 201)
+# input = torch.randn(10, 1, 32 * 800)
+# print(model(input).shape)
+
+# model = ViT(
+#     360, 640, 512, 32, 512,
+#     [ 20, 20 ], [ 40, 40 ],
+# )
+# model.eval()
+# input = torch.randn(10, 32, 360, 640)
 # print(model(input).shape)
 
 # model = Mixer()
@@ -327,7 +380,6 @@ model = Chobits()
 model.eval()
 input = (
     torch.randn(10, 32, 800),
-#   torch.empty(0),
     torch.randn(10, 32, 3, 360, 640),
 )
 print(model(*input).shape)
