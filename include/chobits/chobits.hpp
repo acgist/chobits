@@ -21,27 +21,17 @@
 
 namespace chobits {
 
-extern bool running;   // 是否运行
-extern bool mode_drop; // 丢弃模式
-extern bool mode_eval; // 验证模式
-extern bool mode_file; // 文件模式
-extern bool mode_play; // 播放模式
-extern bool mode_save; // 保存模式
+extern bool running; // 是否运行
 
-extern int         batch_size;    // 训练批次大小
-extern int         batch_length;  // 训练批次长度
-extern int         batch_thread;  // 文件加载线程
-extern int         train_epoch;   // 训练批次轮数
-extern std::string train_media;   // 训练媒体类型
-extern std::string train_dataset; // 训练数据集
+extern int per_millisecond; // 分段毫秒
 
-extern int per_wind_second;   // 音频每秒窗口
 extern int audio_sample_rate; // 音频采样率
 extern int audio_nb_channels; // 音频通道
 
 extern int video_width;  // 视频宽度
 extern int video_height; // 视频高度
 
+extern void open_all(const std::string& model_path);
 extern void stop_all();
 
 } // END OF chobits

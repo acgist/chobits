@@ -4,28 +4,41 @@
 #include "chobits/chobits.hpp"
 
 #include <ctime>
+#include <thread>
 #include <iostream>
 
-bool chobits::running   = true;
-bool chobits::mode_drop = false;
-bool chobits::mode_eval = false;
-bool chobits::mode_file = false;
-bool chobits::mode_play = false;
-bool chobits::mode_save = false;
+bool chobits::running = true;
 
-int         chobits::batch_size    = 1;
-int         chobits::batch_length  = 32;
-int         chobits::batch_thread  = 1;
-int         chobits::train_epoch   = 1;
-std::string chobits::train_media   = "video";
-std::string chobits::train_dataset = "./";
+int chobits::per_millisecond = 100;
 
-int chobits::per_wind_second   = 10;
 int chobits::audio_sample_rate = 8000;
 int chobits::audio_nb_channels = 1;
 
 int chobits::video_width  = 640;
 int chobits::video_height = 360;
+
+void chobits::open_all(const std::string& model_path) {
+    std::thread player_thread([]() {
+        if(!chobits::player::open_player()) {
+            chobits::stop_all();
+        }
+    });
+    std::thread media_thread([]() {
+        if(!chobits::media::open_media()) {
+            chobits::stop_all();
+        }
+    });
+    std::thread model_thread([model_path]() {
+        if(chobits::model::open_model(model_path)) {
+            chobits::model::run_model();
+        } else {
+            chobits::stop_all();
+        }
+    });
+    player_thread.join();
+    media_thread.join();
+    model_thread.join();
+}
 
 void chobits::stop_all() {
     std::time_t time = std::time(nullptr);
@@ -36,6 +49,6 @@ void chobits::stop_all() {
     std::printf("等待系统关闭...\n");
     chobits::running = false;
     chobits::player::stop_player();
-    chobits::media::stop_all();
-    chobits::model::stop_all();
+    chobits::media::stop_media();
+    chobits::model::stop_model();
 }

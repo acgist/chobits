@@ -45,7 +45,6 @@ bool chobits::player::open_player() {
             SDL_WaitEventTimeout(&event, 1000);
             if(event.type == SDL_QUIT) {
                 std::printf("退出播放器\n");
-                chobits::stop_all();
                 break;
             } else {
                 // -

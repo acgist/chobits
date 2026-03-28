@@ -1,13 +1,9 @@
-#include "chobits/media.hpp"
-#include "chobits/model.hpp"
 #include "chobits/chobits.hpp"
 
-#include <thread>
 #include <csignal>
 #include <cstring>
 
-static void help();
-static bool init(int argc, char const *argv[]);
+static void welcome();
 static void signal_handler(int code);
 
 int main(int argc, char const *argv[]) {
@@ -16,25 +12,19 @@ int main(int argc, char const *argv[]) {
     #if defined(_WIN32)
     system("chcp 65001");
     #endif
-    if(!init(argc, argv)) {
-        help();
-        return 0;
-    }
+    welcome();
     std::signal(SIGINT,  signal_handler);
     std::signal(SIGTERM, signal_handler);
-    std::thread media_thread([]() {
-        chobits::media::open_media();
-    });
-    std::thread model_thread([]() {
-        chobits::model::open_model();
-    });
-    media_thread.join();
-    model_thread.join();
+    std::string model_path = "./chobits.pt";
+    if(argc > 1) {
+        model_path = argv[1];
+    }
+    chobits::open_all(model_path);
     std::fflush(stdout);
     return 0;
 }
 
-static bool init(int argc, char const *argv[]) {
+static void welcome() {
     std::printf(
 R"(
 洛神赋（节选）
@@ -62,55 +52,6 @@ R"(
 攘皓腕于神浒兮，采湍濑之玄芝。
 )"
     );
-    if(argc == 1) {
-        chobits::mode_drop = true;
-        chobits::mode_eval = true;
-        chobits::mode_file = false;
-        chobits::mode_play = true;
-    } else {
-        if(
-            std::strcmp("?",      argv[1]) == 0 ||
-            std::strcmp("-h",     argv[1]) == 0 ||
-            std::strcmp("--help", argv[1]) == 0
-        ) {
-            return false;
-        } else if(std::strcmp("eval", argv[1]) == 0) {
-            chobits::mode_drop = true;
-            chobits::mode_eval = true;
-            chobits::mode_file = false;
-            chobits::mode_play = true;
-        } else {
-            chobits::mode_drop     = false;
-            chobits::mode_eval     = false;
-            chobits::mode_file     = true;
-            chobits::mode_play     = false;
-            chobits::batch_size    = argc >= 5 ? std::atoi(argv[4]) : 4;
-            chobits::batch_thread  = argc >= 6 ? std::atoi(argv[5]) : 4;
-            chobits::train_epoch   = argc >= 4 ? std::atoi(argv[3]) : 1;
-            chobits::train_media   = argv[2];
-            chobits::train_dataset = argv[1];
-        }
-    }
-    std::printf(
-        "丢弃模式：%d 验证模式：%d 文件模式：%d 播放模式：%d "
-        "训练批次大小：%d 训练批次长度：%d 文件线程数量：%d 训练批次轮数：%d 训练媒体类型：%s 训练数据集：%s "
-        "音频每秒窗口：%d 音频采样率：%d 音频通道：%d "
-        "视频宽度：%d 视频高度：%d\n",
-        chobits::mode_drop, chobits::mode_eval, chobits::mode_file, chobits::mode_play,
-        chobits::batch_size, chobits::batch_length, chobits::batch_thread, chobits::train_epoch, chobits::train_media.c_str(), chobits::train_dataset.c_str(),
-        chobits::per_wind_second, chobits::audio_sample_rate, chobits::audio_nb_channels,
-        chobits::video_width, chobits::video_height
-    );
-    return true;
-}
-
-static void help() {
-    std::printf(R"(帮助：chobits[.exe] [?|-h|--help]
-视频文件训练：chobits[.exe] file [audio|video] [训练批次大小] [训练批次轮数] [文件线程数量]
-媒体设备评估：chobits[.exe] eval
-媒体设备训练：chobits[.exe]
-)");
-    std::fflush(stdout);
 }
 
 static void signal_handler(int code) {

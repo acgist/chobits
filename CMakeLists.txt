@@ -163,24 +163,13 @@ endif()
 
 if(BUILD_TEST)
     add_executable(
-        test_media
-        test/test_media.cpp
+        test_chobits
+        test/test_chobits.cpp
     )
     target_link_libraries(
-        test_media
+        test_chobits
         chobits-core
     )
-    add_test(NAME test_media COMMAND test_media)
-    set_target_properties(test_media PROPERTIES FOLDER "test")
-
-    add_executable(
-        test_model
-        test/test_model.cpp
-    )
-    target_link_libraries(
-        test_model
-        chobits-core
-    )
-    add_test(NAME test_model COMMAND test_model)
-    set_target_properties(test_model PROPERTIES FOLDER "test")
+    add_test(NAME test_chobits COMMAND test_chobits)
+    set_target_properties(test_chobits PROPERTIES FOLDER "test")
 endif()

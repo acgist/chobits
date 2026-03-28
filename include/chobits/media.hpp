@@ -16,8 +16,6 @@
 #define CHOBITS_MEDIA_HPP
 
 #include <tuple>
-#include <string>
-#include <vector>
 
 namespace at {
 
@@ -28,12 +26,9 @@ class Tensor;
 namespace chobits::media {
 
 extern bool open_media();
-extern bool open_file(const std::string& file);
-extern bool open_device();
+extern void stop_media();
 
-extern void stop_all();
-
-extern std::tuple<bool, at::Tensor, at::Tensor, at::Tensor> get_data();
+extern std::tuple<bool, at::Tensor, at::Tensor> get_data();
 extern void set_data(const at::Tensor& audio, const at::Tensor& video);
 
 } // END OF chobits::media

@@ -16,29 +16,13 @@
 #define CHOBITS_MODEL_HPP
 
 #include <string>
-#include <vector>
-#include <functional>
 
 namespace chobits::model {
 
-class Trainer {
+extern bool open_model(const std::string& model_path = "./chobits.pt");
+extern bool stop_model();
 
-private:
-    void info();
-
-public:
-    bool save(const std::string& path = "chobits.pt", bool train = false);
-    bool load(const std::string& path = "chobits.pt", bool train = false);
-    void train();
-    void train(float& loss_val);
-    void eval();
-    void close();
-    
-};
-
-extern bool open_model();
-
-extern void stop_all();
+extern void run_model();
 
 } // END OF chobits::model
 
