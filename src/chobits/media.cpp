@@ -35,6 +35,8 @@ const static AVChannelLayout audio_layout = AV_CHANNEL_LAYOUT_MONO;
 
 const static int audio_bytes_per_sample = av_get_bytes_per_sample(audio_format);
 
+const int video_width_stride = chobits::video_width * 3;
+
 static struct Dataset {
     size_t cache_size = 100;
     size_t audio_size = 2ULL * chobits::audio_sample_rate * chobits::per_millisecond / 1000;
@@ -57,8 +59,8 @@ static bool video_to_tensor(std::vector<torch::Tensor>& audio, std::vector<torch
 static bool drop = true;
 
 bool chobits::media::open_media() {
-    // ffmpeg -devices
     int ret = 0;
+    // ffmpeg -devices
     avdevice_register_all();
     #if _WIN32
     const char* audio_format_name = "dshow";
@@ -86,10 +88,6 @@ bool chobits::media::open_media() {
     av_dict_set(&audio_options, "sample_rate",       "48000",     0);
     av_dict_set(&audio_options, "sample_format",     "pcm_s16le", 0);
     av_dict_set(&audio_options, "audio_buffer_size", "100",       0); // 毫秒
-    // 视频参数
-    av_dict_set(&video_options, "framerate",    "30",      0);
-    av_dict_set(&video_options, "video_size",   "640*480", 0);
-    av_dict_set(&video_options, "pixel_format", "yuyv422", 0);
     ret = avformat_open_input(&audio_format_ctx, audio_device_name.c_str(), audio_format, &audio_options);
     av_dict_free(&audio_options);
     if(ret != 0) {
@@ -98,6 +96,11 @@ bool chobits::media::open_media() {
         std::printf("打开音频硬件失败：%d - %s\n", ret, audio_device_name.c_str());
         return false;
     }
+    // 视频参数
+    av_dict_set(&video_options, "framerate",    "30",       0);
+    av_dict_set(&video_options, "rtbufsize",    "10485760", 0);
+    av_dict_set(&video_options, "video_size",   "640*480",  0);
+    av_dict_set(&video_options, "pixel_format", "yuyv422",  0);
     ret = avformat_open_input(&video_format_ctx, video_device_name.c_str(), video_format, &video_options);
     av_dict_free(&video_options);
     if(ret != 0) {
@@ -106,8 +109,8 @@ bool chobits::media::open_media() {
         std::printf("打开视频硬件失败：%d - %s\n", ret, video_device_name.c_str());
         return false;
     }
-    // av_dump_format(audio_format_ctx, 0, audio_format_ctx->url, 0);
-    // av_dump_format(video_format_ctx, 0, video_format_ctx->url, 0);
+    av_dump_format(audio_format_ctx, 0, audio_format_ctx->url, 0);
+    av_dump_format(video_format_ctx, 0, video_format_ctx->url, 0);
     uint64_t audio_frame_count = 0;
     uint64_t video_frame_count = 0;
     std::vector<torch::Tensor>& audio = dataset.audio;
@@ -141,8 +144,10 @@ bool chobits::media::open_media() {
                         av_frame_unref(frame);
                     }
                 }
+                av_packet_unref(packet);
+            } else {
+                std::this_thread::sleep_for(std::chrono::milliseconds(10));
             }
-            av_packet_unref(packet);
         }
         swr_free(&audio_swr);
         av_frame_free(&frame);
@@ -178,8 +183,10 @@ bool chobits::media::open_media() {
                         av_frame_unref(frame);
                     }
                 }
+                av_packet_unref(packet);
+            } else {
+                std::this_thread::sleep_for(std::chrono::milliseconds(10));
             }
-            av_packet_unref(packet);
         }
         sws_free(&video_sws);
         av_frame_free(&frame);
@@ -231,16 +238,15 @@ std::tuple<bool, at::Tensor, at::Tensor> chobits::media::get_data() {
 
 void chobits::media::set_data(const torch::Tensor& audio, const torch::Tensor& video) {
     // audio
-    auto audio_tensor = audio.mul(audio_normalization).to(torch::kShort).cpu();
+    auto audio_tensor = audio.mul(audio_normalization).squeeze(0).to(torch::kShort).cpu();
     auto audio_data   = reinterpret_cast<short*>(audio_tensor.data_ptr());
     auto audio_length = audio.size(-1);
     // video
     auto video_tensor = video.permute({ 1, 2, 0 }).contiguous().mul(video_normalization).add(video_normalization).to(torch::kUInt8).cpu();
     auto video_data   = reinterpret_cast<char*>(video_tensor.data_ptr());
-    auto video_width  = chobits::video_width * 3;
     // play
     chobits::player::play_audio(audio_data, audio_length * sizeof(short));
-    chobits::player::play_video(video_data, video_width);
+    chobits::player::play_video(video_data, video_width_stride);
     static auto time_point_a = std::chrono::system_clock::now();
            auto time_point_z = std::chrono::system_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(time_point_z - time_point_a).count();
@@ -275,9 +281,9 @@ static SwrContext* init_audio_swr(AVCodecContext* ctx, AVFrame*) {
 }
 
 static SwsContext* init_video_sws(AVCodecContext* ctx, AVFrame* frame) {
-    int  width  = ctx->width  != 0 ? ctx->width  : frame->width;
-    int  height = ctx->height != 0 ? ctx->height : frame->height;
-    auto format = ctx->pix_fmt == AV_PIX_FMT_NONE ? AV_PIX_FMT_YUV420P : ctx->pix_fmt;
+    const int  width  = ctx->width  != 0 ? ctx->width  : frame->width;
+    const int  height = ctx->height != 0 ? ctx->height : frame->height;
+    const auto format = ctx->pix_fmt == AV_PIX_FMT_NONE ? AV_PIX_FMT_YUV420P : ctx->pix_fmt;
     SwsContext* sws = sws_getContext(
         width,                height,                format,
         chobits::video_width, chobits::video_height, video_pix_format,
@@ -305,15 +311,16 @@ static std::string device_name(AVMediaType type, const char* format_name) {
         index = 0;
         for (int i = 0; i < device_list->nb_devices; ++i) {
             AVDeviceInfo* device_info = device_list->devices[i];
-            std::printf(
-                "所有硬件输入设备：%d = %s = %s = %s\n",
-                device_info->nb_media_types,
-                av_get_media_type_string(type),
-                device_info->device_name,
-                device_info->device_description
-            );
             for(int j = 0; j < device_info->nb_media_types; ++j) {
                 AVMediaType media_type = device_info->media_types[j];
+                std::printf(
+                    "硬件输入设备列表：%d = %s = %s = %s = %s\n",
+                    i,
+                    format_name,
+                    av_get_media_type_string(media_type),
+                    device_info->device_name,
+                    device_info->device_description
+                );
                 if(media_type == type) {
                     index = i;
                 }
@@ -323,8 +330,9 @@ static std::string device_name(AVMediaType type, const char* format_name) {
     if(index >= 0) {
         AVDeviceInfo* device_info = device_list->devices[index];
         std::printf(
-            "选择硬件输入设备：%d = %s = %s = %s\n",
-            device_info->nb_media_types,
+            "选择硬件输入设备：%d = %s = %s = %s = %s\n",
+            index,
+            format_name,
             av_get_media_type_string(type),
             device_info->device_name,
             device_info->device_description
@@ -351,9 +359,7 @@ static bool audio_to_tensor(std::vector<torch::Tensor>& audio, std::vector<torch
     }
     const size_t size = chobits::audio_nb_channels * audio_bytes_per_sample * out_samples;
     remain += size;
-    // if(dataset_index == 0) {
-    //     chobits::player::play_audio(buffer, size);
-    // }
+    // chobits::player::play_audio(buffer, size);
     bool insert = false;
     if(remain >= dataset.audio_size) {
         std::unique_lock<std::mutex> lock(dataset.mutex);
@@ -373,7 +379,11 @@ static bool audio_to_tensor(std::vector<torch::Tensor>& audio, std::vector<torch
             if(insert) {
                 auto pcm_data   = reinterpret_cast<short*>(audio_buffer.data());
                 auto pcm_size   = int(dataset.audio_size / sizeof(short));
-                auto pmc_tensor = torch::from_blob(pcm_data, { pcm_size }, torch::kShort).to(torch::kFloat32).div(audio_normalization);
+                auto pmc_tensor = torch::from_blob(
+                    pcm_data,
+                    { pcm_size },
+                    torch::kShort
+                ).to(torch::kFloat32).unsqueeze(0).div(audio_normalization);
                 audio.push_back(std::move(pmc_tensor));
             }
             remain -= dataset.audio_size;
@@ -389,17 +399,14 @@ static bool audio_to_tensor(std::vector<torch::Tensor>& audio, std::vector<torch
 }
 
 static bool video_to_tensor(std::vector<torch::Tensor>& audio, std::vector<torch::Tensor>& video, SwsContext* sws, AVFrame* frame) {
-    thread_local static int width = chobits::video_width * 3;
     thread_local static std::vector<uint8_t> video_buffer(av_image_get_buffer_size(video_pix_format, chobits::video_width, chobits::video_height, 1));
     uint8_t* buffer = video_buffer.data();
-    const int height = sws_scale(sws, (const uint8_t* const *) frame->data, frame->linesize, 0, frame->height, &buffer, &width);
+    const int height = sws_scale(sws, (const uint8_t* const *) frame->data, frame->linesize, 0, frame->height, &buffer, &video_width_stride);
     if(height < 0 || chobits::video_height != height) {
         std::printf("视频重采样失败：%d\n", height);
         return false;
     }
-    // if(dataset_index == 0) {
-    //     chobits::player::play_video(buffer, width);
-    // }
+    // chobits::player::play_video(buffer, video_width_stride);
     bool insert = false;
     {
         std::unique_lock<std::mutex> lock(dataset.mutex);

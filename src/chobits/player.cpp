@@ -3,7 +3,7 @@
 
 #include "SDL2/SDL.h"
 
-struct PlayerState {
+static struct PlayerState {
     bool audio_running = false;
     bool video_running = false;
     SDL_mutex   *     mutex      = nullptr;
@@ -23,9 +23,7 @@ struct PlayerState {
         .callback = nullptr,
         .userdata = nullptr
     };
-};
-
-static PlayerState player_state = { };
+} player_state;
 
 static bool init_audio_player();
 static bool init_video_player();
@@ -44,8 +42,26 @@ bool chobits::player::open_player() {
         while(chobits::running) {
             SDL_WaitEventTimeout(&event, 1000);
             if(event.type == SDL_QUIT) {
+                chobits::stop_all();
                 std::printf("退出播放器\n");
                 break;
+            } else if(event.type == SDL_USEREVENT) {
+                if(SDL_LockMutex(player_state.mutex) != 0) {
+                    std::printf("视频加锁失败：%s\n", SDL_GetError());
+                    continue;
+                }
+                if(SDL_RenderClear(player_state.renderer) != 0) {
+                    std::printf("视频清除失败：%s\n", SDL_GetError());
+                    SDL_UnlockMutex(player_state.mutex);
+                    continue;
+                }
+                if(SDL_RenderCopy(player_state.renderer, player_state.texture, nullptr, nullptr) != 0) {
+                    std::printf("视频拷贝失败：%s\n", SDL_GetError());
+                    SDL_UnlockMutex(player_state.mutex);
+                    continue;
+                }
+                SDL_RenderPresent(player_state.renderer);
+                SDL_UnlockMutex(player_state.mutex);
             } else {
                 // -
             }
@@ -83,37 +99,19 @@ bool chobits::player::play_audio(const void* data, int len) {
 
 bool chobits::player::play_video(const void* data, int len) {
     if(chobits::running && player_state.video_running) {
-        int ret = SDL_LockMutex(player_state.mutex);
-        if(ret != 0) {
+        if(SDL_LockMutex(player_state.mutex) != 0) {
             std::printf("视频加锁失败：%s\n", SDL_GetError());
             return false;
         }
-        ret = SDL_GL_MakeCurrent(SDL_GL_GetCurrentWindow(), SDL_GL_GetCurrentContext());
-        if(ret != 0) {
-            std::printf("窗口绑定失败：%s\n", SDL_GetError());
-            return false;
-        }
-        ret = SDL_UpdateTexture(player_state.texture, nullptr, data, len);
-        if(ret != 0) {
+        if(SDL_UpdateTexture(player_state.texture, nullptr, data, len) != 0) {
             std::printf("视频更新失败：%s\n", SDL_GetError());
+            SDL_UnlockMutex(player_state.mutex);
             return false;
         }
-        ret = SDL_RenderClear(player_state.renderer);
-        if(ret != 0) {
-            std::printf("视频清除失败：%s\n", SDL_GetError());
-            return false;
-        }
-        ret = SDL_RenderCopy(player_state.renderer, player_state.texture, nullptr, nullptr);
-        if(ret != 0) {
-            std::printf("视频拷贝失败：%s\n", SDL_GetError());
-            return false;
-        }
-        SDL_RenderPresent(player_state.renderer);
-        ret = SDL_UnlockMutex(player_state.mutex);
-        if(ret != 0) {
-            std::printf("视频解锁失败：%s\n", SDL_GetError());
-            return false;
-        }
+        SDL_UnlockMutex(player_state.mutex);
+        SDL_Event event;
+        event.type = SDL_USEREVENT;
+        SDL_PushEvent(&event);
         return true;
     }
     return false;

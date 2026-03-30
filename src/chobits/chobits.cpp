@@ -4,8 +4,8 @@
 #include "chobits/chobits.hpp"
 
 #include <ctime>
+#include <mutex>
 #include <thread>
-#include <iostream>
 
 bool chobits::running = true;
 
@@ -16,6 +16,8 @@ int chobits::audio_nb_channels = 1;
 
 int chobits::video_width  = 640;
 int chobits::video_height = 480;
+
+static std::mutex mutex;
 
 void chobits::open_all(const std::string& model_path) {
     std::thread player_thread([]() {
@@ -41,13 +43,19 @@ void chobits::open_all(const std::string& model_path) {
 }
 
 void chobits::stop_all() {
+    {
+        std::lock_guard<std::mutex> lock(mutex);
+        if(!chobits::running) {
+            return;
+        }
+        chobits::running = false;
+    }
     std::time_t time = std::time(nullptr);
     std::tm* tm = std::localtime(&time);
     char buffer[32];
     std::strftime(buffer, sizeof(buffer), "%Y-%m-%d %H:%M:%S", tm);
     std::printf("%s\n", buffer);
     std::printf("等待系统关闭...\n");
-    chobits::running = false;
     chobits::player::stop_player();
     chobits::media::stop_media();
     chobits::model::stop_model();

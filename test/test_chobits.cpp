@@ -7,11 +7,11 @@
 #include "torch/torch.h"
 
 [[maybe_unused]] static void test_media() {
-    std::thread media_thread([]() {
-        chobits::media::open_media();
-    });
     std::thread player_thread([]() {
         chobits::player::open_player();
+    });
+    std::thread media_thread([]() {
+        chobits::media::open_media();
     });
     while(chobits::running) {
         auto [ success, audio, video ] = chobits::media::get_data();
@@ -23,16 +23,16 @@
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
         }
     }
-    media_thread.join();
     player_thread.join();
+    media_thread.join();
 }
 
-[[maybe_unused]] static void test_chobits() {
-    chobits::open_all("./chobits.pt");
+[[maybe_unused]] static void test_model() {
+    chobits::open_all("D://download/chobits.pt");
 }
 
 int main() {
-    test_media();
-    // test_chobits();
+    // test_media();
+    test_model();
     return 0;
 }

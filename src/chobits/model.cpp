@@ -33,6 +33,8 @@ bool chobits::model::stop_model() {
 }
 
 void chobits::model::run_model() {
+    auto audio_memory = torch::randn({1, 10, 1024}, torch::kFloat32).to(model_state.device);
+    auto video_memory = torch::randn({1, 10, 1024}, torch::kFloat32).to(model_state.device);
     while(chobits::running) {
         auto [ success, audio, video ] = chobits::media::get_data();
         if(!success) {
@@ -40,9 +42,14 @@ void chobits::model::run_model() {
             continue;
         }
         std::vector<torch::jit::IValue> input;
-        input.push_back(audio.to(model_state.device));
-        input.push_back(video.to(model_state.device));
-        auto pred = model_state.model.forward(input).toTensor().to(torch::kCPU);
+        input.push_back(audio.unsqueeze(0).to(model_state.device));
+        input.push_back(video.unsqueeze(0).to(model_state.device));
+        input.push_back(audio_memory);
+        input.push_back(video_memory);
+        auto tuple = model_state.model.forward(input).toTuple()->elements();
+        auto pred    = tuple[0].toTensor();
+        audio_memory = tuple[1].toTensor();
+        video_memory = tuple[2].toTensor();
         chobits::media::set_data(pred, video);
     }
 }

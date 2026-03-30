@@ -29,6 +29,7 @@ extern bool open_media();
 extern void stop_media();
 
 extern std::tuple<bool, at::Tensor, at::Tensor> get_data();
+
 extern void set_data(const at::Tensor& audio, const at::Tensor& video);
 
 } // END OF chobits::media
