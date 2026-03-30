@@ -3,8 +3,6 @@
 #include "chobits/chobits.hpp"
 
 #include <thread>
-#include <cinttypes>
-#include <filesystem>
 
 #include "torch/torch.h"
 #include "torch/script.h"
@@ -33,8 +31,8 @@ bool chobits::model::stop_model() {
 }
 
 void chobits::model::run_model() {
-    auto audio_memory = torch::randn({1, 10, 1024}, torch::kFloat32).to(model_state.device);
-    auto video_memory = torch::randn({1, 10, 1024}, torch::kFloat32).to(model_state.device);
+    auto audio_memory = torch::randn({ 1, 10, 1024 }, torch::kFloat32).to(model_state.device);
+    auto video_memory = torch::randn({ 1, 10, 1024 }, torch::kFloat32).to(model_state.device);
     while(chobits::running) {
         auto [ success, audio, video ] = chobits::media::get_data();
         if(!success) {
