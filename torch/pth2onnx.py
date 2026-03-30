@@ -12,14 +12,18 @@ torch.onnx.export(
     model,
     (
         torch.rand(1, 1, 800),
-        torch.rand(1, 3, 480, 640)
+        torch.rand(1, 3, 480, 640),
+        torch.rand(1, 10, 1024),
+        torch.rand(1, 10, 1024),
     ),
-    "D:/download/chobits.onnx",
+    "chobits.onnx",
     dynamo         = True,
     opset_version  = 18,
-    input_names    = [ "audio", "video" ],
-    output_names   = [ "output" ],
+    input_names    = [ "audio", "video", "audio_memory", "video_memory" ],
+    output_names   = [ "output", "audio_memory", "video_memory" ],
     dynamic_shapes = (
+        { 0: batch },
+        { 0: batch },
         { 0: batch },
         { 0: batch },
     )

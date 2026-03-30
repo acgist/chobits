@@ -67,3 +67,14 @@ cmake --config Debug|Release --build . -j 8
 cmake --config Debug|Release --build . --parallel 8
 # cmake --install .
 ```
+
+## 训练
+
+```
+# 安装相关依赖
+# pip install tqdm onnxscript
+# 更新相关依赖（保证所有依赖版本一致）
+#pip install --upgrade torch torchcodec torchaudio torchvision --index-url https://download.pytorch.org/whl/cu126
+
+python trainer.py
+```

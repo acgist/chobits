@@ -1,6 +1,5 @@
 import os
-import sys
-import signal
+import platform
 
 import torch
 import torch.nn as nn
@@ -134,11 +133,11 @@ class Triner:
                     optimizer.zero_grad()
                     scheduler.step()
                     process.set_postfix(
-                        loss = "{:.2f}".format(loss_sum / loss_count),
-                        aedl = "{:.2f}".format(audio_encode_decode_loss_sum / loss_count),
-                        vedl = "{:.2f}".format(video_encode_decode_loss_sum / loss_count),
-                        aml  = "{:.2f}".format(audio_memory_loss_sum / loss_count),
-                        vml  = "{:.2f}".format(video_memory_loss_sum / loss_count),
+                        loss = "{:.6f}".format(loss_sum / loss_count),
+                        aedl = "{:.6f}".format(audio_encode_decode_loss_sum / loss_count),
+                        vedl = "{:.6f}".format(video_encode_decode_loss_sum / loss_count),
+                        aml  = "{:.6f}".format(audio_memory_loss_sum / loss_count),
+                        vml  = "{:.6f}".format(video_memory_loss_sum / loss_count),
                     )
                     audio_encode_decode_loss_sum = 0.0
                     video_encode_decode_loss_sum = 0.0
@@ -169,8 +168,10 @@ if __name__ == '__main__':
     """)
     trainer = Triner()
     try:
-        trainer.train("D:/tmp")
-        # trainer.train("/data/chobits/dataset")
+        if platform.system() == "Windows":
+            trainer.train("D://tmp")
+        else:
+            trainer.train("/data/chobits/video")
     except KeyboardInterrupt:
         print("训练中断")
         trainer.save()

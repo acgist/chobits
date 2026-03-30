@@ -5,11 +5,9 @@ import sounddevice as sd
 
 from dataset import VideoReader, loadDataset
 
-# os.add_dll_directory("D:\\develop\\ffmpeg-n7.1.3-43-g5a1f107b4c-win64-gpl-shared-7.1\\bin")
-
 def test_reader():
     index = 0
-    video_reader = VideoReader("D:/tmp/video.mp4", 200, 1)
+    video_reader = VideoReader("D://tmp/video.mp4", 200, 1)
     cv2.namedWindow("chobits", cv2.WINDOW_AUTOSIZE)
     while True:
         index += 1

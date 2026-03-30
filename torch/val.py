@@ -4,7 +4,7 @@ from model import *
 from dataset import VideoReader
 from torchcodec.encoders import AudioEncoder
 
-video_reader = VideoReader("D:/tmp/video.mp4", 1)
+video_reader = VideoReader("video.mp4", 1)
 
 model = Chobits()
 model.load_state_dict(torch.load("chobits.pth"))
