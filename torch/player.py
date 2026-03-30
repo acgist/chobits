@@ -18,7 +18,7 @@ def test_reader():
             break
         print(f"音频Tensor形状: {audio_tensor.shape} {audio_tensor.dtype}")
         print(f"视频Tensor形状: {video_tensor.shape} {video_tensor.dtype}")
-        audio_np = audio_tensor.squeeze(0).numpy()
+        audio_np = audio_tensor.view(-1).squeeze(0).numpy()
         sd.play(audio_np, samplerate = 8000)
         sd.wait()
         video_np = video_tensor.permute(0, 2, 3, 1).numpy()
@@ -34,7 +34,6 @@ def test_loader():
     loader = loadDataset("D://tmp")
     cv2.namedWindow("chobits", cv2.WINDOW_AUTOSIZE)
     for batch in loader:
-        print(batch)
         success, audio_tensor, video_tensor = batch
         success = success[0]
         audio_tensor = audio_tensor[0]
@@ -43,7 +42,7 @@ def test_loader():
             break
         print(f"音频Tensor形状: {audio_tensor.shape} {audio_tensor.dtype}")
         print(f"视频Tensor形状: {video_tensor.shape} {video_tensor.dtype}")
-        audio_np = audio_tensor.squeeze(0).numpy()
+        audio_np = audio_tensor.view(-1).squeeze(0).numpy()
         sd.play(audio_np, samplerate = 8000)
         sd.wait()
         video_np = video_tensor.permute(0, 2, 3, 1).numpy()

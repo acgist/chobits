@@ -32,7 +32,7 @@
 }
 
 int main() {
-    // test_media();
-    test_chobits();
+    test_media();
+    // test_chobits();
     return 0;
 }

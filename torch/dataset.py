@@ -7,10 +7,6 @@ from tqdm import tqdm
 from torch.utils.data import DataLoader
 from torchcodec.decoders import AudioDecoder, VideoDecoder
 
-"""
-注意：torch版本和torchcodec版本需要保持一致
-"""
-
 global_lock = threading.Lock()
 
 class VideoReader:
@@ -22,8 +18,8 @@ class VideoReader:
         millis: int = 100,  # 片段时间
         ar    : int = 8000, # 音频采样
         ac    : int = 1,    # 音频通道
-        vh    : int = 180,  # 视频高度
-        vw    : int = 320,  # 视频宽度
+        vh    : int = 480,  # 视频高度
+        vw    : int = 640,  # 视频宽度
     ):
         self.init   = False
         self.path   = path
@@ -35,7 +31,7 @@ class VideoReader:
         self.vh     = vh
         self.vw     = vw
 
-    def load(self):
+    def load(self) -> None:
         with global_lock:
             if self.init:
                 return
@@ -57,11 +53,13 @@ class VideoReader:
             try:
                 audio_tensor = self.audio_decoer.get_samples_played_in_range(1. * self.millis * index / 1000., 1. * self.millis * (index + self.length) / 1000.).data
                 video_tensor = self.video_decoer.get_frames_played_in_range (1. * self.millis * index / 1000., 1. * self.millis * (index + self.length) / 1000.).data
+                audio_tensor = audio_tensor.view(self.length, 1, -1)
                 video_tensor = video_tensor[torch.linspace(0, video_tensor.shape[0] - 1, self.length).long()]
                 video_tensor = self.transform(video_tensor)
                 return True, audio_tensor, video_tensor
             except Exception as e:
                 print(f"读取视频异常：{self.path} - {index} - {repr(e)}")
+        return False, None, None
     
 class VideoDataset(torch.utils.data.Dataset):
     def __init__(
@@ -121,14 +119,15 @@ class VideoDataset(torch.utils.data.Dataset):
 
 def loadDataset(
     folder: str,
+    batch_size: int = 32,
     length: int = 40,
     millis: int = 100
-):
+) -> DataLoader:
     return DataLoader(
         VideoDataset(folder, length, millis),
         shuffle            = True,
         drop_last          = True,
-        batch_size         = 4, 
+        batch_size         = batch_size, 
         num_workers        = 4,
         prefetch_factor    = 4,
         persistent_workers = True,

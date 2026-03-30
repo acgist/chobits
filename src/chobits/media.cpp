@@ -88,7 +88,7 @@ bool chobits::media::open_media() {
     av_dict_set(&audio_options, "audio_buffer_size", "100",       0); // 毫秒
     // 视频参数
     av_dict_set(&video_options, "framerate",    "30",      0);
-    av_dict_set(&video_options, "video_size",   "640*360", 0);
+    av_dict_set(&video_options, "video_size",   "640*480", 0);
     av_dict_set(&video_options, "pixel_format", "yuyv422", 0);
     ret = avformat_open_input(&audio_format_ctx, audio_device_name.c_str(), audio_format, &audio_options);
     av_dict_free(&audio_options);

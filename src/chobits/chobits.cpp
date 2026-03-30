@@ -15,7 +15,7 @@ int chobits::audio_sample_rate = 8000;
 int chobits::audio_nb_channels = 1;
 
 int chobits::video_width  = 640;
-int chobits::video_height = 360;
+int chobits::video_height = 480;
 
 void chobits::open_all(const std::string& model_path) {
     std::thread player_thread([]() {

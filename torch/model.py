@@ -2,14 +2,12 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-"""
-RAT = reaction
-ACE ACD = audio encoder -> audio decoder = audio
-VCE VCD = video encoder -> video decoder = video
-ATE TAE = audio encoder -> time embed + memory -> time audio encoder
-VTE TAE = video encoder -> time embed + memory -> time video encoder
-ATE VTE -> ACD = audio
-"""
+def initialize_weights(module: nn.Module):
+    for layer in module.modules():
+        if isinstance(layer, nn.Conv2d):
+            layer.reset_parameters()
+        elif isinstance(layer, nn.BatchNorm2d):
+            layer.reset_parameters()
 
 class Activation(nn.Module):
     def forward(
@@ -71,166 +69,276 @@ class MHA(nn.Module):
         o = self.norm(o)
         return self.ffn(o)
 
-
-class Patch(nn.Module):
+class BasicBlock1d(nn.Module):
     def __init__(
         self,
-        h         : int,
-        w         : int,
-        i_channels: int,
-        o_channels: int,
-        kernel_p  : List[int],
-        stride_p  : List[int],
-        padding_p : List[int] = [ 0, 0 ],
-        dilation_p: List[int] = [ 1, 1 ],
-        kernel_h  : List[int] = [ 3, 3 ],
-        stride_h  : List[int] = [ 1, 1 ],
-        padding_h : List[int] = [ 1, 1 ],
-        dilation_h: List[int] = [ 1, 1 ],
+        in_channels,
+        out_channels,
     ):
         super().__init__()
-        seq_len = (h // stride_p[0]) * (w // stride_p[1])
-        self.embed = nn.Parameter(torch.zeros(1, seq_len, o_channels))
-        self.norm1 = nn.LayerNorm([h // stride_p[0], w // stride_p[1]])
-        self.norm2 = nn.LayerNorm(o_channels)
-        self.patch = nn.Sequential(
-            nn.Conv2d(i_channels, o_channels, kernel_p, stride = stride_p, padding = padding_p, dilation = dilation_p),
-            Activation(),
-            nn.Conv2d(o_channels, o_channels, kernel_h, stride = stride_h, padding = padding_h, dilation = dilation_h),
-        )
-        self.conv = nn.Sequential(
-            nn.Conv2d(o_channels, o_channels, kernel_h, stride = stride_h, padding = padding_h, dilation = dilation_h),
-            Activation(),
-            nn.Conv2d(o_channels, o_channels, kernel_h, stride = stride_h, padding = padding_h, dilation = dilation_h),
-        )
+        self.need_downsample = in_channels != out_channels
+        if self.need_downsample:
+            self.conv1 = nn.Conv1d(in_channels,  out_channels, kernel_size = 1, stride = 2, padding = 0, bias = False)
+            # self.conv1 = nn.Conv1d(in_channels,  out_channels, kernel_size = 3, stride = 2, padding = 1, bias = False)
+            self.conv2 = nn.Conv1d(in_channels,  out_channels, kernel_size = 3, stride = 2, padding = 1, bias = False)
+            self.conv3 = nn.Conv1d(out_channels, out_channels, kernel_size = 3, stride = 1, padding = 1, bias = False)
+            self.bn1   = nn.BatchNorm1d(out_channels)
+            self.bn2   = nn.BatchNorm1d(out_channels)
+            self.bn3   = nn.BatchNorm1d(out_channels)
+        else:
+            self.conv1 = nn.Conv1d(out_channels,  out_channels, kernel_size = 3, stride = 1, padding = 1, bias = False)
+            self.conv2 = nn.Conv1d(out_channels, out_channels, kernel_size = 3, stride = 1, padding = 1, bias = False)
+            self.bn1   = nn.BatchNorm1d(out_channels)
+            self.bn2   = nn.BatchNorm1d(out_channels)
 
-    def forward(
-        self,
-        input: torch.Tensor,
-    ) -> torch.Tensor:
-        out = self.patch(input)
-        out = self.norm1(out)
-        out = out + self.conv(out)
-        out = out.flatten(2).transpose(1, 2)
-        out = out + self.embed
-        return self.norm2(out)
+    def forward(self, input):
+        if self.need_downsample:
+            x = F.relu(self.bn1(self.conv1(input)))
+            y = F.relu(self.bn2(self.conv2(input)))
+            y = F.relu(self.bn3(self.conv3(y)))
+            out = F.relu(x + y)
+            return out
+        else:
+            out = F.relu(self.bn1(self.conv1(input)))
+            out = F.relu(self.bn2(self.conv2(out)))
+            out = F.relu(out + input)
+            return out
 
-class Patch1d(nn.Module):
+class BasicBlock1dInverse(nn.Module):
+    def __init__(self, in_channels, out_channels):
+        super().__init__()
+        self.need_upsample = in_channels != out_channels
+        if self.need_upsample:
+            self.deconv1 = nn.ConvTranspose1d(in_channels, out_channels, kernel_size=1, stride=2, padding=0, output_padding=1, bias=False)
+            self.deconv2 = nn.ConvTranspose1d(in_channels, out_channels, kernel_size=3, stride=2, padding=1, output_padding=1, bias=False)
+            self.conv3 = nn.Conv1d(out_channels, out_channels, kernel_size=3, stride=1, padding=1, bias=False)
+            self.bn1 = nn.BatchNorm1d(out_channels)
+            self.bn2 = nn.BatchNorm1d(out_channels)
+            self.bn3 = nn.BatchNorm1d(out_channels)
+        else:
+            self.deconv1 = nn.ConvTranspose1d(out_channels, out_channels, kernel_size=3, stride=1, padding=1, bias=False)
+            self.deconv2 = nn.ConvTranspose1d(out_channels, out_channels, kernel_size=3, stride=1, padding=1, bias=False)
+            self.bn1 = nn.BatchNorm1d(out_channels)
+            self.bn2 = nn.BatchNorm1d(out_channels)
+
+    def forward(self, input):
+        if self.need_upsample:
+            x = F.relu(self.bn1(self.deconv1(input)))
+            y = F.relu(self.bn2(self.deconv2(input)))
+            y = F.relu(self.bn3(self.conv3(y)))
+            out = F.relu(x + y)
+            return out
+        else:
+            out = F.relu(self.bn1(self.deconv1(input)))
+            out = F.relu(self.bn2(self.deconv2(out)))
+            out = F.relu(out + input)
+            return out
+
+class BasicBlock2d(nn.Module):
     def __init__(
         self,
-        l         : int,
-        i_channels: int,
-        o_channels: int,
-        kernel_p  : int,
-        stride_p  : int,
-        padding_p : int = 0,
-        dilation_p: int = 1,
-        kernel_h  : int = 3,
-        stride_h  : int = 1,
-        padding_h : int = 1,
-        dilation_h: int = 1,
+        in_channels,
+        out_channels,
     ):
         super().__init__()
-        seq_len = l // stride_p
-        self.embed = nn.Parameter(torch.zeros(1, seq_len, o_channels))
-        self.norm1 = nn.LayerNorm(seq_len)
-        self.norm2 = nn.LayerNorm(o_channels)
-        self.patch = nn.Sequential(
-            nn.Conv1d(i_channels, o_channels, kernel_p, stride = stride_p, padding = padding_p, dilation = dilation_p),
-            Activation(),
-            nn.Conv1d(o_channels, o_channels, kernel_h, stride = stride_h, padding = padding_h, dilation = dilation_h),
-        )
-        self.conv = nn.Sequential(
-            nn.Conv1d(o_channels, o_channels, kernel_h, stride = stride_h, padding = padding_h, dilation = dilation_h),
-            Activation(),
-            nn.Conv1d(o_channels, o_channels, kernel_h, stride = stride_h, padding = padding_h, dilation = dilation_h),
-        )
+        self.need_downsample = in_channels != out_channels
+        if self.need_downsample:
+            self.conv1 = nn.Conv2d(in_channels,  out_channels, kernel_size = 1, stride = 2, padding = 0, bias = False)
+            # self.conv1 = nn.Conv2d(in_channels,  out_channels, kernel_size = 3, stride = 2, padding = 1, bias = False)
+            self.conv2 = nn.Conv2d(in_channels,  out_channels, kernel_size = 3, stride = 2, padding = 1, bias = False)
+            self.conv3 = nn.Conv2d(out_channels, out_channels, kernel_size = 3, stride = 1, padding = 1, bias = False)
+            self.bn1   = nn.BatchNorm2d(out_channels)
+            self.bn2   = nn.BatchNorm2d(out_channels)
+            self.bn3   = nn.BatchNorm2d(out_channels)
+        else:
+            self.conv1 = nn.Conv2d(out_channels,  out_channels, kernel_size = 3, stride = 1, padding = 1, bias = False)
+            self.conv2 = nn.Conv2d(out_channels, out_channels, kernel_size = 3, stride = 1, padding = 1, bias = False)
+            self.bn1   = nn.BatchNorm2d(out_channels)
+            self.bn2   = nn.BatchNorm2d(out_channels)
 
-    def forward(
-        self,
-        input: torch.Tensor,
-    ) -> torch.Tensor:
-        out = self.patch(input)
-        out = self.norm1(out)
-        out = out + self.conv(out)
-        out = out.transpose(1, 2)
-        out = out + self.embed
-        return self.norm2(out)
+    def forward(self, input):
+        if self.need_downsample:
+            x = F.relu(self.bn1(self.conv1(input)))
+            y = F.relu(self.bn2(self.conv2(input)))
+            y = F.relu(self.bn3(self.conv3(y)))
+            out = F.relu(x + y)
+            return out
+        else:
+            out = F.relu(self.bn1(self.conv1(input)))
+            out = F.relu(self.bn2(self.conv2(out)))
+            out = F.relu(out + input)
+            return out
 
-class AsT(nn.Module):
+class BasicBlock2dInverse(nn.Module):
     def __init__(
         self,
-        l         : int,
-        channels  : int,
-        i_channels: int,
-        o_channels: int,
-        kernel_s  : int,
-        kernel_l  : int,
-        num_heads : int = 8,
+        in_channels,
+        out_channels,
     ):
         super().__init__()
-        o_dim   = o_channels
-        h_dim   = o_dim * 2
-        seq_len = l // kernel_s
-        self.patch_s = Patch1d(l, i_channels, o_channels, kernel_s, kernel_s)
-        self.patch_l = Patch1d(l, i_channels, o_channels, kernel_l, kernel_l)
-        self.mha  = MHA(o_dim, o_dim, o_dim, o_dim, h_dim, num_heads)
-        self.conv = nn.Sequential(
-            nn.Conv1d(seq_len, channels, 3, padding = 1),
-            Activation(),
-            nn.Conv1d(channels, channels, 3, padding = 1),
-            nn.LayerNorm(o_dim),
-        )
+        self.need_upsample = in_channels != out_channels
+        if self.need_upsample:
+            self.deconv1 = nn.ConvTranspose2d(in_channels, out_channels, kernel_size=1, stride=2, padding=0, output_padding=1, bias=False)
+            self.deconv2 = nn.ConvTranspose2d(in_channels, out_channels, kernel_size=3, stride=2, padding=1, output_padding=1, bias=False)
+            self.conv3 = nn.Conv2d(out_channels, out_channels, kernel_size=3, stride=1, padding=1, bias=False)
+            self.bn1 = nn.BatchNorm2d(out_channels)
+            self.bn2 = nn.BatchNorm2d(out_channels)
+            self.bn3 = nn.BatchNorm2d(out_channels)
+        else:
+            self.deconv1 = nn.ConvTranspose2d(out_channels, out_channels, kernel_size=3, stride=1, padding=1, bias=False)
+            self.deconv2 = nn.ConvTranspose2d(out_channels, out_channels, kernel_size=3, stride=1, padding=1, bias=False)
+            self.bn1 = nn.BatchNorm2d(out_channels)
+            self.bn2 = nn.BatchNorm2d(out_channels)
 
-    def forward(
-        self,
-        input: torch.Tensor,
-    ) -> torch.Tensor:
-        input_s = self.patch_s(input)
-        input_l = self.patch_l(input)
-        out = self.mha(input_s, input_l, input_l)
-        return self.conv(out)
+    def forward(self, input):
+        if self.need_upsample:
+            x = F.relu(self.bn1(self.deconv1(input)))
+            y = F.relu(self.bn2(self.deconv2(input)))
+            y = F.relu(self.bn3(self.conv3(y)))
+            out = F.relu(x + y)
+            return out
+        else:
+            out = F.relu(self.bn1(self.deconv1(input)))
+            out = F.relu(self.bn2(self.deconv2(out)))
+            out = F.relu(out + input)
+            return out
 
-class ViT(nn.Module):
-    def __init__(
-        self,
-        h         : int,
-        w         : int,
-        channels  : int,
-        i_channels: int,
-        o_channels: int,
-        kernel_s  : int,
-        kernel_l  : int,
-        num_heads : int = 8,
-    ):
+class ACE(nn.Module):
+    def __init__(self):
         super().__init__()
-        o_dim   = o_channels
-        h_dim   = o_dim * 2
-        seq_len = (h // kernel_s) * (w // kernel_s)
-        self.patch_s = Patch(h, w, i_channels, o_channels, [kernel_s, kernel_s], [kernel_s, kernel_s])
-        self.patch_l = Patch(h, w, i_channels, o_channels, [kernel_l, kernel_l], [kernel_l, kernel_l])
-        self.mha  = MHA(o_dim, o_dim, o_dim, o_dim, h_dim, num_heads)
-        self.conv = nn.Sequential(
-            nn.Conv1d(seq_len, channels, 3, padding = 1),
-            Activation(),
-            nn.Conv1d(channels, channels, 3, padding = 1),
-            nn.LayerNorm(o_dim),
-        )
+        self.conv1   = nn.Conv1d(1, 64, kernel_size = 7, stride = 2, padding = 3, bias = False)
+        self.bn1     = nn.BatchNorm1d(64)
+        self.maxpool = nn.MaxPool1d(kernel_size = 3, stride = 2, padding = 1)
+        self.layer1 = BasicBlock1d( 64,  64)
+        self.layer2 = BasicBlock1d( 64,  64)
+        self.layer3 = BasicBlock1d( 64, 128)
+        self.layer4 = BasicBlock1d(128, 128)
+        self.layer5 = BasicBlock1d(128, 256)
+        self.layer6 = BasicBlock1d(256, 256)
+        self.layer7 = BasicBlock1d(256, 512)
+        self.layer8 = BasicBlock1d(512, 512)
+        self.avgpool = nn.AdaptiveAvgPool1d((2))
+        initialize_weights(self)
 
-    def forward(
-        self,
-        input: torch.Tensor,
-    ) -> torch.Tensor:
-        input_s = self.patch_s(input)
-        input_l = self.patch_l(input)
-        out = self.mha(input_s, input_l, input_l)
-        return self.conv(out)
+    def forward(self, input):
+        x = F.relu(self.bn1(self.conv1(input)))
+        x = self.maxpool(x)
+        x = self.layer1(x)
+        x = self.layer2(x)
+        x = self.layer3(x)
+        x = self.layer4(x)
+        x = self.layer5(x)
+        x = self.layer6(x)
+        x = self.layer7(x)
+        x = self.layer8(x)
+        x = self.avgpool(x)
+        x = x.view(x.size(0), 1, -1)
+        return x
+    
+class ACD(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.layer8_inv = BasicBlock1dInverse(512, 512)
+        self.layer7_inv = BasicBlock1dInverse(512, 256)
+        self.layer6_inv = BasicBlock1dInverse(256, 256)
+        self.layer5_inv = BasicBlock1dInverse(256, 128)
+        self.layer4_inv = BasicBlock1dInverse(128, 128)
+        self.layer3_inv = BasicBlock1dInverse(128, 64)
+        self.layer2_inv = BasicBlock1dInverse(64, 64)
+        self.layer1_inv = BasicBlock1dInverse(64, 64)
+        self.upsample = nn.ConvTranspose1d(64, 64, kernel_size=3, stride=2, padding=1, output_padding=1, bias=False)
+        self.bn_up    = nn.BatchNorm1d(64)
+        self.deconv1  = nn.ConvTranspose1d(64, 1, kernel_size=7, stride=2, padding=3, output_padding=1, bias=False)
+
+    def forward(self, input):
+        x = F.interpolate(input.view(input.size(0), 512, -1), size=25, mode='linear')
+        x = self.layer8_inv(x)
+        x = self.layer7_inv(x)
+        x = self.layer6_inv(x)
+        x = self.layer5_inv(x)
+        x = self.layer4_inv(x)
+        x = self.layer3_inv(x)
+        x = self.layer2_inv(x)
+        x = self.layer1_inv(x)
+        x = F.relu(self.bn_up(self.upsample(x)))
+        x = self.deconv1(x)
+        return x
+
+class VCE(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.conv1   = nn.Conv2d(3, 64, kernel_size = 7, stride = 2, padding = 3, bias = False)
+        self.bn1     = nn.BatchNorm2d(64)
+        self.maxpool = nn.MaxPool2d(kernel_size = 3, stride = 2, padding = 1)
+        self.layer1 = BasicBlock2d( 64,  64)
+        self.layer2 = BasicBlock2d( 64,  64)
+        self.layer3 = BasicBlock2d( 64, 128)
+        self.layer4 = BasicBlock2d(128, 128)
+        self.layer5 = BasicBlock2d(128, 256)
+        self.layer6 = BasicBlock2d(256, 256)
+        self.layer7 = BasicBlock2d(256, 512)
+        self.layer8 = BasicBlock2d(512, 512)
+        self.avgpool = nn.AdaptiveAvgPool2d((1, 2))
+        initialize_weights(self)
+
+    def forward(self, input):
+        x = F.relu(self.bn1(self.conv1(input)))
+        x = self.maxpool(x)
+        x = self.layer1(x)
+        x = self.layer2(x)
+        x = self.layer3(x)
+        x = self.layer4(x)
+        x = self.layer5(x)
+        x = self.layer6(x)
+        x = self.layer7(x)
+        x = self.layer8(x)
+        x = self.avgpool(x)
+        x = x.view(x.size(0), 1, -1)
+        return x
+    
+class VCD(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.layer8_inv = BasicBlock2dInverse(512, 512)
+        self.layer7_inv = BasicBlock2dInverse(512, 256)
+        self.layer6_inv = BasicBlock2dInverse(256, 256)
+        self.layer5_inv = BasicBlock2dInverse(256, 128)
+        self.layer4_inv = BasicBlock2dInverse(128, 128)
+        self.layer3_inv = BasicBlock2dInverse(128, 64)
+        self.layer2_inv = BasicBlock2dInverse(64, 64)
+        self.layer1_inv = BasicBlock2dInverse(64, 64)
+        self.upsample = nn.ConvTranspose2d(64, 64, kernel_size=3, stride=2, padding=1, output_padding=1, bias=False)
+        self.bn_up    = nn.BatchNorm2d(64)
+        self.deconv1  = nn.ConvTranspose2d(64, 3, kernel_size=7, stride=2, padding=3, output_padding=1, bias=False)
+        self.bn1_inv  = nn.BatchNorm2d(3)
+
+    def forward(self, input):
+        x = F.interpolate(input.view(input.size(0), 512, 1, 2), size=(15, 20), mode='bilinear')
+        x = self.layer8_inv(x)
+        x = self.layer7_inv(x)
+        x = self.layer6_inv(x)
+        x = self.layer5_inv(x)
+        x = self.layer4_inv(x)
+        x = self.layer3_inv(x)
+        x = self.layer2_inv(x)
+        x = self.layer1_inv(x)
+        x = F.relu(self.bn_up(self.upsample(x)))
+        x = self.deconv1(x)
+        return x
+
+class Memory(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.mha = MHA(1024, 1024, 1024, 1024, 1024 * 2, 8)
+
+    def forward(self, input, memory):
+        return self.mha(memory, input, input)
 
 class Mixer(nn.Module):
     def __init__(
         self,
-        audio_dim: int = 256,
-        video_dim: int = 512,
+        audio_dim: int = 1024,
+        video_dim: int = 1024,
         num_heads: int = 8,
     ):
         super().__init__()
@@ -249,78 +357,35 @@ class Mixer(nn.Module):
 class Chobits(nn.Module):
     def __init__(self):
         super().__init__()
-        self.audio_ast = AsT(32 * 800, 128,  1, 256, 40, 80)
-        self.video_vit = ViT(360, 640, 128, 32, 512, 20, 40)
-        self.image_vit = ViT(360, 640, 128,  3, 512, 20, 40)
-        self.image_mha = MHA(512, 512, 512, 512, 1024, 8)
-        self.mixer_mha = MHA(256, 512, 512, 256, 1024, 8)
-        self.mixers    = nn.ModuleList([Mixer() for _ in range(3)])
-        self.voice     = Voice()
+        self.ace = ACE()
+        self.acd = ACD()
+        self.vce = VCE()
+        self.vcd = VCD()
+        self.audio_memory = Memory()
+        self.video_memory = Memory()
+        self.mixers = nn.ModuleList([Mixer() for _ in range(3)])
+        self.audio_mha = Mixer()
+        self.video_mha = Mixer()
 
     def forward(
         self,
         audio: torch.Tensor,
         video: torch.Tensor,
-    ) -> torch.Tensor:
-        audio_o = self.audio_ast(audio.view(audio.size(0), 1, -1))
-        video_i = video.select(2, -1)
-        image_i = video.select(1, -1)
-        video_o = self.video_vit(video_i)
-        image_o = self.image_vit(image_i)
-        video_o = self.image_mha(video_o, image_o, image_o)
+        audio_memory: torch.Tensor,
+        video_memory: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        audio_o = self.ace(audio)
+        video_o = self.vce(video)
+        audio_c = audio_o
+        audio_m = self.audio_memory(audio_o, audio_memory)
+        video_m = self.video_memory(video_o, video_memory)
+        audio_o = audio_m
+        video_o = video_m
         for mixer in self.mixers:
             audio_x, video_x = mixer(audio_o, video_o)
             audio_o = audio_x
             video_o = video_x
-        audio_o = self.mixer_mha(audio_o, video_o, video_o)
-        # TODO 输出前一秒后一秒
-        return self.voice(audio_o)
-
-# model = MHA(512, 512, 512, 512)
-# model.eval()
-# input = (
-#     torch.randn(10, 256, 512),
-#     torch.randn(10, 256, 512),
-#     torch.randn(10, 256, 512),
-# )
-# print(model(*input).shape)
-
-# model = Mixer()
-# model.eval()
-# input = (
-#     torch.randn(10, 128, 256),
-#     torch.randn(10, 256, 512),
-# )
-# audio, video = model(*input)
-# print(audio.shape)
-# print(video.shape)
-
-model = Chobits()
-model.eval()
-input = (
-    torch.randn(10, 32, 800),
-    torch.randn(10, 32, 3, 360, 640),
-)
-print(model(*input).shape)
-
-# 直接保存
-# torch.save(model, "D:/download/chobits.pt")
-
-# JIT保存
-torch.jit.save(torch.jit.trace(model, input), "D:/download/chobits.pt")
-
-# ONNX保存
-# batch = torch.export.Dim("batch", min = 1)
-# torch.onnx.export(
-#     model,
-#     input,
-#     "D:/download/chobits.onnx",
-#     dynamo         = True,
-#     opset_version  = 18,
-#     input_names    = [ "audio", "video" ],
-#     output_names   = [ "output" ],
-#     dynamic_shapes = (
-#         { 0: batch },
-#         { 0: batch },
-#     )
-# )
+        audio_c, video_c = self.audio_mha(audio_c, audio_o)
+        audio_c, video_c = self.video_mha(audio_c, video_o)
+        audio_c = self.acd(audio_c)
+        return audio_c, audio_m, video_m

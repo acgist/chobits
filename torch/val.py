@@ -1,26 +1,18 @@
 import torch
 
-# from model import *
+from model import *
 from dataset import VideoReader
 from torchcodec.encoders import AudioEncoder
 
 video_reader = VideoReader("D:/tmp/video.mp4", 1)
 
-# JIT
-# model = torch.jit.load("model.pt")
-# if torch.cuda.is_available():
-#     model.cuda()
-# else:
-#     model.cpu()
-# model.eval()
-
-# 原始模型
-# model = torch.load("model.pth", weights_only = False)
-# if torch.cuda.is_available():
-#     model.cuda()
-# else:
-#     model.cpu()
-# model.eval()
+model = Chobits()
+model.load_state_dict(torch.load("chobits.pth"))
+if torch.cuda.is_available():
+    model = model.cuda()
+else:
+    model = model.cpu()
+model.eval()
 
 index  = 0
 sample = []
