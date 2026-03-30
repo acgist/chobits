@@ -159,7 +159,7 @@ class Triner:
         torch.save(self.model.state_dict(), f"chobits.ckpt")
         torch.save(self.optimizer.state_dict(), f"optimizer.ckpt")
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     print("""
 
     众鸟高飞尽，孤云独去闲。

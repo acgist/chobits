@@ -104,11 +104,11 @@ class VideoDataset(torch.utils.data.Dataset):
     
     def decode(
         self,
-        video_path: str,
-        millis    : int = 100
+        path  : str,
+        millis: int = 100,
     ) -> tuple[bool, int]:
-        audio_decoer = AudioDecoder(video_path)
-        video_decoer = VideoDecoder(video_path)
+        audio_decoer = AudioDecoder(path)
+        video_decoer = VideoDecoder(path)
         # 出错格式：opus
         suport_audio_codec = [ "aac", "mp3", "pcm",  "flac" ]
         suport_video_codec = [ "vp8", "vp9", "h264", "h265" ]
@@ -118,10 +118,10 @@ class VideoDataset(torch.utils.data.Dataset):
             return False, 0
 
 def loadDataset(
-    folder: str,
+    folder    : str,
     batch_size: int = 32,
-    length: int = 40,
-    millis: int = 100
+    length    : int = 40,
+    millis    : int = 100,
 ) -> DataLoader:
     return DataLoader(
         VideoDataset(folder, length, millis),
