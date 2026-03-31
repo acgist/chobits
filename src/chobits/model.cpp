@@ -45,9 +45,10 @@ void chobits::model::run_model() {
         input.push_back(audio_memory);
         input.push_back(video_memory);
         auto tuple = model_state.model.forward(input).toTuple()->elements();
-        auto pred    = tuple[0].toTensor();
-        audio_memory = tuple[1].toTensor();
-        video_memory = tuple[2].toTensor();
-        chobits::media::set_data(pred, video);
+        auto audio_pred = tuple[0].toTensor();
+        auto video_pred = tuple[1].toTensor();
+        audio_memory = tuple[2].toTensor();
+        video_memory = tuple[3].toTensor();
+        chobits::media::set_data(audio_pred, video_pred);
     }
 }

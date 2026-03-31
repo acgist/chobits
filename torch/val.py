@@ -1,30 +1,47 @@
 import torch
 
-from model import *
+from tqdm import tqdm
+from model import Chobits
 from dataset import VideoReader
-from torchcodec.encoders import AudioEncoder
+from torchcodec.encoders import AudioEncoder, VideoEncoder
 
-video_reader = VideoReader("video.mp4", 1)
+video_reader = VideoReader("video.mp4", 200, 1)
 
 model = Chobits()
-model.load_state_dict(torch.load("chobits.pth"))
-if torch.cuda.is_available():
-    model = model.cuda()
-else:
-    model = model.cpu()
+model.load_state_dict(torch.load("chobits.ckpt"))
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+model.to(device)
 model.eval()
 
-index  = 0
-sample = []
+audio_samples = []
+video_frames  = []
 
-while True:
-    index += 1
-    success, audio, video = video_reader.read(index)
-    if not success:
-        break
-    # pred = model(audio, video)
-    # sample.append(pred)
-    sample.append(audio)
+with torch.no_grad():
+    for index in tqdm(range(video_reader.sample)):
+        success, audio, video = video_reader.read(index)
+        if not success:
+            break
+        audio = audio.to(device)
+        video = video.to(device)
+        # 归一化标准化
+        audio = audio.float()
+        video = video.float().sub(128.0).div(128.0)
+        # 编码解码
+        audio = model.acd(model.ace(audio))
+        video = model.vcd(model.vce(video))
+        audio_samples.append(audio)
+        video_frames .append(video)
+        # 模型推理
+        # audio_memory = torch.rand(1, 10, 1024).to(device)
+        # video_memory = torch.rand(1, 10, 1024).to(device)
+        # audio, video, audio_memory, video_memory = model(audio, video, audio_memory, video_memory)
+        # audio_samples.append(audio)
+        # video_frames .append(video)
 
-encoder = AudioEncoder(samples = torch.cat(sample, dim = 1), sample_rate = 8000)
-encoder.to_file("./output.mp3", num_channels = 1, sample_rate = 8000)
+audio_encoder = AudioEncoder(samples = torch.cat(audio_samples, dim = 1).view(1, -1).cpu(), sample_rate = 8000)
+audio_encoder.to_file("./output.wav", num_channels = 1, sample_rate = 8000)
+print(f"保存音频成功 ./output.wav")
+
+video_encoder = VideoEncoder(frames = torch.cat(video_frames, dim = 0).mul(128.0).add(128.0).to(torch.uint8).cpu(), frame_rate = 24)
+video_encoder.to_file("./output.mp4", codec = "h264", pixel_format = "yuv420p")
+print(f"保存视频成功 ./output.mp4")

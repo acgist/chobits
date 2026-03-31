@@ -36,6 +36,12 @@ def initialize_weights(module: nn.Module):
             layer.reset_parameters()
         elif isinstance(layer, Memory):
             layer.reset_parameters()
+        elif isinstance(layer, Mixer):
+            layer.reset_parameters()
+        elif isinstance(layer, Muxer):
+            layer.reset_parameters()
+        elif isinstance(layer, Chobits):
+            layer.reset_parameters()
         else:
             print(f"不支持初始化的层: {module.__class__.__name__}")
 
@@ -276,7 +282,7 @@ class ACE(nn.Module):
         x = self.layer7(x)
         x = self.layer8(x)
         x = self.avgpool(x)
-        x = x.view(x.size(0), 1, -1)
+        x = x.reshape(x.size(0), 1, -1)
         return x
     
 class ACD(nn.Module):
@@ -339,7 +345,7 @@ class VCE(nn.Module):
         x = self.layer7(x)
         x = self.layer8(x)
         x = self.avgpool(x)
-        x = x.view(x.size(0), 1, -1)
+        x = x.reshape(x.size(0), 1, -1)
         return x
     
 class VCD(nn.Module):
@@ -377,13 +383,22 @@ class VCD(nn.Module):
 class Memory(nn.Module):
     def __init__(self):
         super().__init__()
-        self.mha = MHA(1024, 1024, 1024, 1024, 1024 * 2, 8)
+        self.audio_mha = MHA(1024, 1024, 1024, 1024, 1024 * 2, 8)
+        self.video_mha = MHA(1024, 1024, 1024, 1024, 1024 * 2, 8)
 
     def reset_parameters(self):
         initialize_weights(self)
 
-    def forward(self, input: torch.Tensor, memory: torch.Tensor) -> torch.Tensor:
-        return self.mha(memory, input, input)
+    def forward(
+        self,
+        audio: torch.Tensor,
+        video: torch.Tensor,
+        audio_memory: torch.Tensor,
+        video_memory: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        audio_o = self.audio_mha(audio_memory, audio, audio)
+        video_o = self.video_mha(video_memory, video, video)
+        return (audio_o, video_o)
 
 class Mixer(nn.Module):
     def __init__(
@@ -408,18 +423,18 @@ class Mixer(nn.Module):
         video_o = self.video_mha(video, audio, audio)
         return (audio_o, video_o)
 
-class Chobits(nn.Module):
-    def __init__(self):
+class Muxer(nn.Module):
+    def __init__(
+        self,
+        num_mixer: int = 3,
+    ):
         super().__init__()
-        self.ace = ACE()
-        self.acd = ACD()
-        self.vce = VCE()
-        self.vcd = VCD()
-        self.audio_memory = Memory()
-        self.video_memory = Memory()
-        self.mixers = nn.ModuleList([Mixer() for _ in range(3)])
-        self.audio_mha = Mixer()
-        self.video_mha = Mixer()
+        self.mixers = nn.ModuleList([Mixer() for _ in range(num_mixer)])
+        self.audio_mha = MHA(1024, 1024, 1024, 1024, 1024 * 2, 8)
+        self.video_mha = MHA(1024, 1024, 1024, 1024, 1024 * 2, 8)
+
+    def reset_parameters(self):
+        initialize_weights(self)
 
     def forward(
         self,
@@ -427,19 +442,42 @@ class Chobits(nn.Module):
         video: torch.Tensor,
         audio_memory: torch.Tensor,
         video_memory: torch.Tensor,
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        audio_o = self.ace(audio)
-        video_o = self.vce(video)
-        audio_c = audio_o
-        audio_m = self.audio_memory(audio_o, audio_memory)
-        video_m = self.video_memory(video_o, video_memory)
-        audio_o = audio_m
-        video_o = video_m
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        audio_o = audio_memory
+        video_o = video_memory
         for mixer in self.mixers:
             audio_x, video_x = mixer(audio_o, video_o)
             audio_o = audio_x
             video_o = video_x
-        audio_c, video_c = self.audio_mha(audio_c, audio_o)
-        audio_c, video_c = self.video_mha(audio_c, video_o)
-        audio_c = self.acd(audio_c)
-        return audio_c, audio_m, video_m
+        audio_c = self.audio_mha(audio, audio_o, audio_o)
+        video_c = self.video_mha(video, video_o, video_o)
+        return (audio_c, video_c)
+
+
+class Chobits(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.ace = ACE()
+        self.acd = ACD()
+        self.vce = VCE()
+        self.vcd = VCD()
+        self.memory = Memory()
+        self.muxer  = Muxer()
+
+    def reset_parameters(self):
+        initialize_weights(self)
+
+    def forward(
+        self,
+        audio: torch.Tensor,
+        video: torch.Tensor,
+        audio_memory: torch.Tensor,
+        video_memory: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        audio_encode = self.ace(audio)
+        video_encode = self.vce(video)
+        audio_feature_memory, video_feature_memory = self.memory(audio_encode, video_encode, audio_memory, video_memory)
+        audio_feature_encode, video_feature_encode = self.muxer(audio_encode, video_encode, audio_feature_memory, video_feature_memory)
+        audio_feature_decode = self.acd(audio_feature_encode)
+        video_feature_decode = self.vcd(video_feature_encode)
+        return (audio_feature_decode, video_feature_decode, audio_feature_memory, video_feature_memory)

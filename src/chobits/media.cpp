@@ -233,7 +233,7 @@ std::tuple<bool, at::Tensor, at::Tensor> chobits::media::get_data() {
 
 void chobits::media::set_data(const torch::Tensor& audio, const torch::Tensor& video) {
     // audio
-    auto audio_tensor = audio.mul(audio_normalization).squeeze(0).to(torch::kShort).cpu();
+    auto audio_tensor = audio.view({ 1, -1 }).contiguous().mul(audio_normalization).to(torch::kShort).cpu();
     auto audio_data   = reinterpret_cast<short*>(audio_tensor.data_ptr());
     auto audio_length = audio.size(-1);
     // video

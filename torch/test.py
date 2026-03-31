@@ -1,9 +1,9 @@
-from model import *
-
 import cv2
-import numpy as np
+import torch
 import sounddevice as sd
 
+from tqdm import tqdm
+from model import *
 from dataset import VideoReader, loadDataset
 
 def test_ffn():
@@ -66,8 +66,22 @@ def test_mixer():
     model = Mixer()
     model.eval()
     input = (
-        torch.randn(10, 128, 1024),
-        torch.randn(10, 256, 1024),
+        torch.randn(10, 10, 1024),
+        torch.randn(10, 10, 1024),
+    )
+    audio, video = model(*input)
+    print(audio.shape)
+    print(video.shape)
+    torch.jit.save(torch.jit.trace(model, input), "chobits.pt")
+
+def test_muxer():
+    model = Muxer()
+    model.eval()
+    input = (
+        torch.randn(10, 1, 1024),
+        torch.randn(10, 1, 1024),
+        torch.randn(10, 10, 1024),
+        torch.randn(10, 10, 1024),
     )
     audio, video = model(*input)
     print(audio.shape)
@@ -83,61 +97,56 @@ def test_chobits():
         torch.randn(10, 10, 1024),
         torch.randn(10, 10, 1024),
     )
-    audio_c, audio_m, video_m = model(*input)
-    print(audio_c.shape)
-    print(audio_m.shape)
-    print(video_m.shape)
-    # torch.save(model, "chobits.pth")
-    # torch.save(model.state_dict(), "chobits.pth")
+    audio, video, audio_memory, video_memory = model(*input)
+    print(audio.shape)
+    print(video.shape)
+    print(audio_memory.shape)
+    print(video_memory.shape)
     torch.jit.save(torch.jit.trace(model, input), "chobits.pt")
 
 def test_reader():
-    index = 0
     video_reader = VideoReader("D://tmp/video.mp4", 20, 1, 1000)
     cv2.namedWindow("chobits", cv2.WINDOW_AUTOSIZE)
-    while True:
-        index += 1
+    for index in tqdm(range(video_reader.sample)):
         success, audio_tensor, video_tensor = video_reader.read(index)
         if not success:
             break
-        print(f"音频Tensor形状: {audio_tensor.shape} {audio_tensor.dtype}")
-        print(f"视频Tensor形状: {video_tensor.shape} {video_tensor.dtype}")
-        audio_np = audio_tensor.view(-1).numpy()
-        sd.play(audio_np, samplerate = 8000)
+        # print(f"audio: {audio_tensor.shape} {audio_tensor.dtype}")
+        # print(f"video: {video_tensor.shape} {video_tensor.dtype}")
+        audio_data = audio_tensor.view(-1).numpy()
+        sd.play(audio_data, samplerate = 8000)
         sd.wait()
-        video_np = video_tensor.permute(0, 2, 3, 1).numpy()
-        for frame in video_np:
+        video_data = video_tensor.permute(0, 2, 3, 1).numpy()
+        for frame in video_data:
             frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
             cv2.imshow("chobits", frame)
-            if cv2.waitKey(20) & 0xFF == 27:
-                break
+            if cv2.waitKey(20) == 27:
+                return
     cv2.destroyAllWindows()
 
 def test_loader():
     loader = loadDataset("D://tmp", 1, 1, 1000)
     cv2.namedWindow("chobits", cv2.WINDOW_AUTOSIZE)
-    for success, audio_tensor, video_tensor in loader:
-        if not success.all():
-            break
-        print(f"音频Tensor形状: {audio_tensor.shape} {audio_tensor.dtype}")
-        print(f"视频Tensor形状: {video_tensor.shape} {video_tensor.dtype}")
+    for audio_tensor, video_tensor in loader:
+        # print(f"audio: {audio_tensor.shape} {audio_tensor.dtype}")
+        # print(f"video: {video_tensor.shape} {video_tensor.dtype}")
         audio_tensor = audio_tensor[0]
         video_tensor = video_tensor[0]
-        audio_np = audio_tensor.view(-1).numpy()
-        sd.play(audio_np, samplerate = 8000)
+        audio_data = audio_tensor.view(-1).numpy()
+        sd.play(audio_data, samplerate = 8000)
         sd.wait()
-        video_np = video_tensor.permute(0, 2, 3, 1).numpy()
-        for frame in video_np:
+        video_data = video_tensor.permute(0, 2, 3, 1).numpy()
+        for frame in video_data:
             frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
             cv2.imshow("chobits", frame)
-            if cv2.waitKey(20) & 0xFF == 27:
-                break
+            if cv2.waitKey(20) == 27:
+                return
     cv2.destroyAllWindows()
 
 if __name__ == "__main__":
     # test_reader()
     # test_loader()
-    # test_ffn()
+    test_ffn()
     # test_mha()
     # test_ace()
     # test_acd()
@@ -145,4 +154,5 @@ if __name__ == "__main__":
     # test_vcd()
     # test_memory()
     # test_mixer()
-    test_chobits()
+    # test_muxer()
+    # test_chobits()

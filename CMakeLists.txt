@@ -126,7 +126,7 @@ target_link_libraries(
 
 set_target_properties(
     ${PROJECT_NAME}
-    PROPERTIES PUBLIC_HEADER "include/chobits/nn.hpp;include/chobits/media.hpp;include/chobits/model.hpp;include/chobits/player.hpp;include/chobits/chobits.hpp;"
+    PROPERTIES PUBLIC_HEADER "include/chobits/media.hpp;include/chobits/model.hpp;include/chobits/player.hpp;include/chobits/chobits.hpp;"
 )
 
 install(

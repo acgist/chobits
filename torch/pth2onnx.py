@@ -1,9 +1,9 @@
 import torch
 
-from model import *
+from model import Chobits
 
 model = Chobits()
-model.load_state_dict(torch.load("chobits.pth"))
+model.load_state_dict(torch.load("chobits.ckpt"))
 model.cpu()
 model.eval()
 
@@ -20,7 +20,7 @@ torch.onnx.export(
     dynamo         = True,
     opset_version  = 18,
     input_names    = [ "audio", "video", "audio_memory", "video_memory" ],
-    output_names   = [ "output", "audio_memory", "video_memory" ],
+    output_names   = [ "audio", "video", "audio_memory", "video_memory" ],
     dynamic_shapes = (
         { 0: batch },
         { 0: batch },

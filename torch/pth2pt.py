@@ -1,9 +1,9 @@
 import torch
 
-from model import *
+from model import Chobits
 
 model = Chobits()
-model.load_state_dict(torch.load("chobits.pth"))
+model.load_state_dict(torch.load("chobits.ckpt"))
 model.cpu()
 model.eval()
 

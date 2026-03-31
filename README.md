@@ -72,9 +72,15 @@ cmake --config Debug|Release --build . --parallel 8
 
 ```
 # 安装相关依赖
-# pip install tqdm onnxscript
-# 更新相关依赖（保证所有依赖版本一致）
-#pip install --upgrade torch torchcodec torchaudio torchvision --index-url https://download.pytorch.org/whl/cu126
+pip install tqdm onnxscript sounddevice opencv-python
 
+# 更新相关依赖
+pip install --upgrade torch torchcodec torchaudio torchvision --index-url https://download.pytorch.org/whl/cu126
+
+# 训练
 python trainer.py
+
+# 监控
+pip install --user tensorboard
+tensorboard --logdir=runs --host=0.0.0.0 --port=6006
 ```
