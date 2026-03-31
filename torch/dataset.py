@@ -99,7 +99,7 @@ class VideoDataset(torch.utils.data.Dataset):
                 print(f"加载视频异常：{file_path} - {e}")
         self.index  = index
         self.reader = reader
-        print(f"视频总数：{len(self.reader)}")
+        print(f"视频文件数：{len(self.reader)}")
         print(f"视频总帧数：{self.index}")
 
     def __len__(self):

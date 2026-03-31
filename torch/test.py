@@ -7,21 +7,53 @@ from model import *
 from dataset import VideoReader, loadDataset
 
 def test_ffn():
-    model = FFN(512)
+    model = FFN(1024)
     model.eval()
-    input = torch.randn(10, 512)
+    input = torch.randn(10, 1024)
     print(model(input).shape)
     torch.jit.save(torch.jit.trace(model, input), "chobits.pt") 
 
 def test_mha():
-    model = MHA(512, 512, 512, 512)
+    model = MHA(1024, 1024, 1024, 1024, 1024)
     model.eval()
     input = (
-        torch.randn(10, 256, 512),
-        torch.randn(10, 256, 512),
-        torch.randn(10, 256, 512),
+        torch.randn(10, 10, 1024),
+        torch.randn(10, 10, 1024),
+        torch.randn(10, 10, 1024),
     )
     print(model(*input).shape)
+    torch.jit.save(torch.jit.trace(model, input), "chobits.pt")
+
+def test_basic_block1d_downsample():
+    # model = BasicBlock1dDownsample(64, 64)
+    model = BasicBlock1dDownsample(64, 128)
+    model.eval()
+    input = torch.randn(10, 64, 1024)
+    print(model(input).shape)
+    torch.jit.save(torch.jit.trace(model, input), "chobits.pt")
+
+def test_basic_block1d_upsample():
+    # model = BasicBlock1dUpsample(128, 128)
+    model = BasicBlock1dUpsample(128, 64)
+    model.eval()
+    input = torch.randn(10, 128, 1024)
+    print(model(input).shape)
+    torch.jit.save(torch.jit.trace(model, input), "chobits.pt")
+
+def test_basic_block2d_downsample():
+    # model = BasicBlock2dDownsample(64, 64)
+    model = BasicBlock2dDownsample(64, 128)
+    model.eval()
+    input = torch.randn(10, 64, 128, 128)
+    print(model(input).shape)
+    torch.jit.save(torch.jit.trace(model, input), "chobits.pt")
+
+def test_basic_block2d_upsample():
+    # model = BasicBlock2dUpsample(128, 128)
+    model = BasicBlock2dUpsample(128, 64)
+    model.eval()
+    input = torch.randn(10, 128, 128, 128)
+    print(model(input).shape)
     torch.jit.save(torch.jit.trace(model, input), "chobits.pt")
 
 def test_ace():
@@ -57,9 +89,13 @@ def test_memory():
     model.eval()
     input = (
         torch.randn(10,  1, 1024),
+        torch.randn(10,  1, 1024),
+        torch.randn(10, 10, 1024),
         torch.randn(10, 10, 1024),
     )
-    print(model(*input).shape)
+    audio_memory, video_memory = model(*input)
+    print(audio_memory.shape)
+    print(video_memory.shape)
     torch.jit.save(torch.jit.trace(model, input), "chobits.pt")
 
 def test_mixer():
@@ -78,8 +114,8 @@ def test_muxer():
     model = Muxer()
     model.eval()
     input = (
-        torch.randn(10, 1, 1024),
-        torch.randn(10, 1, 1024),
+        torch.randn(10,  1, 1024),
+        torch.randn(10,  1, 1024),
         torch.randn(10, 10, 1024),
         torch.randn(10, 10, 1024),
     )
@@ -144,15 +180,20 @@ def test_loader():
     cv2.destroyAllWindows()
 
 if __name__ == "__main__":
-    # test_reader()
-    # test_loader()
-    test_ffn()
-    # test_mha()
-    # test_ace()
-    # test_acd()
-    # test_vce()
-    # test_vcd()
-    # test_memory()
-    # test_mixer()
-    # test_muxer()
-    # test_chobits()
+    with torch.no_grad():
+        # test_ffn()
+        # test_mha()
+        # test_basic_block1d_downsample()
+        # test_basic_block1d_upsample()
+        # test_basic_block2d_downsample()
+        # test_basic_block2d_upsample()
+        # test_ace()
+        # test_acd()
+        # test_vce()
+        # test_vcd()
+        # test_memory()
+        # test_mixer()
+        # test_muxer()
+        test_chobits()
+        # test_reader()
+        # test_loader()
