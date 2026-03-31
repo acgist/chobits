@@ -121,23 +121,24 @@ class Triner:
                     video_memory_pred_encode_detach,
                 )
                 # 音频损失
-                audio_loss = F.mse_loss(audio_pred_encode, audio_label_encode)
-                audio_loss = audio_loss / per_op_epoch
-                audio_loss.backward()
-                audio_loss_sum += audio_loss.item() * per_op_epoch
+                # audio_loss = F.mse_loss(audio_pred_encode, audio_label_encode)
+                # audio_loss = audio_loss / per_op_epoch
+                # audio_loss.backward()
+                # audio_loss_sum += audio_loss.item() * per_op_epoch
                 # 视频损失
                 # video_loss = F.mse_loss(video_pred_encode, video_label_encode)
                 # video_loss = video_loss / per_op_epoch
                 # video_loss.backward()
                 # video_loss_sum += video_loss.item() * per_op_epoch
                 # 联合损失
-                # audio_loss = F.mse_loss(audio_pred_encode, audio_label_encode)
-                # video_loss = F.mse_loss(video_pred_encode, video_label_encode)
-                # audio_loss = audio_loss / per_op_epoch
-                # video_loss = video_loss / per_op_epoch
-                # (audio_loss + video_loss).backward()
-                # audio_loss_sum += audio_loss.item() * per_op_epoch
-                # video_loss_sum += video_loss.item() * per_op_epoch
+                audio_loss = F.mse_loss(audio_pred_encode, audio_label_encode)
+                video_loss = F.mse_loss(video_pred_encode, video_label_encode)
+                audio_loss = audio_loss / per_op_epoch
+                video_loss = video_loss / per_op_epoch
+                loss = audio_loss * 0.4 + video_loss * 0.6
+                loss.backward()
+                audio_loss_sum += audio_loss.item() * per_op_epoch
+                video_loss_sum += video_loss.item() * per_op_epoch
                 # 统计信息
                 loss_count += 1
                 if (step + 1) % per_op_epoch == 0:

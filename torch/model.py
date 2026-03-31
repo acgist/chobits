@@ -320,7 +320,7 @@ class VCD(nn.Module):
         self.layer1 = BasicBlock2dUpsample( 64,  64)
         self.upsample1 = nn.ConvTranspose2d(64, 64, kernel_size = 3, stride = 2, padding = 1, output_padding = 1, bias = False)
         self.upsample2 = nn.ConvTranspose2d(64,  3, kernel_size = 7, stride = 5, padding = 1, output_padding = 0, bias = False)
-        self.bn1      = nn.BatchNorm2d(64)
+        self.bn1 = nn.BatchNorm2d(64)
 
     def reset_parameters(self) -> None:
         initialize_weights(self)
