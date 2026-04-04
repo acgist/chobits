@@ -1,3 +1,4 @@
+import os
 import torch
 
 from tqdm import tqdm
@@ -8,7 +9,8 @@ from torchcodec.encoders import AudioEncoder, VideoEncoder
 video_reader = VideoReader("video.mp4", 200, 1)
 
 model = Chobits()
-model.load_state_dict(torch.load("chobits.ckpt"))
+if os.path.exists("chobits.ckpt"):
+    model.load_state_dict(torch.load("chobits.ckpt"))
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 model.to(device)
 model.eval()
@@ -20,12 +22,9 @@ with torch.no_grad():
     for index in tqdm(range(video_reader.sample)):
         success, audio, video = video_reader.read(index)
         if not success:
-            break
+            continue
         audio = audio.to(device)
-        video = video.to(device)
-        # 归一化标准化
-        audio = audio.float()
-        video = video.float().sub(128.0).div(128.0)
+        video = video.to(device).float().sub(128.0).div(128.0)
         # 编码解码
         audio = model.acd(model.ace(audio))
         video = model.vcd(model.vce(video))

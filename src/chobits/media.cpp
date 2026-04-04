@@ -233,11 +233,11 @@ std::tuple<bool, at::Tensor, at::Tensor> chobits::media::get_data() {
 
 void chobits::media::set_data(const torch::Tensor& audio, const torch::Tensor& video) {
     // audio
-    auto audio_tensor = audio.view({ 1, -1 }).contiguous().mul(audio_normalization).to(torch::kShort).cpu();
+    auto audio_tensor = audio.view({ 1, -1 }).mul(audio_normalization).to(torch::kShort).cpu();
     auto audio_data   = reinterpret_cast<short*>(audio_tensor.data_ptr());
     auto audio_length = audio.size(-1);
     // video
-    auto video_tensor = video.permute({ 1, 2, 0 }).contiguous().mul(video_normalization).add(video_normalization).to(torch::kUInt8).cpu();
+    auto video_tensor = video.mul(video_normalization).add(video_normalization).permute({ 1, 2, 0 })/*.contiguous()*/.to(torch::kUInt8).cpu();
     auto video_data   = reinterpret_cast<char*>(video_tensor.data_ptr());
     // play
     chobits::player::play_audio(audio_data, audio_length * sizeof(short));
@@ -378,7 +378,7 @@ static bool audio_to_tensor(std::vector<torch::Tensor>& audio, std::vector<torch
                     pcm_data,
                     { pcm_size },
                     torch::kShort
-                ).to(torch::kFloat32).unsqueeze(0).div(audio_normalization);
+                ).to(torch::kFloat32).view({ 1, -1 }).div(audio_normalization);
                 audio.push_back(std::move(pmc_tensor));
             }
             remain -= dataset.audio_size;
@@ -423,7 +423,7 @@ static bool video_to_tensor(std::vector<torch::Tensor>& audio, std::vector<torch
                     buffer,
                     { chobits::video_height, chobits::video_width, 3 },
                     torch::kUInt8
-                ).to(torch::kFloat32).sub(video_normalization).div(video_normalization).permute({ 2, 0, 1 }).contiguous();
+                ).permute({ 2, 0, 1 })/*.contiguous()*/.to(torch::kFloat32).sub(video_normalization).div(video_normalization);
                 video.push_back(std::move(tensor));
             }
         }

@@ -1,6 +1,5 @@
 import os
-import platform
-
+import signal
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -15,6 +14,7 @@ class Triner:
         self,
         dataset_path: str,
     ) -> None:
+        self.running = True
         num_epochs = 128
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         model  = Chobits()
@@ -26,6 +26,8 @@ class Triner:
         if os.path.exists("optimizer.ckpt"):
             print("加载优化器权重：optimizer.ckpt")
             optimizer.load_state_dict(torch.load("optimizer.ckpt"))
+        else:
+            model.reset_parameters()
         scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size = 10, gamma = 0.9999)
         if os.path.exists("scheduler.ckpt"):
             print("加载调度器权重：scheduler.ckpt")
@@ -33,27 +35,33 @@ class Triner:
         self.model = model
         self.optimizer = optimizer
         self.scheduler = scheduler
-        loss_writer = SummaryWriter("runs/chobits_loss")
         per_op_epoch = 10
         per_ck_epoch = 10000
+        timeline = 20
+        timeline_next = timeline + 1
         loss_count = 0
-        audio_loss_sum = 0.0
-        video_loss_sum = 0.0
-        audio_memory_loss_sum = 0.0
-        video_memory_loss_sum = 0.0
+        audio_loss_sum               = 0.0
+        video_loss_sum               = 0.0
+        audio_memory_loss_sum        = 0.0
+        video_memory_loss_sum        = 0.0
         audio_encode_decode_loss_sum = 0.0
         video_encode_decode_loss_sum = 0.0
+        writer = SummaryWriter("runs/chobits_loss")
+        loader = loadDataset(dataset_path, batch_size = 4, length = timeline)
+        if not self.running:
+            print("训练结束")
+            return
         model.train()
-        loader = loadDataset(dataset_path, batch_size = 4)
         for epoch in range(num_epochs):
             optimizer.zero_grad()
             process = tqdm(loader, total = len(loader), desc = f"Epoch [{epoch + 1} / { num_epochs }]")
             for step, (audio, video) in enumerate(process):
+                if not self.running:
+                    print("训练结束")
+                    self.save()
+                    return
                 audio = audio.to(device)
-                video = video.to(device)
-                # 归一化标准化
-                audio = audio.float()
-                video = video.float().sub(128.0).div(128.0)
+                video = video.to(device).float().sub(128.0).div(128.0)
                 # 训练音频编码解码
                 audio_frame = audio[:, 0, :, :]
                 audio_encode = model.ace(audio_frame)
@@ -73,12 +81,12 @@ class Triner:
                 video_encode_decode_loss.backward()
                 video_encode_decode_loss_sum += video_encode_decode_loss.item() * per_op_epoch
                 # 训练媒体记忆
-                audio_memory_frame = audio[:, 10, :, :]
-                video_memory_frame = video[:, 10, :, :, :]
-                audio_memory_feature = audio[:, 0:10, :, :]
-                video_memory_feature = video[:, 0:10, :, :, :]
-                audio_memory_label = audio[:, 1:11, :, :]
-                video_memory_label = video[:, 1:11, :, :, :]
+                audio_memory_frame = audio[:, timeline, :, :]
+                video_memory_frame = video[:, timeline, :, :, :]
+                audio_memory_feature = audio[:, 0:timeline, :, :]
+                video_memory_feature = video[:, 0:timeline, :, :, :]
+                audio_memory_label = audio[:, 1:timeline_next, :, :]
+                video_memory_label = video[:, 1:timeline_next, :, :, :]
                 with torch.no_grad():
                     audio_memory_frame_encode = model.ace(audio_memory_frame)
                     video_memory_frame_encode = model.vce(video_memory_frame)
@@ -107,18 +115,18 @@ class Triner:
                 video_memory_loss.backward()
                 video_memory_loss_sum += video_memory_loss.item() * per_op_epoch
                 # 训练媒体混合
-                audio_label = audio[:, 11, :, :]
-                video_label = video[:, 11, :, :, :]
+                audio_label = audio[:, timeline_next, :, :]
+                video_label = video[:, timeline_next, :, :, :]
                 with torch.no_grad():
                     audio_label_encode = model.ace(audio_label)
                     video_label_encode = model.vce(video_label)
-                audio_memory_pred_encode_detach = audio_memory_pred_encode.detach()
-                video_memory_pred_encode_detach = video_memory_pred_encode.detach()
                 audio_pred_encode, video_pred_encode = model.muxer(
                     audio_memory_frame_encode,
                     video_memory_frame_encode,
-                    audio_memory_pred_encode_detach,
-                    video_memory_pred_encode_detach,
+                    audio_memory_label_encode,
+                    video_memory_label_encode,
+                    # audio_memory_pred_encode.detach(),
+                    # video_memory_pred_encode.detach(),
                 )
                 # 音频损失
                 # audio_loss = F.mse_loss(audio_pred_encode, audio_label_encode)
@@ -147,46 +155,56 @@ class Triner:
                     optimizer.zero_grad()
                     scheduler.step()
                     process.set_postfix(
-                        AL = "{:.6f}".format(audio_loss_sum / loss_count),
-                        VL = "{:.6f}".format(video_loss_sum / loss_count),
-                        AML = "{:.6f}".format(audio_memory_loss_sum / loss_count),
-                        VML = "{:.6f}".format(video_memory_loss_sum / loss_count),
+                        AL   = "{:.6f}".format(audio_loss_sum               / loss_count),
+                        VL   = "{:.6f}".format(video_loss_sum               / loss_count),
+                        AML  = "{:.6f}".format(audio_memory_loss_sum        / loss_count),
+                        VML  = "{:.6f}".format(video_memory_loss_sum        / loss_count),
                         AEDL = "{:.6f}".format(audio_encode_decode_loss_sum / loss_count),
                         VEDL = "{:.6f}".format(video_encode_decode_loss_sum / loss_count),
                     )
-                    loss_writer.add_scalars("Loss", {
-                        "AL": audio_loss_sum / loss_count,
-                        "VL": video_loss_sum / loss_count,
-                        "AML": audio_memory_loss_sum / loss_count,
-                        "VML": video_memory_loss_sum / loss_count,
+                    writer.add_scalars("Loss", {
+                        "AL"  : audio_loss_sum               / loss_count,
+                        "VL"  : video_loss_sum               / loss_count,
+                        "AML" : audio_memory_loss_sum        / loss_count,
+                        "VML" : video_memory_loss_sum        / loss_count,
                         "AEDL": audio_encode_decode_loss_sum / loss_count,
                         "VEDL": video_encode_decode_loss_sum / loss_count,
                     }, step)
                     loss_count = 0
-                    audio_loss_sum = 0.0
-                    video_loss_sum = 0.0
-                    audio_memory_loss_sum = 0.0
-                    video_memory_loss_sum = 0.0
+                    audio_loss_sum               = 0.0
+                    video_loss_sum               = 0.0
+                    audio_memory_loss_sum        = 0.0
+                    video_memory_loss_sum        = 0.0
                     audio_encode_decode_loss_sum = 0.0
                     video_encode_decode_loss_sum = 0.0
                 if (step + 1) % per_ck_epoch == 0:
-                    model.eval()
-                    torch.save(model.state_dict(), f"chobits.ckpt")
-                    torch.save(optimizer.state_dict(), f"optimizer.ckpt")
-                    torch.save(scheduler.state_dict(), f"scheduler.ckpt")
+                    self.save()
                     model.train()
-        model.eval()
-        model = model.cpu()
-        torch.save(model, f"chobits.pth")
+        print("训练完成")
+        self.save(True, True)
 
-    def save(self):
+    def stop(self):
+        print("训练停止")
+        self.running = False
+
+    def save(
+        self,
+        cpu: bool = False,
+        pth: bool = False,
+    ):
+        print("保存模型")
         self.model.eval()
-        torch.save(self.model.state_dict(), f"chobits.ckpt_")
-        torch.save(self.optimizer.state_dict(), f"optimizer.ckpt_")
-        torch.save(self.scheduler.state_dict(), f"scheduler.ckpt_")
-        os.rename(f"chobits.ckpt_", f"chobits.ckpt")
-        os.rename(f"optimizer.ckpt_", f"optimizer.ckpt")
-        os.rename(f"scheduler.ckpt_", f"scheduler.ckpt")
+        if cpu:
+            self.model.cpu()
+        if pth:
+            torch.save(self.model, f"chobits.pth")
+        else:
+            torch.save(self.model.state_dict(), f"chobits.ckpt_")
+            torch.save(self.optimizer.state_dict(), f"optimizer.ckpt_")
+            torch.save(self.scheduler.state_dict(), f"scheduler.ckpt_")
+            os.rename(f"chobits.ckpt_", f"chobits.ckpt")
+            os.rename(f"optimizer.ckpt_", f"optimizer.ckpt")
+            os.rename(f"scheduler.ckpt_", f"scheduler.ckpt")
 
 if __name__ == "__main__":
     print("""
@@ -196,11 +214,12 @@ if __name__ == "__main__":
 
     """)
     trainer = Triner()
+    def signal_handler(sig, frame):
+        trainer.stop()
+    signal.signal(signal.SIGINT,  signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
     try:
-        if platform.system() == "Windows":
-            trainer.train("D://tmp")
-        else:
-            trainer.train("/data/chobits/video")
-    except KeyboardInterrupt:
-        print("训练中断")
-        trainer.save()
+        trainer.train("/data/chobits/video")
+    except Exception as e:
+        print(f"训练异常: {e}")
+        trainer.stop()

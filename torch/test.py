@@ -9,6 +9,7 @@ from dataset import VideoReader, loadDataset
 def test_ffn():
     model = FFN(1024)
     model.eval()
+    model.reset_parameters()
     input = torch.randn(10, 1024)
     print(model(input).shape)
     torch.jit.save(torch.jit.trace(model, input), "chobits.pt") 
@@ -16,6 +17,7 @@ def test_ffn():
 def test_mha():
     model = MHA(1024, 1024, 1024, 1024, 1024)
     model.eval()
+    model.reset_parameters()
     input = (
         torch.randn(10, 10, 1024),
         torch.randn(10, 10, 1024),
@@ -28,6 +30,7 @@ def test_basic_block1d_downsample():
     # model = BasicBlock1dDownsample(64, 64)
     model = BasicBlock1dDownsample(64, 128)
     model.eval()
+    model.reset_parameters()
     input = torch.randn(10, 64, 1024)
     print(model(input).shape)
     torch.jit.save(torch.jit.trace(model, input), "chobits.pt")
@@ -36,7 +39,8 @@ def test_basic_block1d_upsample():
     # model = BasicBlock1dUpsample(128, 128)
     model = BasicBlock1dUpsample(128, 64)
     model.eval()
-    input = torch.randn(10, 128, 1024)
+    model.reset_parameters()
+    input = torch.randn(10, 128, 512)
     print(model(input).shape)
     torch.jit.save(torch.jit.trace(model, input), "chobits.pt")
 
@@ -44,6 +48,7 @@ def test_basic_block2d_downsample():
     # model = BasicBlock2dDownsample(64, 64)
     model = BasicBlock2dDownsample(64, 128)
     model.eval()
+    model.reset_parameters()
     input = torch.randn(10, 64, 128, 128)
     print(model(input).shape)
     torch.jit.save(torch.jit.trace(model, input), "chobits.pt")
@@ -52,13 +57,15 @@ def test_basic_block2d_upsample():
     # model = BasicBlock2dUpsample(128, 128)
     model = BasicBlock2dUpsample(128, 64)
     model.eval()
-    input = torch.randn(10, 128, 128, 128)
+    model.reset_parameters()
+    input = torch.randn(10, 128, 64, 64)
     print(model(input).shape)
     torch.jit.save(torch.jit.trace(model, input), "chobits.pt")
 
 def test_ace():
     model = ACE()
     model.eval()
+    model.reset_parameters()
     input = torch.randn(10, 1, 800)
     print(model(input).shape)
     torch.jit.save(torch.jit.trace(model, input), "chobits.pt")
@@ -66,13 +73,15 @@ def test_ace():
 def test_acd():
     model = ACD()
     model.eval()
-    input = torch.randn(10, 1, 1024)
+    model.reset_parameters()
+    input = torch.randn(10, 1, 512)
     print(model(input).shape)
     torch.jit.save(torch.jit.trace(model, input), "chobits.pt")
 
 def test_vce():
     model = VCE()
     model.eval()
+    model.reset_parameters()
     input = torch.randn(10, 3, 480, 640)
     print(model(input).shape)
     torch.jit.save(torch.jit.trace(model, input), "chobits.pt")
@@ -80,6 +89,7 @@ def test_vce():
 def test_vcd():
     model = VCD()
     model.eval()
+    model.reset_parameters()
     input = torch.randn(10, 1, 1024)
     print(model(input).shape)
     torch.jit.save(torch.jit.trace(model, input), "chobits.pt")
@@ -87,10 +97,11 @@ def test_vcd():
 def test_memory():
     model = Memory()
     model.eval()
+    model.reset_parameters()
     input = (
+        torch.randn(10,  1,  512),
         torch.randn(10,  1, 1024),
-        torch.randn(10,  1, 1024),
-        torch.randn(10, 10, 1024),
+        torch.randn(10, 10,  512),
         torch.randn(10, 10, 1024),
     )
     audio_memory, video_memory = model(*input)
@@ -101,8 +112,9 @@ def test_memory():
 def test_mixer():
     model = Mixer()
     model.eval()
+    model.reset_parameters()
     input = (
-        torch.randn(10, 10, 1024),
+        torch.randn(10, 10,  512),
         torch.randn(10, 10, 1024),
     )
     audio, video = model(*input)
@@ -113,10 +125,11 @@ def test_mixer():
 def test_muxer():
     model = Muxer()
     model.eval()
+    model.reset_parameters()
     input = (
+        torch.randn(10,  1,  512),
         torch.randn(10,  1, 1024),
-        torch.randn(10,  1, 1024),
-        torch.randn(10, 10, 1024),
+        torch.randn(10, 10,  512),
         torch.randn(10, 10, 1024),
     )
     audio, video = model(*input)
@@ -127,10 +140,11 @@ def test_muxer():
 def test_chobits():
     model = Chobits()
     model.eval()
+    model.reset_parameters()
     input = (
-        torch.randn(10, 1, 800),
-        torch.randn(10, 3, 480, 640),
-        torch.randn(10, 10, 1024),
+        torch.randn(10,  1, 800),
+        torch.randn(10,  3, 480, 640),
+        torch.randn(10, 10, 512),
         torch.randn(10, 10, 1024),
     )
     audio, video, audio_memory, video_memory = model(*input)
@@ -187,13 +201,13 @@ if __name__ == "__main__":
         # test_basic_block1d_upsample()
         # test_basic_block2d_downsample()
         # test_basic_block2d_upsample()
-        # test_ace()
-        # test_acd()
-        # test_vce()
-        # test_vcd()
+        test_ace()
+        test_acd()
+        test_vce()
+        test_vcd()
         # test_memory()
         # test_mixer()
         # test_muxer()
-        test_chobits()
+        # test_chobits()
         # test_reader()
         # test_loader()

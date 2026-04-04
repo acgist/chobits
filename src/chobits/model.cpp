@@ -31,7 +31,8 @@ bool chobits::model::stop_model() {
 }
 
 void chobits::model::run_model() {
-    auto audio_memory = torch::randn({ 1, 10, 1024 }, torch::kFloat32).to(model_state.device);
+    torch::NoGradGuard guard;
+    auto audio_memory = torch::randn({ 1, 10,  512 }, torch::kFloat32).to(model_state.device);
     auto video_memory = torch::randn({ 1, 10, 1024 }, torch::kFloat32).to(model_state.device);
     while(chobits::running) {
         auto [ success, audio, video ] = chobits::media::get_data();

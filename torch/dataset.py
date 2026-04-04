@@ -1,7 +1,6 @@
 import os
-import random
-
 import torch
+import random
 import threading
 
 from tqdm import tqdm
@@ -52,11 +51,12 @@ class VideoReader:
             self.load()
         with self.lock:
             try:
-                # 直接采样AV_SAMPLE_FMT_FLTP格式
+                # 使用AV_SAMPLE_FMT_FLTP采样
                 audio_tensor = self.audio_decoer.get_samples_played_in_range(1. * self.millis * index / 1000., 1. * self.millis * (index + self.length) / 1000.).data
                 video_tensor = self.video_decoer.get_frames_played_in_range (1. * self.millis * index / 1000., 1. * self.millis * (index + self.length) / 1000.).data
                 audio_tensor = audio_tensor.view(self.length, 1, -1)
                 video_tensor = video_tensor[torch.linspace(0, video_tensor.shape[0] - 1, self.length).long()]
+                # 读取数据长度验证
                 if (
                     audio_tensor.shape[0] != self.length or
                     video_tensor.shape[0] != self.length or
@@ -107,17 +107,15 @@ class VideoDataset(torch.utils.data.Dataset):
     
     def __getitem__(self, index):
         while True:
-            for (k, v) in reversed(self.reader):
-                if index >= k:
-                    success, audio_tensor, video_tensor = v.read(index - k)
+            for (jndex, reader) in reversed(self.reader):
+                if index >= jndex:
+                    success, audio_tensor, video_tensor = reader.read(index - jndex)
                     if success:
                         return audio_tensor, video_tensor
                     else:
+                        # 读取失败随机选择一个视频
                         index = random.randint(0, self.index - 1)
                         continue
-    
-    def __len__(self):
-        return self.index
     
     def decode(
         self,
@@ -126,8 +124,8 @@ class VideoDataset(torch.utils.data.Dataset):
     ) -> tuple[bool, int]:
         audio_decoer = AudioDecoder(path)
         video_decoer = VideoDecoder(path)
-        suport_audio_codec = [ "aac", "mp3", "pcm",  "flac" ]
-        suport_video_codec = [ "vp8", "vp9", "h264", "h265" ]
+        suport_audio_codec = [ "aac",  "mp3"  ]
+        suport_video_codec = [ "h264", "h265" ]
         if audio_decoer.metadata.codec in suport_audio_codec and video_decoer.metadata.codec in suport_video_codec:
             return True, int(min(audio_decoer.metadata.duration_seconds, video_decoer.metadata.duration_seconds) * 1000 / millis)
         else:
@@ -145,6 +143,6 @@ def loadDataset(
         drop_last          = True,
         batch_size         = batch_size, 
         num_workers        = 4,
-        prefetch_factor    = 4,
+        prefetch_factor    = 16,
         persistent_workers = True,
     )

@@ -32,7 +32,7 @@
 }
 
 int main() {
-    // test_media();
-    test_model();
+    test_media();
+    // test_model();
     return 0;
 }
