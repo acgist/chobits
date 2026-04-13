@@ -31,9 +31,8 @@ with torch.no_grad():
         audio_samples.append(audio)
         video_frames .append(video)
         # 模型推理
-        # audio_memory = torch.rand(1, 10, 1024).to(device)
-        # video_memory = torch.rand(1, 10, 1024).to(device)
-        # audio, video, audio_memory, video_memory = model(audio, video, audio_memory, video_memory)
+        # memory = torch.rand(1, 10, 1024).to(device)
+        # audio, video, memory = model(audio, video, memory)
         # audio_samples.append(audio)
         # video_frames .append(video)
 

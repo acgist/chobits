@@ -15,16 +15,14 @@ torch.onnx.export(
     (
         torch.rand(1,  1, 800),
         torch.rand(1,  3, 480, 640),
-        torch.rand(1, 10, 512),
         torch.rand(1, 10, 1024),
     ),
     "chobits.onnx",
     dynamo         = True,
     opset_version  = 18,
-    input_names    = [ "audio", "video", "audio_memory", "video_memory" ],
-    output_names   = [ "audio", "video", "audio_memory", "video_memory" ],
+    input_names    = [ "audio", "video", "memory" ],
+    output_names   = [ "audio", "video", "memory" ],
     dynamic_shapes = (
-        { 0: batch },
         { 0: batch },
         { 0: batch },
         { 0: batch },

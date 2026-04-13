@@ -1,5 +1,6 @@
 import os
 import signal
+import traceback
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -16,12 +17,14 @@ class Triner:
     ) -> None:
         self.running = True
         num_epochs = 128
+        batch_size = 4
+        dtype  = torch.float32
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         model  = Chobits()
         if os.path.exists("chobits.ckpt"):
             print("加载模型权重：chobits.ckpt")
             model.load_state_dict(torch.load("chobits.ckpt"))
-        model.to(device)
+        model.to(device = device, dtype = dtype)
         optimizer = torch.optim.AdamW(model.parameters(), lr = 0.0003)
         if os.path.exists("optimizer.ckpt"):
             print("加载优化器权重：optimizer.ckpt")
@@ -35,19 +38,17 @@ class Triner:
         self.model = model
         self.optimizer = optimizer
         self.scheduler = scheduler
+        timeline     = 22 # 20 + 1 = 1
         per_op_epoch = 10
         per_ck_epoch = 10000
-        timeline = 20
-        timeline_next = timeline + 1
-        loss_count = 0
-        audio_loss_sum               = 0.0
-        video_loss_sum               = 0.0
-        audio_memory_loss_sum        = 0.0
-        video_memory_loss_sum        = 0.0
+        loss_count     = 0
+        loss_sum       = 0.0
+        audio_loss_sum = 0.0
+        video_loss_sum = 0.0
         audio_encode_decode_loss_sum = 0.0
         video_encode_decode_loss_sum = 0.0
         writer = SummaryWriter("runs/chobits_loss")
-        loader = loadDataset(dataset_path, batch_size = 4, length = timeline)
+        loader = loadDataset(dataset_path, batch_size = batch_size, length = timeline)
         if not self.running:
             print("训练结束")
             return
@@ -60,121 +61,90 @@ class Triner:
                     print("训练结束")
                     self.save()
                     return
-                audio = audio.to(device)
-                video = video.to(device).float().sub(128.0).div(128.0)
+                audio = audio.to(device = device, dtype = dtype)
+                video = video.to(device = device, dtype = dtype).sub(128.0).div(128.0)
                 # 训练音频编码解码
-                audio_frame = audio[:, 0, :, :]
-                audio_encode = model.ace(audio_frame)
-                audio_decode = model.acd(audio_encode)
+                audio_frame  = audio[:, 0, :, :]
+                audio_frame_encode = model.ace(audio_frame)
+                audio_frame_decode = model.acd(audio_frame_encode)
                 # 损失函数
-                audio_encode_decode_loss = F.mse_loss(audio_decode, audio_frame)
+                audio_encode_decode_loss = F.mse_loss(audio_frame_decode, audio_frame)
                 audio_encode_decode_loss = audio_encode_decode_loss / per_op_epoch
                 audio_encode_decode_loss.backward()
                 audio_encode_decode_loss_sum += audio_encode_decode_loss.item() * per_op_epoch
                 # 训练视频编码解码
-                video_frame = video[:, 0, :, :, :]
-                video_encode = model.vce(video_frame)
-                video_decode = model.vcd(video_encode)
+                video_frame  = video[:, 0, :, :, :]
+                video_frame_encode = model.vce(video_frame)
+                video_frame_decode = model.vcd(video_frame_encode)
                 # 损失函数
-                video_encode_decode_loss = F.mse_loss(video_decode, video_frame)
+                video_encode_decode_loss = F.mse_loss(video_frame_decode, video_frame)
                 video_encode_decode_loss = video_encode_decode_loss / per_op_epoch
                 video_encode_decode_loss.backward()
                 video_encode_decode_loss_sum += video_encode_decode_loss.item() * per_op_epoch
-                # 训练媒体记忆
-                audio_memory_frame = audio[:, timeline, :, :]
-                video_memory_frame = video[:, timeline, :, :, :]
-                audio_memory_feature = audio[:, 0:timeline, :, :]
-                video_memory_feature = video[:, 0:timeline, :, :, :]
-                audio_memory_label = audio[:, 1:timeline_next, :, :]
-                video_memory_label = video[:, 1:timeline_next, :, :, :]
+                # 训练核心
                 with torch.no_grad():
-                    audio_memory_frame_encode = model.ace(audio_memory_frame)
-                    video_memory_frame_encode = model.vce(video_memory_frame)
-                    audio_memory_feature_encode = model.ace(audio_memory_feature.reshape(-1, audio_memory_feature.size(2), audio_memory_feature.size(3)))
-                    audio_memory_feature_encode = audio_memory_feature_encode.view(audio.size(0), -1, audio_memory_feature_encode.size(-1))
-                    video_memory_feature_encode = model.vce(video_memory_feature.reshape(-1, video_memory_feature.size(2), video_memory_feature.size(3), video_memory_feature.size(4)))
-                    video_memory_feature_encode = video_memory_feature_encode.view(video.size(0), -1, video_memory_feature_encode.size(-1))
-                    audio_memory_label_encode = model.ace(audio_memory_label.reshape(-1, audio_memory_label.size(2), audio_memory_label.size(3)))
-                    audio_memory_label_encode = audio_memory_label_encode.view(audio.size(0), -1, audio_memory_label_encode.size(-1))
-                    video_memory_label_encode = model.vce(video_memory_label.reshape(-1, video_memory_label.size(2), video_memory_label.size(3), video_memory_feature.size(4)))
-                    video_memory_label_encode = video_memory_label_encode.view(video.size(0), -1, video_memory_label_encode.size(-1))
-                audio_memory_pred_encode, video_memory_pred_encode = model.memory(
-                    audio_memory_frame_encode,
-                    video_memory_frame_encode,
-                    audio_memory_feature_encode,
-                    video_memory_feature_encode,
+                    chaos = torch.randn(batch_size, 10, 1024, device = device, dtype = dtype)
+                    audio_encode = model.ace(audio.reshape(-1, audio.size(2), audio.size(3)))
+                    audio_encode = audio_encode.view(audio.size(0), audio.size(1), -1, audio_encode.size(-1))
+                    video_encode = model.vce(video.reshape(-1, video.size(2), video.size(3), video.size(4)))
+                    video_encode = video_encode.view(video.size(0), video.size(1), -1, video_encode.size(-1))
+                    # 输入特征
+                    audio_label_encode = audio_encode[:, -1, :, :]
+                    video_label_encode = video_encode[:, -1, :, :]
+                    # 过去记忆
+                    audio_memory_encode = audio_encode[:, :-2, :, :].view(audio_encode.size(0), -1, audio_encode.size(-1))
+                    video_memory_encode = video_encode[:, :-2, :, :].view(video_encode.size(0), -1, video_encode.size(-1))
+                    # 输出特征
+                    audio_feature_encode = audio_encode[:, -2, :, :]
+                    video_feature_encode = video_encode[:, -2, :, :]
+                    memory_feature = model.memory(audio_memory_encode, video_memory_encode, chaos)
+                # 记忆
+                memory_pred = model.memory(
+                    audio_feature_encode,
+                    video_feature_encode,
+                    memory_feature,
                 )
-                # 音频内存损失
-                audio_memory_loss = F.mse_loss(audio_memory_pred_encode, audio_memory_label_encode)
-                audio_memory_loss = audio_memory_loss / per_op_epoch
-                audio_memory_loss.backward()
-                audio_memory_loss_sum += audio_memory_loss.item() * per_op_epoch
-                # 视频内存损失
-                video_memory_loss = F.mse_loss(video_memory_pred_encode, video_memory_label_encode)
-                video_memory_loss = video_memory_loss / per_op_epoch
-                video_memory_loss.backward()
-                video_memory_loss_sum += video_memory_loss.item() * per_op_epoch
-                # 训练媒体混合
-                audio_label = audio[:, timeline_next, :, :]
-                video_label = video[:, timeline_next, :, :, :]
-                with torch.no_grad():
-                    audio_label_encode = model.ace(audio_label)
-                    video_label_encode = model.vce(video_label)
-                audio_pred_encode, video_pred_encode = model.muxer(
-                    audio_memory_frame_encode,
-                    video_memory_frame_encode,
-                    audio_memory_label_encode,
-                    video_memory_label_encode,
-                    # audio_memory_pred_encode.detach(),
-                    # video_memory_pred_encode.detach(),
+                # 回忆
+                audio_pred_encode, video_pred_encode = model.recall(
+                    audio_feature_encode,
+                    video_feature_encode,
+                    memory_pred,
                 )
-                # 音频损失
-                # audio_loss = F.mse_loss(audio_pred_encode, audio_label_encode)
-                # audio_loss = audio_loss / per_op_epoch
-                # audio_loss.backward()
-                # audio_loss_sum += audio_loss.item() * per_op_epoch
-                # 视频损失
-                # video_loss = F.mse_loss(video_pred_encode, video_label_encode)
-                # video_loss = video_loss / per_op_epoch
-                # video_loss.backward()
-                # video_loss_sum += video_loss.item() * per_op_epoch
                 # 联合损失
                 audio_loss = F.mse_loss(audio_pred_encode, audio_label_encode)
                 video_loss = F.mse_loss(video_pred_encode, video_label_encode)
                 audio_loss = audio_loss / per_op_epoch
                 video_loss = video_loss / per_op_epoch
-                loss = audio_loss * 0.4 + video_loss * 0.6
+                loss = audio_loss * 0.2 + video_loss * 0.8
                 loss.backward()
+                loss_sum       += loss.item()       * per_op_epoch
                 audio_loss_sum += audio_loss.item() * per_op_epoch
                 video_loss_sum += video_loss.item() * per_op_epoch
                 # 统计信息
                 loss_count += 1
                 if (step + 1) % per_op_epoch == 0:
-                    nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+                    # nn.utils.clip_grad_norm_(model.parameters(), 5.0)
                     optimizer.step()
                     optimizer.zero_grad()
                     scheduler.step()
-                    process.set_postfix(
-                        AL   = "{:.6f}".format(audio_loss_sum               / loss_count),
-                        VL   = "{:.6f}".format(video_loss_sum               / loss_count),
-                        AML  = "{:.6f}".format(audio_memory_loss_sum        / loss_count),
-                        VML  = "{:.6f}".format(video_memory_loss_sum        / loss_count),
-                        AEDL = "{:.6f}".format(audio_encode_decode_loss_sum / loss_count),
-                        VEDL = "{:.6f}".format(video_encode_decode_loss_sum / loss_count),
-                    )
+                    process.set_postfix({
+                        "L"   : "{:.6f}".format(loss_sum       / loss_count),
+                        "AL"  : "{:.6f}".format(audio_loss_sum / loss_count),
+                        "VL"  : "{:.6f}".format(video_loss_sum / loss_count),
+                        "AEDL": "{:.6f}".format(audio_encode_decode_loss_sum / loss_count),
+                        "VEDL": "{:.6f}".format(video_encode_decode_loss_sum / loss_count),
+                    })
                     writer.add_scalars("Loss", {
-                        "AL"  : audio_loss_sum               / loss_count,
-                        "VL"  : video_loss_sum               / loss_count,
-                        "AML" : audio_memory_loss_sum        / loss_count,
-                        "VML" : video_memory_loss_sum        / loss_count,
+                        "L"   : loss_sum       / loss_count,
+                        "AL"  : audio_loss_sum / loss_count,
+                        "VL"  : video_loss_sum / loss_count,
                         "AEDL": audio_encode_decode_loss_sum / loss_count,
                         "VEDL": video_encode_decode_loss_sum / loss_count,
                     }, step)
-                    loss_count = 0
-                    audio_loss_sum               = 0.0
-                    video_loss_sum               = 0.0
-                    audio_memory_loss_sum        = 0.0
-                    video_memory_loss_sum        = 0.0
+                    loss_count     = 0
+                    loss_sum       = 0.0
+                    audio_loss_sum = 0.0
+                    video_loss_sum = 0.0
                     audio_encode_decode_loss_sum = 0.0
                     video_encode_decode_loss_sum = 0.0
                 if (step + 1) % per_ck_epoch == 0:
@@ -221,5 +191,6 @@ if __name__ == "__main__":
     try:
         trainer.train("/data/chobits/video")
     except Exception as e:
+        traceback.print_exc()
         print(f"训练异常: {e}")
         trainer.stop()

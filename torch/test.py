@@ -28,7 +28,7 @@ def test_mha():
 
 def test_basic_block1d_downsample():
     # model = BasicBlock1dDownsample(64, 64)
-    model = BasicBlock1dDownsample(64, 128)
+    model = BasicBlock1dDownsample(64, 128, 2)
     model.eval()
     model.reset_parameters()
     input = torch.randn(10, 64, 1024)
@@ -37,28 +37,10 @@ def test_basic_block1d_downsample():
 
 def test_basic_block1d_upsample():
     # model = BasicBlock1dUpsample(128, 128)
-    model = BasicBlock1dUpsample(128, 64)
+    model = BasicBlock1dUpsample(128, 64, 2)
     model.eval()
     model.reset_parameters()
     input = torch.randn(10, 128, 512)
-    print(model(input).shape)
-    torch.jit.save(torch.jit.trace(model, input), "chobits.pt")
-
-def test_basic_block2d_downsample():
-    # model = BasicBlock2dDownsample(64, 64)
-    model = BasicBlock2dDownsample(64, 128)
-    model.eval()
-    model.reset_parameters()
-    input = torch.randn(10, 64, 128, 128)
-    print(model(input).shape)
-    torch.jit.save(torch.jit.trace(model, input), "chobits.pt")
-
-def test_basic_block2d_upsample():
-    # model = BasicBlock2dUpsample(128, 128)
-    model = BasicBlock2dUpsample(128, 64)
-    model.eval()
-    model.reset_parameters()
-    input = torch.randn(10, 128, 64, 64)
     print(model(input).shape)
     torch.jit.save(torch.jit.trace(model, input), "chobits.pt")
 
@@ -75,6 +57,24 @@ def test_acd():
     model.eval()
     model.reset_parameters()
     input = torch.randn(10, 1, 512)
+    print(model(input).shape)
+    torch.jit.save(torch.jit.trace(model, input), "chobits.pt")
+
+def test_basic_block2d_downsample():
+    # model = BasicBlock2dDownsample(64, 64)
+    model = BasicBlock2dDownsample(64, 128, (2, 2))
+    model.eval()
+    model.reset_parameters()
+    input = torch.randn(10, 64, 128, 128)
+    print(model(input).shape)
+    torch.jit.save(torch.jit.trace(model, input), "chobits.pt")
+
+def test_basic_block2d_upsample():
+    # model = BasicBlock2dUpsample(128, 128)
+    model = BasicBlock2dUpsample(128, 64, (2, 2))
+    model.eval()
+    model.reset_parameters()
+    input = torch.randn(10, 128, 64, 64)
     print(model(input).shape)
     torch.jit.save(torch.jit.trace(model, input), "chobits.pt")
 
@@ -101,35 +101,18 @@ def test_memory():
     input = (
         torch.randn(10,  1,  512),
         torch.randn(10,  1, 1024),
-        torch.randn(10, 10,  512),
         torch.randn(10, 10, 1024),
     )
-    audio_memory, video_memory = model(*input)
-    print(audio_memory.shape)
-    print(video_memory.shape)
+    print(model(*input).shape)
     torch.jit.save(torch.jit.trace(model, input), "chobits.pt")
 
-def test_mixer():
-    model = Mixer()
-    model.eval()
-    model.reset_parameters()
-    input = (
-        torch.randn(10, 10,  512),
-        torch.randn(10, 10, 1024),
-    )
-    audio, video = model(*input)
-    print(audio.shape)
-    print(video.shape)
-    torch.jit.save(torch.jit.trace(model, input), "chobits.pt")
-
-def test_muxer():
-    model = Muxer()
+def test_recall():
+    model = Recall()
     model.eval()
     model.reset_parameters()
     input = (
         torch.randn(10,  1,  512),
         torch.randn(10,  1, 1024),
-        torch.randn(10, 10,  512),
         torch.randn(10, 10, 1024),
     )
     audio, video = model(*input)
@@ -144,14 +127,13 @@ def test_chobits():
     input = (
         torch.randn(10,  1, 800),
         torch.randn(10,  3, 480, 640),
-        torch.randn(10, 10, 512),
         torch.randn(10, 10, 1024),
     )
-    audio, video, audio_memory, video_memory = model(*input)
+    audio, video, memory = model(*input)
     print(audio.shape)
     print(video.shape)
-    print(audio_memory.shape)
-    print(video_memory.shape)
+    print(memory.shape)
+    # torch.save(model.state_dict(), "chobits.ckpt")
     torch.jit.save(torch.jit.trace(model, input), "chobits.pt")
 
 def test_reader():
@@ -199,15 +181,14 @@ if __name__ == "__main__":
         # test_mha()
         # test_basic_block1d_downsample()
         # test_basic_block1d_upsample()
+        # test_ace()
+        # test_acd()
         # test_basic_block2d_downsample()
         # test_basic_block2d_upsample()
-        test_ace()
-        test_acd()
-        test_vce()
-        test_vcd()
+        # test_vce()
+        # test_vcd()
         # test_memory()
-        # test_mixer()
-        # test_muxer()
-        # test_chobits()
+        # test_recall()
+        test_chobits()
         # test_reader()
         # test_loader()

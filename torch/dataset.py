@@ -134,7 +134,7 @@ class VideoDataset(torch.utils.data.Dataset):
 def loadDataset(
     folder    : str,
     batch_size: int = 32,
-    length    : int = 12,
+    length    : int = 16,
     millis    : int = 100,
 ) -> DataLoader:
     return DataLoader(
