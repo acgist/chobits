@@ -21,7 +21,7 @@ class VideoReader:
         ac    : int = 1,    # 音频通道
         vh    : int = 480,  # 视频高度
         vw    : int = 640,  # 视频宽度
-    ):
+    ) -> None:
         self.init   = False
         self.path   = path
         self.sample = sample
@@ -77,7 +77,7 @@ class VideoDataset(torch.utils.data.Dataset):
         folder: str,
         length: int = 12,
         millis: int = 100,
-    ):
+    ) -> None:
         files = []
         for file_name in os.listdir(folder):
             file_path = os.path.join(folder, file_name)

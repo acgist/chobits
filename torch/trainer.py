@@ -1,6 +1,7 @@
 import os
 import signal
 import traceback
+import threading
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -17,6 +18,7 @@ class Triner:
         train_video        : bool = True,
         train_memory_recall: bool = True,
     ) -> None:
+        self.lock = threading.RLock()
         self.train_audio = train_audio
         self.train_video = train_video
         self.train_memory_recall = train_memory_recall
@@ -63,7 +65,7 @@ class Triner:
         video_loss_sum = 0.0
         audio_encode_decode_loss_sum = 0.0
         video_encode_decode_loss_sum = 0.0
-        writer = SummaryWriter("runs/chobits_loss")
+        writer = SummaryWriter("runs/chobits")
         loader = loadDataset(dataset_path, batch_size = batch_size, length = timeline)
         if not self.running:
             print("训练结束")
@@ -179,19 +181,20 @@ class Triner:
         cpu: bool = False,
         pth: bool = False,
     ):
-        print("保存模型")
-        self.model.eval()
-        if cpu:
-            self.model.cpu()
-        if pth:
-            torch.save(self.model, f"chobits.pth")
-        else:
-            torch.save(self.model.state_dict(), f"chobits.ckpt_")
-            torch.save(self.optimizer.state_dict(), f"optimizer.ckpt_")
-            torch.save(self.scheduler.state_dict(), f"scheduler.ckpt_")
-            os.rename(f"chobits.ckpt_", f"chobits.ckpt")
-            os.rename(f"optimizer.ckpt_", f"optimizer.ckpt")
-            os.rename(f"scheduler.ckpt_", f"scheduler.ckpt")
+        with self.lock:
+            print("保存模型")
+            self.model.eval()
+            if cpu:
+                self.model.cpu()
+            if pth:
+                torch.save(self.model, f"chobits.pth")
+            else:
+                torch.save(self.model.state_dict(), f"chobits.ckpt_")
+                torch.save(self.optimizer.state_dict(), f"optimizer.ckpt_")
+                torch.save(self.scheduler.state_dict(), f"scheduler.ckpt_")
+                os.rename(f"chobits.ckpt_", f"chobits.ckpt")
+                os.rename(f"optimizer.ckpt_", f"optimizer.ckpt")
+                os.rename(f"scheduler.ckpt_", f"scheduler.ckpt")
 
 if __name__ == "__main__":
     print("""

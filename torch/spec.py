@@ -36,6 +36,13 @@ torch_stft = torch.stft(
 torch_spec = torch.abs(torch_stft)
 torch_spec_db = 20 * torch.log10(torch.clamp(torch_spec, 1e-8))
 # torch_spec_db -= torch_spec_db.max()
+# # 高质量语音低噪声
+# torch_spec_db = torch.clamp(torch_spec_db, min=-60)
+# # 干净语音
+# torch_spec_db = torch.clamp(torch_spec_db, min=-80)
+# # 语音 音频 音乐
+# torch_spec_db = torch.clamp(torch_spec_db, min=-100)
+# 模拟librosa
 torch_spec_db = torch.maximum(torch_spec_db, torch_spec_db.max() - 80)
 torch_spec_db = torch_spec_db.numpy()
 

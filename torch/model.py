@@ -6,7 +6,7 @@ class KLLoss(nn.Module):
     def __init__(
         self,
         beta: float = 0.0001,
-    ):
+    ) -> None:
         super().__init__()
         self.beta = beta
 
@@ -24,7 +24,7 @@ class STFTLoss(nn.Module):
         n_fft     : int = 512,
         hop_length: int = 128,
         win_length: int = 512,
-    ):
+    ) -> None:
         super().__init__()
         self.n_fft      = n_fft
         self.hop_length = hop_length
@@ -33,12 +33,15 @@ class STFTLoss(nn.Module):
 
     def db(
         self,
-        stft: torch.Tensor
+        raw: torch.Tensor
     ) -> torch.Tensor:
-        spec = torch.abs(stft)
-        spec_db = 20 * torch.log10(torch.clamp(spec, 1e-8))
-        spec_db = torch.maximum(spec_db, spec_db.max() - 80)
-        return spec_db
+        spec = torch.stft(raw.squeeze(1), self.n_fft, self.hop_length, self.win_length, self.window, return_complex = True)
+        mag  = torch.abs(spec)       # 幅度
+#       pha  = torch.angle(spec)     # 角度
+#       stft = torch.polar(mag, pha) # 恢复
+        db = 20.0 * torch.log10(mag + 1e-8)
+        db = torch.clamp(db, min = -60)
+        return db
 
     def forward(
         self,
@@ -47,22 +50,13 @@ class STFTLoss(nn.Module):
     ) -> torch.Tensor:
         # 原始损失
         raw_loss = F.l1_loss(pred, true)
-        # 计算STFT
-        pred_spec = torch.stft(pred.squeeze(1), self.n_fft, self.hop_length, self.win_length, self.window, return_complex = True)
-        true_spec = torch.stft(true.squeeze(1), self.n_fft, self.hop_length, self.win_length, self.window, return_complex = True)
-        # 计算幅度
-        pred_mag = torch.abs(pred_spec)
-        true_mag = torch.abs(true_spec)
-        # 计算角度
-#       pred_pha = torch.angle(pred_spec)
-#       true_pha = torch.angle(true_spec)
-        # 计算对数语谱图（人耳感知）
-        pred_db = self.db(pred_mag)
-        true_db = self.db(true_mag)
-        # 计算对数语谱图损失
+        # 对数语谱图（人耳感知）
+        pred_db = self.db(pred)
+        true_db = self.db(true)
+        # 对数语谱图损失
         db_loss = F.l1_loss(pred_db, true_db)
 #       db_loss = F.mse_loss(pred_db, true_db)
-        # 计算损失：原始损失 + 对数语谱图损失
+        # 总损失：原始损失 + 对数语谱图损失
         loss = 0.6 * raw_loss + 0.4 * db_loss
         return loss
 
@@ -71,12 +65,12 @@ class FFN(nn.Module):
         self,
         embed_dim: int,
         scale    : int = 2,
-    ):
+    ) -> None:
         super().__init__()
         self.fc = nn.Sequential(
-            nn.Linear(embed_dim, embed_dim * scale),
+            nn.Linear(embed_dim, embed_dim * scale, bias = False),
             nn.SiLU(),
-            nn.Linear(embed_dim * scale, embed_dim),
+            nn.Linear(embed_dim * scale, embed_dim, bias = False),
         )
         self.norm = nn.RMSNorm(embed_dim)
 
@@ -87,120 +81,98 @@ class FFN(nn.Module):
         self,
         input: torch.Tensor,
     ) -> torch.Tensor:
-        return self.norm(self.fc(input) + input)
+        # Pre-Norm
+        return self.fc(self.norm(input)) + input
 
 class MHA(nn.Module):
     def __init__(
         self,
-        q_dim    : int,
-        k_dim    : int,
-        v_dim    : int,
-        o_dim    : int,
-        h_dim    : int,
+        q_dim : int,
+        kv_dim: int,
         num_heads: int = 8,
-    ):
+    ) -> None:
         super().__init__()
-        self.q    = nn.Linear(q_dim, h_dim, bias = False)
-        self.k    = nn.Linear(k_dim, h_dim, bias = False)
-        self.v    = nn.Linear(v_dim, h_dim, bias = False)
-        self.attn = nn.MultiheadAttention(h_dim, num_heads, bias = False, batch_first = True)
-        self.proj = nn.Linear(h_dim, o_dim, bias = False)
-        self.norm = nn.RMSNorm(o_dim)
-        self.ffn  = FFN(o_dim)
+        self.norm_q  = nn.RMSNorm(q_dim)
+        self.norm_kv = nn.RMSNorm(kv_dim)
+        self.attn = nn.MultiheadAttention(q_dim, num_heads, kdim = kv_dim, vdim = kv_dim, bias = False, batch_first = True)
+        self.proj = nn.Linear(q_dim, q_dim, bias = False)
+        self.ffn  = FFN(q_dim)
 
     def reset_parameters(self) -> None:
         initialize_weights(self)
 
     def forward(
         self,
-        query: torch.Tensor,
-        key  : torch.Tensor,
-        value: torch.Tensor,
+        q : torch.Tensor,
+        kv: torch.Tensor,
     ) -> torch.Tensor:
-        q = self.q(query)
-        k = self.k(key  )
-        v = self.v(value)
+        # Pre-Norm
+        residual = q
+        q = self.norm_q(q)
+        k = v = self.norm_kv(kv)
         o, _ = self.attn(q, k, v)
-        o = self.norm(self.proj(o) + query)
+        o = self.proj(o) + residual
         return self.ffn(o)
-    
-class BasicBlock2dDownsample(nn.Module):
+
+class BasicBlock2d(nn.Module):
+    """
+    输入input必须能被kernel_size整除
+    """
     def __init__(
         self,
         in_channels : int,
         out_channels: int,
         kernel_size : int | tuple[int, int] = None,
+        upsample    : bool = False,
         num_groups  : int = 32,
-    ):
+    ) -> None:
         super().__init__()
-        self.need_downsample = kernel_size is not None
-        if self.need_downsample:
-            self.conv1 = nn.Conv2d(in_channels,  out_channels, kernel_size = kernel_size, stride = kernel_size, padding = 0, bias = False)
-            self.conv2 = nn.Conv2d(in_channels,  out_channels, kernel_size = kernel_size, stride = kernel_size, padding = 0, bias = False)
-            self.conv3 = nn.Conv2d(out_channels, out_channels, kernel_size = 3, stride = 1, padding = 1, bias = False)
-            self.norm1 = nn.GroupNorm(num_groups, out_channels)
-            self.norm2 = nn.GroupNorm(num_groups, out_channels)
-            self.norm3 = nn.GroupNorm(num_groups, out_channels)
+        num_groups = min(num_groups, out_channels)
+        if kernel_size is None:
+            self.conv = nn.Sequential(
+                nn.Conv2d(in_channels, out_channels, kernel_size = 3, stride = 1, padding = 1, bias = False),
+                nn.GroupNorm(num_groups, out_channels),
+                nn.LeakyReLU(inplace = True),
+                nn.Conv2d(out_channels, out_channels, kernel_size = 3, stride = 1, padding = 1, bias = False),
+                nn.GroupNorm(num_groups, out_channels),
+            )
+            self.shortcut= nn.Identity() if in_channels == out_channels else nn.Sequential(
+                nn.Conv2d(in_channels, out_channels, kernel_size = 1, stride = 1, padding = 0, bias = False),
+#               nn.GroupNorm(num_groups, out_channels),
+            )
         else:
-            self.conv1 = nn.Conv2d(out_channels, out_channels, kernel_size = 3, stride = 1, padding = 1, bias = False)
-            self.conv2 = nn.Conv2d(out_channels, out_channels, kernel_size = 3, stride = 1, padding = 1, bias = False)
-            self.norm1 = nn.GroupNorm(num_groups, out_channels)
-            self.norm2 = nn.GroupNorm(num_groups, out_channels)
+            if upsample:
+                self.conv = nn.Sequential(
+                    nn.ConvTranspose2d(in_channels, out_channels, kernel_size = kernel_size, stride = kernel_size, padding = 0, output_padding = 0, bias = False),
+                    nn.GroupNorm(num_groups, out_channels),
+                    nn.LeakyReLU(inplace = True),
+                    nn.ConvTranspose2d(out_channels, out_channels, kernel_size = 3, stride = 1, padding = 1, output_padding = 0, bias = False),
+                    nn.GroupNorm(num_groups, out_channels),
+                )
+                self.shortcut = nn.Sequential(
+                    nn.ConvTranspose2d(in_channels, out_channels, kernel_size = kernel_size, stride = kernel_size, padding = 0, output_padding = 0, bias = False),
+                    nn.GroupNorm(num_groups, out_channels),
+                )
+            else:
+                self.conv = nn.Sequential(
+                    nn.Conv2d(in_channels, out_channels, kernel_size = kernel_size, stride = kernel_size, padding = 0, bias = False),
+                    nn.GroupNorm(num_groups, out_channels),
+                    nn.LeakyReLU(inplace = True),
+                    nn.Conv2d(out_channels, out_channels, kernel_size = 3, stride = 1, padding = 1, bias = False),
+                    nn.GroupNorm(num_groups, out_channels),
+                )
+                self.shortcut = nn.Sequential(
+                    nn.Conv2d(in_channels, out_channels, kernel_size = kernel_size, stride = kernel_size, padding = 0, bias = False),
+                    nn.GroupNorm(num_groups, out_channels),
+                )
 
     def reset_parameters(self) -> None:
         initialize_weights(self)
 
     def forward(self, input: torch.Tensor) -> torch.Tensor:
-        if self.need_downsample:
-            x = self.norm1(self.conv1(input))
-            y = self.norm2(self.conv2(input))
-            y = F.leaky_relu(y)
-            y = self.norm3(self.conv3(y))
-            return F.leaky_relu(x + y)
-        else:
-            x = self.norm1(self.conv1(input))
-            x = F.leaky_relu(x)
-            x = self.norm2(self.conv2(x))
-            return F.leaky_relu(x + input)
-
-class BasicBlock2dUpsample(nn.Module):
-    def __init__(
-        self,
-        in_channels : int,
-        out_channels: int,
-        kernel_size : int | tuple[int, int] = None,
-        num_groups  : int = 32,
-    ):
-        super().__init__()
-        self.need_upsample = kernel_size is not None
-        if self.need_upsample:
-            self.deconv1 = nn.ConvTranspose2d(in_channels,  out_channels, kernel_size = kernel_size, stride = kernel_size, padding = 0, output_padding = 0, bias = False)
-            self.deconv2 = nn.ConvTranspose2d(in_channels,  out_channels, kernel_size = kernel_size, stride = kernel_size, padding = 0, output_padding = 0, bias = False)
-            self.deconv3 = nn.ConvTranspose2d(out_channels, out_channels, kernel_size = 3, stride = 1, padding = 1, output_padding = 0, bias = False)
-            self.norm1 = nn.GroupNorm(num_groups, out_channels)
-            self.norm2 = nn.GroupNorm(num_groups, out_channels)
-            self.norm3 = nn.GroupNorm(num_groups, out_channels)
-        else:
-            self.deconv1 = nn.ConvTranspose2d(out_channels, out_channels, kernel_size = 3, stride = 1, padding = 1, output_padding = 0, bias = False)
-            self.deconv2 = nn.ConvTranspose2d(out_channels, out_channels, kernel_size = 3, stride = 1, padding = 1, output_padding = 0, bias = False)
-            self.norm1 = nn.GroupNorm(num_groups, out_channels)
-            self.norm2 = nn.GroupNorm(num_groups, out_channels)
-
-    def reset_parameters(self) -> None:
-        initialize_weights(self)
-
-    def forward(self, input: torch.Tensor) -> torch.Tensor:
-        if self.need_upsample:
-            x = self.norm1(self.deconv1(input))
-            y = self.norm2(self.deconv2(input))
-            y = F.leaky_relu(y)
-            y = self.norm3(self.deconv3(y))
-            return F.leaky_relu(x + y)
-        else:
-            x = self.norm1(self.deconv1(input))
-            x = F.leaky_relu(x)
-            x = self.norm2(self.deconv2(x))
-            return F.leaky_relu(x + input)
+        x = self.conv(input)
+        y = self.shortcut(input)
+        return F.leaky_relu(x + y, inplace = True)
 
 class ACE(nn.Module):
     def __init__(
@@ -208,22 +180,25 @@ class ACE(nn.Module):
         n_fft     : int = 512,
         hop_length: int = 128,
         win_length: int = 512,
-    ):
+    ) -> None:
         super().__init__()
         self.n_fft      = n_fft
         self.hop_length = hop_length
         self.win_length = win_length
         self.register_buffer("window", torch.hann_window(win_length))
-        self.downsample1 = nn.Conv2d(1, 64, kernel_size = 2, stride = 1, padding = 0, bias = False)
-        self.norm1 = nn.GroupNorm(32, 64)
-        self.layer1 = BasicBlock2dDownsample( 64,  64)
-        self.layer2 = BasicBlock2dDownsample( 64, 128, [ 1, 2 ])
-        self.layer3 = BasicBlock2dDownsample(128, 128)
-        self.layer4 = BasicBlock2dDownsample(128, 256, [ 1, 2 ])
-        self.layer5 = BasicBlock2dDownsample(256, 256)
-        self.layer6 = BasicBlock2dDownsample(256, 256, [ 1, 2 ])
-        self.layer7 = BasicBlock2dDownsample(256, 256)
-        self.layer8 = BasicBlock2dDownsample(256, 256, [ 3, 4 ])
+        self.layer0 = nn.Sequential(
+            nn.Conv2d(1, 64, kernel_size = 2, stride = 1, padding = 0, bias = False),
+            nn.GroupNorm(32, 64),
+            nn.LeakyReLU(inplace = True),
+        )
+        self.layer1 = BasicBlock2d( 64,  64)
+        self.layer2 = BasicBlock2d( 64, 128, [ 1, 2 ])
+        self.layer3 = BasicBlock2d(128, 128)
+        self.layer4 = BasicBlock2d(128, 256, [ 1, 2 ])
+        self.layer5 = BasicBlock2d(256, 256)
+        self.layer6 = BasicBlock2d(256, 256, [ 1, 2 ])
+        self.layer7 = BasicBlock2d(256, 256)
+        self.layer8 = BasicBlock2d(256, 256, [ 3, 4 ])
         self.fc_mu      = nn.Linear(256, 256)
         self.fc_log_var = nn.Linear(256, 256)
 
@@ -239,8 +214,11 @@ class ACE(nn.Module):
         eps = torch.randn_like(std)
         return mu + eps * std
 
-    def forward(self, input: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-        stft = torch.stft(
+    def forward(
+        self,
+        input: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        spec = torch.stft(
             input.squeeze(1),
             n_fft          = self.n_fft,
             hop_length     = self.hop_length,
@@ -248,10 +226,12 @@ class ACE(nn.Module):
             window         = self.window,
             return_complex = True,
         )
-        spec = torch.abs(stft)
-        spec_db = 20 * torch.log10(spec + 1e-8)
-        spec_db = spec_db.transpose(1, 2).unsqueeze(1)
-        x = F.leaky_relu(self.norm1(self.downsample1(spec_db)))
+        mag = torch.abs(spec)
+        db  = 20.0 * torch.log10(mag + 1e-8)
+        db  = torch.clamp(db, min = -60)
+        db  = db / 60.0
+        db  = db.transpose(1, 2).unsqueeze(1)
+        x = self.layer0(db)
         x = self.layer1(x)
         x = self.layer2(x)
         x = self.layer3(x)
@@ -273,27 +253,35 @@ class ACD(nn.Module):
         hop_length: int = 128,
         win_length: int = 512,
         length    : int = 800,
-    ):
+    ) -> None:
         super().__init__()
         self.n_fft      = n_fft
         self.hop_length = hop_length
         self.win_length = win_length
         self.length     = length
         self.register_buffer("window", torch.hann_window(win_length))
-        self.layer8 = BasicBlock2dUpsample(256, 256, [ 3, 4 ])
-        self.layer7 = BasicBlock2dUpsample(256, 256)
-        self.layer6 = BasicBlock2dUpsample(256, 256, [ 1, 2 ])
-        self.layer5 = BasicBlock2dUpsample(256, 256)
-        self.layer4 = BasicBlock2dUpsample(256, 128, [ 1, 2])
-        self.layer3 = BasicBlock2dUpsample(128, 128)
-        self.layer2 = BasicBlock2dUpsample(128,  64, [ 1, 2 ])
-        self.layer1 = BasicBlock2dUpsample( 64,  64)
-        self.upsample1 = nn.ConvTranspose2d(64, 1, kernel_size = 2, stride = 1, padding = 0, output_padding = 0, bias = False)
+        self.layer8 = BasicBlock2d(256, 256, [ 3, 4 ], upsample = True)
+        self.layer7 = BasicBlock2d(256, 256,           upsample = True)
+        self.layer6 = BasicBlock2d(256, 256, [ 1, 2 ], upsample = True)
+        self.layer5 = BasicBlock2d(256, 256,           upsample = True)
+        self.layer4 = BasicBlock2d(256, 128, [ 1, 2 ], upsample = True)
+        self.layer3 = BasicBlock2d(128, 128,           upsample = True)
+        self.layer2 = BasicBlock2d(128,  64, [ 1, 2 ], upsample = True)
+        self.layer1 = BasicBlock2d( 64,  64,           upsample = True)
+        self.layer0 = nn.Sequential(
+            nn.ConvTranspose2d(64, 1, kernel_size = 2, stride = 1, padding = 0, output_padding = 0, bias = False),
+            nn.GroupNorm(1, 1),
+            nn.Tanh(),
+#           nn.LeakyReLU(inplace = True),
+        )
 
     def reset_parameters(self) -> None:
         initialize_weights(self)
 
-    def forward(self, input: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self,
+        input: torch.Tensor
+    ) -> torch.Tensor:
         x = input.transpose(1, 2)
         x = x.view(x.size(0), 256, 2, 8)
         x = self.layer8(x)
@@ -304,33 +292,38 @@ class ACD(nn.Module):
         x = self.layer3(x)
         x = self.layer2(x)
         x = self.layer1(x)
-        x = F.leaky_relu(self.upsample1(x))
-        mag = (10 ** (x / 20)) - 1e-8
+        x = self.layer0(x)
+        db  = x * 60.0
+        mag = torch.pow(10, db / 20.0) - 1e-8
+        mag = torch.clamp(mag, min = 0.0)
         mag = mag.squeeze(1).transpose(1, 2)
+        pha = torch.zeros_like(mag)
         wav = torch.istft(
-            torch.polar(mag, torch.zeros_like(mag)),
+            torch.polar(mag, pha),
             n_fft      = self.n_fft,
             hop_length = self.hop_length,
             win_length = self.win_length,
             window     = self.window,
             length     = self.length,
         )
-        wav = wav.unsqueeze(1)
-        return torch.tanh(wav)
+        return torch.tanh(wav).unsqueeze(1)
 
 class VCE(nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
-        self.downsample1 = nn.Conv2d(3, 64, kernel_size = (2, 2), stride = (2, 2), padding = 0, bias = False)
-        self.norm1 = nn.GroupNorm(32, 64)
-        self.layer1 = BasicBlock2dDownsample( 64,  64)
-        self.layer2 = BasicBlock2dDownsample( 64, 128, (2, 2))
-        self.layer3 = BasicBlock2dDownsample(128, 128)
-        self.layer4 = BasicBlock2dDownsample(128, 256, (2, 2))
-        self.layer5 = BasicBlock2dDownsample(256, 256)
-        self.layer6 = BasicBlock2dDownsample(256, 512, (3, 4))
-        self.layer7 = BasicBlock2dDownsample(512, 512)
-        self.layer8 = BasicBlock2dDownsample(512, 512, (5, 5))
+        self.layer0 = nn.Sequential(
+            nn.Conv2d(3, 64, kernel_size = (2, 2), stride = (2, 2), padding = 0, bias = False),
+            nn.GroupNorm(32, 64),
+            nn.LeakyReLU(inplace = True),
+        )
+        self.layer1 = BasicBlock2d( 64,  64)
+        self.layer2 = BasicBlock2d( 64, 128, (2, 2))
+        self.layer3 = BasicBlock2d(128, 128)
+        self.layer4 = BasicBlock2d(128, 256, (2, 2))
+        self.layer5 = BasicBlock2d(256, 256)
+        self.layer6 = BasicBlock2d(256, 512, (3, 4))
+        self.layer7 = BasicBlock2d(512, 512)
+        self.layer8 = BasicBlock2d(512, 512, (5, 5))
         self.fc_mu      = nn.Linear(512, 512)
         self.fc_log_var = nn.Linear(512, 512)
 
@@ -346,8 +339,11 @@ class VCE(nn.Module):
         eps = torch.randn_like(std)
         return mu + eps * std
 
-    def forward(self, input: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-        x = F.leaky_relu(self.norm1(self.downsample1(input)))
+    def forward(
+        self,
+        input: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        x = self.layer0(input)
         x = self.layer1(x)
         x = self.layer2(x)
         x = self.layer3(x)
@@ -363,22 +359,29 @@ class VCE(nn.Module):
         return mu, log_var
     
 class VCD(nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
-        self.layer8 = BasicBlock2dUpsample(512, 512, (5, 5))
-        self.layer7 = BasicBlock2dUpsample(512, 512)
-        self.layer6 = BasicBlock2dUpsample(512, 256, (3, 4))
-        self.layer5 = BasicBlock2dUpsample(256, 256)
-        self.layer4 = BasicBlock2dUpsample(256, 128, (2, 2))
-        self.layer3 = BasicBlock2dUpsample(128, 128)
-        self.layer2 = BasicBlock2dUpsample(128,  64, (2, 2))
-        self.layer1 = BasicBlock2dUpsample( 64,  64)
-        self.upsample1 = nn.ConvTranspose2d(64, 3, kernel_size = (2, 2), stride = (2, 2), padding = 0, output_padding = 0, bias = False)
+        self.layer8 = BasicBlock2d(512, 512, (5, 5), upsample = True)
+        self.layer7 = BasicBlock2d(512, 512,         upsample = True)
+        self.layer6 = BasicBlock2d(512, 256, (3, 4), upsample = True)
+        self.layer5 = BasicBlock2d(256, 256,         upsample = True)
+        self.layer4 = BasicBlock2d(256, 128, (2, 2), upsample = True)
+        self.layer3 = BasicBlock2d(128, 128,         upsample = True)
+        self.layer2 = BasicBlock2d(128,  64, (2, 2), upsample = True)
+        self.layer1 = BasicBlock2d( 64,  64,         upsample = True)
+        self.layer0 = nn.Sequential(
+            nn.ConvTranspose2d(64, 3, kernel_size = (2, 2), stride = (2, 2), padding = 0, output_padding = 0, bias = False),
+            nn.GroupNorm(1, 3),
+            nn.LeakyReLU(inplace = True),
+        )
 
     def reset_parameters(self) -> None:
         initialize_weights(self)
 
-    def forward(self, input: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self,
+        input: torch.Tensor
+    ) -> torch.Tensor:
         x = input.transpose(1, 2)
         x = x.view(x.size(0), 512, 4, 4)
         x = self.layer8(x)
@@ -389,18 +392,19 @@ class VCD(nn.Module):
         x = self.layer3(x)
         x = self.layer2(x)
         x = self.layer1(x)
-        x = torch.tanh(self.upsample1(x))
-        return x
+        x = self.layer0(x)
+        return torch.tanh(x)
 
 class MemoryLayer(nn.Module):
     def __init__(
         self,
         memory_dim: int = 1024,
+        excite_dim: int = 1024,
         num_heads : int = 8,
-    ):
+    ) -> None:
         super().__init__()
-        self.excite_mha = MHA(memory_dim, memory_dim, memory_dim, memory_dim, memory_dim * 2, num_heads)
-#       self.memory_mha = MHA(memory_dim, memory_dim, memory_dim, memory_dim, memory_dim * 2, num_heads)
+        self.excite_mha = MHA(memory_dim, excite_dim, num_heads)
+        self.memory_mha = MHA(memory_dim, memory_dim, num_heads)
 
     def reset_parameters(self) -> None:
         initialize_weights(self)
@@ -410,8 +414,8 @@ class MemoryLayer(nn.Module):
         memory: torch.Tensor,
         excite: torch.Tensor,
     ) -> torch.Tensor:
-        memory = self.excite_mha(memory, excite, excite)
-#       memory = self.memory_mha(memory, memory, memory)
+        memory = self.excite_mha(memory, excite)
+        memory = self.memory_mha(memory, memory)
         return memory
 
 class Memory(nn.Module):
@@ -420,23 +424,24 @@ class Memory(nn.Module):
         audio_dim : int = 256,
         video_dim : int = 512,
         memory_dim: int = 1024,
+        excite_dim: int = 1024,
         num_heads : int = 8,
         num_layer : int = 3,
-    ):
+    ) -> None:
         super().__init__()
         # 验证：Memory or MemoryLayer
         # 分区：音频、视频、其他感知
         self.audio_embedding  = nn.Parameter(torch.randn(1, 1, 1))
         self.video_embedding  = nn.Parameter(torch.randn(1, 1, 1))
         self.memory_embedding = nn.Parameter(torch.randn(1, 1, 1))
-#       self.audio_embedding  = nn.Parameter(torch.randn(1, 1, memory_dim))
-#       self.video_embedding  = nn.Parameter(torch.randn(1, 1, memory_dim))
+#       self.audio_embedding  = nn.Parameter(torch.randn(1, 1, excite_dim))
+#       self.video_embedding  = nn.Parameter(torch.randn(1, 1, excite_dim))
 #       self.memory_embedding = nn.Parameter(torch.randn(1, 1, memory_dim))
         # 投影：音频、视频、其他感知
-        self.audio_proj = nn.Linear(audio_dim, memory_dim)
-        self.video_proj = nn.Linear(video_dim, memory_dim)
+        self.audio_proj = nn.Linear(audio_dim, excite_dim)
+        self.video_proj = nn.Linear(video_dim, excite_dim)
         # 记忆力层
-        self.layers = nn.ModuleList([MemoryLayer(memory_dim, num_heads) for _ in range(num_layer)])
+        self.layers = nn.ModuleList([MemoryLayer(memory_dim, excite_dim, num_heads) for _ in range(num_layer)])
 
     def reset_parameters(self) -> None:
         initialize_weights(self)
@@ -461,10 +466,10 @@ class RecallLayer(nn.Module):
         recall_dim: int,
         memory_dim: int,
         num_heads : int,
-    ):
+    ) -> None:
         super().__init__()
-        self.memory_mha = MHA(recall_dim, memory_dim, memory_dim, recall_dim, memory_dim * 2, num_heads)
-#       self.recall_mha = MHA(recall_dim, recall_dim, recall_dim, recall_dim, recall_dim * 2, num_heads)
+        self.memory_mha = MHA(recall_dim, memory_dim, num_heads)
+        self.recall_mha = MHA(recall_dim, recall_dim, num_heads)
 
     def reset_parameters(self) -> None:
         initialize_weights(self)
@@ -474,8 +479,8 @@ class RecallLayer(nn.Module):
         recall: torch.Tensor,
         memory: torch.Tensor,
     ) -> torch.Tensor:
-        recall = self.memory_mha(recall, memory, memory)
-#       recall = self.recall_mha(recall, recall, recall)
+        recall = self.memory_mha(recall, memory)
+        recall = self.recall_mha(recall, recall)
         return recall
 
 class Recall(nn.Module):
@@ -486,7 +491,7 @@ class Recall(nn.Module):
         memory_dim: int = 1024,
         num_heads : int = 8,
         num_layer : int = 3,
-    ):
+    ) -> None:
         super().__init__()
         self.audio_layers = nn.ModuleList([RecallLayer(audio_dim, memory_dim, num_heads) for _ in range(num_layer)])
         self.video_layers = nn.ModuleList([RecallLayer(video_dim, memory_dim, num_heads) for _ in range(num_layer)])
@@ -507,7 +512,7 @@ class Recall(nn.Module):
         return (audio, video)
 
 class Chobits(nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.ace = ACE()
         self.acd = ACD()
@@ -541,10 +546,14 @@ def initialize_weights(module: nn.Module) -> None:
             layer.reset_parameters()
         elif isinstance(layer, nn.Conv2d):
             layer.reset_parameters()
+        elif isinstance(layer, nn.Identity):
+            pass
         elif isinstance(layer, nn.ConvTranspose1d):
             layer.reset_parameters()
         elif isinstance(layer, nn.ConvTranspose2d):
             layer.reset_parameters()
+        elif isinstance(layer, nn.MultiheadAttention):
+            layer._reset_parameters()
         elif isinstance(layer, nn.RMSNorm):
             layer.reset_parameters()
         elif isinstance(layer, nn.GroupNorm):
@@ -555,13 +564,13 @@ def initialize_weights(module: nn.Module) -> None:
             layer.reset_parameters()
         elif isinstance(layer, nn.BatchNorm2d):
             layer.reset_parameters()
-        elif isinstance(layer, nn.MultiheadAttention):
-            layer._reset_parameters()
         elif isinstance(layer, nn.ModuleList):
             initialize_weights(layer)
         elif isinstance(layer, nn.Sequential):
             initialize_weights(layer)
         elif isinstance(layer, nn.SiLU):
+            pass
+        elif isinstance(layer, nn.Tanh):
             pass
         elif isinstance(layer, nn.LeakyReLU):
             pass
@@ -573,9 +582,7 @@ def initialize_weights(module: nn.Module) -> None:
             initialize_weights(layer)
         elif isinstance(layer, MHA):
             initialize_weights(layer)
-        elif isinstance(layer, BasicBlock2dDownsample):
-            initialize_weights(layer)
-        elif isinstance(layer, BasicBlock2dUpsample):
+        elif isinstance(layer, BasicBlock2d):
             initialize_weights(layer)
         elif isinstance(layer, ACE):
             initialize_weights(layer)

@@ -6,6 +6,12 @@ from tqdm import tqdm
 from model import *
 from dataset import VideoReader, loadDataset
 
+def test_kl_loss():
+    kl_loss = KLLoss()
+    mu      = torch.randn(10, 1, 800)
+    log_var = torch.randn(10, 1, 800)
+    print(kl_loss(mu, log_var))
+
 def test_stft_loss():
     stft_loss = STFTLoss()
     pred = torch.randn(10, 1, 800)
@@ -21,32 +27,28 @@ def test_ffn():
     torch.jit.save(torch.jit.trace(model, input), "chobits.pt") 
 
 def test_mha():
-    model = MHA(1024, 1024, 1024, 1024, 1024)
+    model = MHA(256, 512)
     model.eval()
     model.reset_parameters()
     input = (
-        torch.randn(10, 10, 1024),
-        torch.randn(10, 10, 1024),
-        torch.randn(10, 10, 1024),
+        torch.randn(10, 10, 256),
+        torch.randn(10, 10, 512),
     )
     print(model(*input).shape)
     torch.jit.save(torch.jit.trace(model, input), "chobits.pt")
 
-def test_basic_block2d_downsample():
-    # model = BasicBlock2dDownsample(64, 64)
-    model = BasicBlock2dDownsample(64, 128, (2, 2))
+def test_basic_block2d():
+    model = BasicBlock2d(64,  64)
+    # model = BasicBlock2d(64, 128)
+    # model = BasicBlock2d(64,  64, (2, 2))
+    # model = BasicBlock2d(64, 128, (2, 2))
+    # model = BasicBlock2d(64,  64, upsample = True)
+    # model = BasicBlock2d(64, 128, upsample = True)
+    # model = BasicBlock2d(64,  64, (2, 2), upsample = True)
+    # model = BasicBlock2d(64, 128, (2, 2), upsample = True)
     model.eval()
     model.reset_parameters()
     input = torch.randn(10, 64, 128, 128)
-    print(model(input).shape)
-    torch.jit.save(torch.jit.trace(model, input), "chobits.pt")
-
-def test_basic_block2d_upsample():
-    # model = BasicBlock2dUpsample(128, 128)
-    model = BasicBlock2dUpsample(128, 64, (2, 2))
-    model.eval()
-    model.reset_parameters()
-    input = torch.randn(10, 128, 64, 64)
     print(model(input).shape)
     torch.jit.save(torch.jit.trace(model, input), "chobits.pt")
 
@@ -55,6 +57,8 @@ def test_ace():
     model.eval()
     model.reset_parameters()
     input = torch.randn(10, 1, 800)
+    # input = torch.range(0, 800, 1).float() / 800.0
+    # input = input.unsqueeze(0).unsqueeze(0)
     mu, log_var = model(input)
     print(mu.shape)
     print(log_var.shape)
@@ -182,18 +186,18 @@ def test_loader():
 
 if __name__ == "__main__":
     with torch.no_grad():
+        # test_kl_loss()
         # test_stft_loss()
         # test_ffn()
         # test_mha()
-        # test_basic_block2d_downsample()
-        # test_basic_block2d_upsample()
+        # test_basic_block2d()
         # test_ace()
         # test_acd()
         # test_vce()
         # test_vcd()
         # test_memory()
         # test_recall()
-        # test_chobits()
-        test_trainer()
+        test_chobits()
+        # test_trainer()
         # test_reader()
         # test_loader()
