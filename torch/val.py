@@ -26,8 +26,12 @@ with torch.no_grad():
         audio = audio.to(device)
         video = video.to(device).float().sub(128.0).div(128.0)
         # 编码解码
-        audio = model.acd(model.ace(audio))
-        video = model.vcd(model.vce(video))
+        audio_mu, audio_log_var = model.ace(audio)
+        audio = model.acd(model.ace.reparameterize(audio_mu, audio_log_var))
+        video_mu, video_log_var = model.vce(video)
+        video = model.vcd(model.vce.reparameterize(video_mu, video_log_var))
+        # audio = model.acd(model.ace(audio)[0])
+        # video = model.vcd(model.vce(video)[0])
         audio_samples.append(audio)
         video_frames .append(video)
         # 模型推理

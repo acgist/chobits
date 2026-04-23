@@ -6,6 +6,12 @@ from tqdm import tqdm
 from model import *
 from dataset import VideoReader, loadDataset
 
+def test_stft_loss():
+    stft_loss = STFTLoss()
+    pred = torch.randn(10, 1, 800)
+    true = torch.randn(10, 1, 800)
+    print(stft_loss(pred, true))
+
 def test_ffn():
     model = FFN(1024)
     model.eval()
@@ -26,40 +32,6 @@ def test_mha():
     print(model(*input).shape)
     torch.jit.save(torch.jit.trace(model, input), "chobits.pt")
 
-def test_basic_block1d_downsample():
-    # model = BasicBlock1dDownsample(64, 64)
-    model = BasicBlock1dDownsample(64, 128, 2)
-    model.eval()
-    model.reset_parameters()
-    input = torch.randn(10, 64, 1024)
-    print(model(input).shape)
-    torch.jit.save(torch.jit.trace(model, input), "chobits.pt")
-
-def test_basic_block1d_upsample():
-    # model = BasicBlock1dUpsample(128, 128)
-    model = BasicBlock1dUpsample(128, 64, 2)
-    model.eval()
-    model.reset_parameters()
-    input = torch.randn(10, 128, 512)
-    print(model(input).shape)
-    torch.jit.save(torch.jit.trace(model, input), "chobits.pt")
-
-def test_ace():
-    model = ACE()
-    model.eval()
-    model.reset_parameters()
-    input = torch.randn(10, 1, 800)
-    print(model(input).shape)
-    torch.jit.save(torch.jit.trace(model, input), "chobits.pt")
-
-def test_acd():
-    model = ACD()
-    model.eval()
-    model.reset_parameters()
-    input = torch.randn(10, 1, 512)
-    print(model(input).shape)
-    torch.jit.save(torch.jit.trace(model, input), "chobits.pt")
-
 def test_basic_block2d_downsample():
     # model = BasicBlock2dDownsample(64, 64)
     model = BasicBlock2dDownsample(64, 128, (2, 2))
@@ -78,19 +50,39 @@ def test_basic_block2d_upsample():
     print(model(input).shape)
     torch.jit.save(torch.jit.trace(model, input), "chobits.pt")
 
+def test_ace():
+    model = ACE()
+    model.eval()
+    model.reset_parameters()
+    input = torch.randn(10, 1, 800)
+    mu, log_var = model(input)
+    print(mu.shape)
+    print(log_var.shape)
+    torch.jit.save(torch.jit.trace(model, input), "chobits.pt")
+
+def test_acd():
+    model = ACD()
+    model.eval()
+    model.reset_parameters()
+    input = torch.randn(10, 16, 256)
+    print(model(input).shape)
+    torch.jit.save(torch.jit.trace(model, input), "chobits.pt")
+
 def test_vce():
     model = VCE()
     model.eval()
     model.reset_parameters()
     input = torch.randn(10, 3, 480, 640)
-    print(model(input).shape)
+    mu, log_var = model(input)
+    print(mu.shape)
+    print(log_var.shape)
     torch.jit.save(torch.jit.trace(model, input), "chobits.pt")
 
 def test_vcd():
     model = VCD()
     model.eval()
     model.reset_parameters()
-    input = torch.randn(10, 1, 1024)
+    input = torch.randn(10, 16, 512)
     print(model(input).shape)
     torch.jit.save(torch.jit.trace(model, input), "chobits.pt")
 
@@ -99,8 +91,8 @@ def test_memory():
     model.eval()
     model.reset_parameters()
     input = (
-        torch.randn(10,  1,  512),
-        torch.randn(10,  1, 1024),
+        torch.randn(10, 16,  256),
+        torch.randn(10, 16,  512),
         torch.randn(10, 10, 1024),
     )
     print(model(*input).shape)
@@ -111,8 +103,8 @@ def test_recall():
     model.eval()
     model.reset_parameters()
     input = (
-        torch.randn(10,  1,  512),
-        torch.randn(10,  1, 1024),
+        torch.randn(10, 16,  256),
+        torch.randn(10, 16,  512),
         torch.randn(10, 10, 1024),
     )
     audio, video = model(*input)
@@ -135,6 +127,19 @@ def test_chobits():
     print(memory.shape)
     # torch.save(model.state_dict(), "chobits.ckpt")
     torch.jit.save(torch.jit.trace(model, input), "chobits.pt")
+
+def test_trainer():
+    model = Chobits()
+    model.eval()
+    model.reset_parameters()
+    audio = torch.randn(10, 10, 1, 800)
+    video = torch.randn(10, 10, 3, 480, 640)
+    audio_encode, _ = model.ace(audio.reshape(-1, audio.size(2), audio.size(3)))
+    audio_encode = audio_encode.view(audio.size(0), audio.size(1), -1, audio_encode.size(-1))
+    video_encode, _ = model.vce(video.reshape(-1, video.size(2), video.size(3), video.size(4)))
+    video_encode = video_encode.view(video.size(0), video.size(1), -1, video_encode.size(-1))
+    print(audio_encode.shape)
+    print(video_encode.shape)
 
 def test_reader():
     video_reader = VideoReader("D://tmp/video.mp4", 20, 1, 1000)
@@ -177,18 +182,18 @@ def test_loader():
 
 if __name__ == "__main__":
     with torch.no_grad():
+        # test_stft_loss()
         # test_ffn()
         # test_mha()
-        # test_basic_block1d_downsample()
-        # test_basic_block1d_upsample()
-        # test_ace()
-        # test_acd()
         # test_basic_block2d_downsample()
         # test_basic_block2d_upsample()
+        # test_ace()
+        # test_acd()
         # test_vce()
         # test_vcd()
         # test_memory()
         # test_recall()
-        test_chobits()
+        # test_chobits()
+        test_trainer()
         # test_reader()
         # test_loader()

@@ -142,7 +142,7 @@ def loadDataset(
         shuffle            = True,
         drop_last          = True,
         batch_size         = batch_size, 
-        num_workers        = 4,
+        num_workers        = 8,
         prefetch_factor    = 16,
         persistent_workers = True,
     )
