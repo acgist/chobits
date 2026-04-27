@@ -75,13 +75,7 @@ class VideoLoss(nn.Module):
     ) -> torch.Tensor:
         # 原始损失
         raw_loss = F.l1_loss(pred, true)
-        # FFT损失
-        fft_pred = self.fft(pred)
-        fft_true = self.fft(true)
-        fft_loss = F.l1_loss(fft_pred, fft_true)
-        # 总损失：原始损失 + FFT损失
-        loss = 0.9 * raw_loss + 0.1 * fft_loss
-        return loss
+        return raw_loss
     
 class STFTLayer(nn.Module):
     def __init__(
