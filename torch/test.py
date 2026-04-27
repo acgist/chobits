@@ -7,16 +7,38 @@ from model import *
 from dataset import VideoReader, loadDataset
 
 def test_kl_loss():
-    kl_loss = KLLoss()
+    kl_loss = KLLoss(beta = 1.0)
     mu      = torch.randn(10, 1, 800)
     log_var = torch.randn(10, 1, 800)
     print(kl_loss(mu, log_var))
 
-def test_stft_loss():
-    stft_loss = STFTLoss()
+def test_audio_loss():
+    audio_loss = AudioLoss()
     pred = torch.randn(10, 1, 800)
     true = torch.randn(10, 1, 800)
-    print(stft_loss(pred, true))
+    print(audio_loss(pred, true))
+
+def test_video_loss():
+    video_loss = VideoLoss()
+    pred = torch.randn(10, 3, 480, 640)
+    true = torch.randn(10, 3, 480, 640)
+    print(video_loss(pred, true))
+
+def test_stft_layer():
+    model = STFTLayer()
+    model.eval()
+    model.reset_parameters()
+    input = torch.arange(-800, 800, 2).float().unsqueeze(0).unsqueeze(0) / 800.0
+    print(model(input).shape)
+    torch.jit.save(torch.jit.trace(model, input), "chobits.pt") 
+
+def test_istft_layer():
+    model = ISTFTLayer()
+    model.eval()
+    model.reset_parameters()
+    input = torch.randn(1, 1, 7, 257)
+    print(model(input).shape)
+    torch.jit.save(torch.jit.trace(model, input), "chobits.pt") 
 
 def test_ffn():
     model = FFN(1024)
@@ -57,8 +79,6 @@ def test_ace():
     model.eval()
     model.reset_parameters()
     input = torch.randn(10, 1, 800)
-    # input = torch.range(0, 800, 1).float() / 800.0
-    # input = input.unsqueeze(0).unsqueeze(0)
     mu, log_var = model(input)
     print(mu.shape)
     print(log_var.shape)
@@ -187,7 +207,10 @@ def test_loader():
 if __name__ == "__main__":
     with torch.no_grad():
         # test_kl_loss()
-        # test_stft_loss()
+        # test_audio_loss()
+        # test_video_loss()
+        # test_stft_layer()
+        # test_istft_layer()
         # test_ffn()
         # test_mha()
         # test_basic_block2d()

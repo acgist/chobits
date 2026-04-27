@@ -4,10 +4,10 @@ import traceback
 import threading
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
+import torch.functional as F
 
 from tqdm import tqdm
-from model import Chobits, KLLoss, STFTLoss
+from model import Chobits, KLLoss, AudioLoss, VideoLoss
 from dataset import loadDataset
 from torch.utils.tensorboard import SummaryWriter
 
@@ -33,19 +33,22 @@ class Triner:
         dtype  = torch.float32
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         model  = Chobits()
-        kl_loss = KLLoss()
-        stft_loss = STFTLoss()
+        kl_loss_f = KLLoss()
+        audio_loss_f = AudioLoss()
+        video_loss_f = VideoLoss()
         if os.path.exists("chobits.ckpt"):
             print("加载模型权重：chobits.ckpt")
             model.load_state_dict(torch.load("chobits.ckpt"))
+        else:
+            model.reset_parameters()
         model.to(device = device, dtype = dtype)
-        stft_loss.to(device = device, dtype = dtype)
+        kl_loss_f.to(device = device, dtype = dtype)
+        audio_loss_f.to(device = device, dtype = dtype)
+        video_loss_f.to(device = device, dtype = dtype)
         optimizer = torch.optim.AdamW(model.parameters(), lr = 0.0001)
         if os.path.exists("optimizer.ckpt"):
             print("加载优化器权重：optimizer.ckpt")
             optimizer.load_state_dict(torch.load("optimizer.ckpt"))
-        else:
-            model.reset_parameters()
         scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size = 10, gamma = 0.9999)
         if os.path.exists("scheduler.ckpt"):
             print("加载调度器权重：scheduler.ckpt")
@@ -88,7 +91,7 @@ class Triner:
                     audio_frame_encode = model.ace.reparameterize(audio_mu, audio_log_var)
                     audio_frame_decode = model.acd(audio_frame_encode)
                     # 损失函数
-                    audio_encode_decode_loss = stft_loss(audio_frame_decode, audio_frame) + kl_loss(audio_mu, audio_log_var)
+                    audio_encode_decode_loss = audio_loss_f(audio_frame_decode, audio_frame) + kl_loss_f(audio_mu, audio_log_var)
                     audio_encode_decode_loss = audio_encode_decode_loss / per_op_epoch
                     audio_encode_decode_loss.backward()
                     audio_encode_decode_loss_sum += audio_encode_decode_loss.item() * per_op_epoch
@@ -99,7 +102,7 @@ class Triner:
                     video_frame_encode = model.vce.reparameterize(video_mu, video_log_var)
                     video_frame_decode = model.vcd(video_frame_encode)
                     # 损失函数
-                    video_encode_decode_loss = F.mse_loss(video_frame_decode, video_frame) + kl_loss(video_mu, video_log_var)
+                    video_encode_decode_loss = video_loss_f(video_frame_decode, video_frame) + kl_loss_f(video_mu, video_log_var)
                     video_encode_decode_loss = video_encode_decode_loss / per_op_epoch
                     video_encode_decode_loss.backward()
                     video_encode_decode_loss_sum += video_encode_decode_loss.item() * per_op_epoch
@@ -130,8 +133,8 @@ class Triner:
                         memory_feature,
                     )
                     # 损失函数
-                    audio_loss = F.mse_loss(audio_pred_encode, audio_label_encode)
-                    video_loss = F.mse_loss(video_pred_encode, video_label_encode)
+                    audio_loss = F.l1_loss(audio_pred_encode, audio_label_encode)
+                    video_loss = F.l1_loss(video_pred_encode, video_label_encode)
                     audio_loss = audio_loss / per_op_epoch
                     video_loss = video_loss / per_op_epoch
                     loss = audio_loss * 0.4 + video_loss * 0.6

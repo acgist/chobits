@@ -16,9 +16,9 @@ class KLLoss(nn.Module):
         log_var: torch.Tensor,
     ) -> torch.Tensor:
         kl = -0.5 * torch.sum(1 + log_var - mu.pow(2) - log_var.exp(), dim = -1)
-        return kl.mean() * self.beta
+        return self.beta * kl.mean()
 
-class STFTLoss(nn.Module):
+class AudioLoss(nn.Module):
     def __init__(
         self,
         n_fft     : int = 512,
@@ -29,7 +29,7 @@ class STFTLoss(nn.Module):
         self.n_fft      = n_fft
         self.hop_length = hop_length
         self.win_length = win_length
-        self.register_buffer("window", torch.hann_window(win_length))
+        self.window = nn.Buffer(torch.hann_window(win_length))
 
     def db(
         self,
@@ -39,8 +39,8 @@ class STFTLoss(nn.Module):
         mag  = torch.abs(spec)       # 幅度
 #       pha  = torch.angle(spec)     # 角度
 #       stft = torch.polar(mag, pha) # 恢复
-        db = 20.0 * torch.log10(mag + 1e-8)
-        db = torch.clamp(db, min = -60)
+        db = 20.0 * torch.log10(torch.clamp(mag, min = 1e-8))
+        db = torch.clamp(db, min = -60, max = 60)
         return db
 
     def forward(
@@ -55,10 +55,106 @@ class STFTLoss(nn.Module):
         true_db = self.db(true)
         # 对数语谱图损失
         db_loss = F.l1_loss(pred_db, true_db)
-#       db_loss = F.mse_loss(pred_db, true_db)
         # 总损失：原始损失 + 对数语谱图损失
-        loss = 0.6 * raw_loss + 0.4 * db_loss
+        loss = 0.8 * raw_loss + 0.2 * db_loss
         return loss
+    
+class VideoLoss(nn.Module):
+    def fft(
+        self,
+        input: torch.Tensor,
+    ) -> torch.Tensor:
+        fft = torch.fft.fft2(input, dim = (-2, -1))
+        mag = torch.abs(fft)
+        return mag
+
+    def forward(
+        self,
+        pred: torch.Tensor,
+        true: torch.Tensor,
+    ) -> torch.Tensor:
+        # 原始损失
+        raw_loss = F.l1_loss(pred, true)
+        # FFT损失
+        fft_pred = self.fft(pred)
+        fft_true = self.fft(true)
+        fft_loss = F.l1_loss(fft_pred, fft_true)
+        # 总损失：原始损失 + FFT损失
+        loss = 0.9 * raw_loss + 0.1 * fft_loss
+        return loss
+    
+class STFTLayer(nn.Module):
+    def __init__(
+        self,
+        n_fft     : int = 512,
+        hop_length: int = 128,
+        win_length: int = 512,
+    ) -> None:
+        super().__init__()
+        self.n_fft      = n_fft
+        self.hop_length = hop_length
+        self.win_length = win_length
+        self.window = nn.Buffer(torch.hann_window(win_length))
+
+    def reset_parameters(self) -> None:
+        initialize_weights(self)
+
+    def forward(
+        self,
+        input: torch.Tensor
+    ) -> torch.Tensor:
+        raw  = input.squeeze(1)
+        spec = torch.stft(
+            raw,
+            n_fft          = self.n_fft,
+            hop_length     = self.hop_length,
+            win_length     = self.win_length,
+            window         = self.window,
+            return_complex = True,
+        )
+        mag = torch.abs(spec)
+        db  = 20.0 * torch.log10(torch.clamp(mag, min = 1e-8))
+        db  = torch.clamp(db, min = -60, max = 60)
+#       db  = db / 60.0 # 归一化效果差
+        return db.transpose(1, 2).unsqueeze(1)
+    
+class ISTFTLayer(nn.Module):
+    def __init__(
+        self,
+        length    : int = 800,
+        n_fft     : int = 512,
+        hop_length: int = 128,
+        win_length: int = 512,
+    ) -> None:
+        super().__init__()
+        self.length     = length
+        self.n_fft      = n_fft
+        self.hop_length = hop_length
+        self.win_length = win_length
+        self.window = nn.Buffer(torch.hann_window(win_length))
+
+    def reset_parameters(self) -> None:
+        initialize_weights(self)
+
+    def forward(
+        self,
+        input: torch.Tensor
+    ) -> torch.Tensor:
+        db  = input
+#       db  = input * 60.0
+        db  = torch.clamp(db, min = -60, max = 60)
+        mag = torch.pow(10, db / 20.0)
+        mag = mag.squeeze(1).transpose(1, 2)
+        pha = torch.zeros_like(mag)
+        raw = torch.istft(
+            torch.polar(mag, pha),
+            n_fft      = self.n_fft,
+            hop_length = self.hop_length,
+            win_length = self.win_length,
+            window     = self.window,
+#           length     = self.length,
+        )
+        return F.interpolate(raw.unsqueeze(1), size = self.length, mode = "linear")
 
 class FFN(nn.Module):
     def __init__(
@@ -97,6 +193,7 @@ class MHA(nn.Module):
         self.attn = nn.MultiheadAttention(q_dim, num_heads, kdim = kv_dim, vdim = kv_dim, bias = False, batch_first = True)
         self.proj = nn.Linear(q_dim, q_dim, bias = False)
         self.ffn  = FFN(q_dim)
+#       self.moe  = ??
 
     def reset_parameters(self) -> None:
         initialize_weights(self)
@@ -175,18 +272,10 @@ class BasicBlock2d(nn.Module):
         return F.leaky_relu(x + y, inplace = True)
 
 class ACE(nn.Module):
-    def __init__(
-        self,
-        n_fft     : int = 512,
-        hop_length: int = 128,
-        win_length: int = 512,
-    ) -> None:
+    def __init__(self) -> None:
         super().__init__()
-        self.n_fft      = n_fft
-        self.hop_length = hop_length
-        self.win_length = win_length
-        self.register_buffer("window", torch.hann_window(win_length))
         self.layer0 = nn.Sequential(
+            STFTLayer(),
             nn.Conv2d(1, 64, kernel_size = 2, stride = 1, padding = 0, bias = False),
             nn.GroupNorm(32, 64),
             nn.LeakyReLU(inplace = True),
@@ -218,20 +307,7 @@ class ACE(nn.Module):
         self,
         input: torch.Tensor
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        spec = torch.stft(
-            input.squeeze(1),
-            n_fft          = self.n_fft,
-            hop_length     = self.hop_length,
-            win_length     = self.win_length,
-            window         = self.window,
-            return_complex = True,
-        )
-        mag = torch.abs(spec)
-        db  = 20.0 * torch.log10(mag + 1e-8)
-        db  = torch.clamp(db, min = -60)
-        db  = db / 60.0
-        db  = db.transpose(1, 2).unsqueeze(1)
-        x = self.layer0(db)
+        x = self.layer0(input)
         x = self.layer1(x)
         x = self.layer2(x)
         x = self.layer3(x)
@@ -247,19 +323,8 @@ class ACE(nn.Module):
         return mu, log_var
     
 class ACD(nn.Module):
-    def __init__(
-        self,
-        n_fft     : int = 512,
-        hop_length: int = 128,
-        win_length: int = 512,
-        length    : int = 800,
-    ) -> None:
+    def __init__(self) -> None:
         super().__init__()
-        self.n_fft      = n_fft
-        self.hop_length = hop_length
-        self.win_length = win_length
-        self.length     = length
-        self.register_buffer("window", torch.hann_window(win_length))
         self.layer8 = BasicBlock2d(256, 256, [ 3, 4 ], upsample = True)
         self.layer7 = BasicBlock2d(256, 256,           upsample = True)
         self.layer6 = BasicBlock2d(256, 256, [ 1, 2 ], upsample = True)
@@ -270,9 +335,10 @@ class ACD(nn.Module):
         self.layer1 = BasicBlock2d( 64,  64,           upsample = True)
         self.layer0 = nn.Sequential(
             nn.ConvTranspose2d(64, 1, kernel_size = 2, stride = 1, padding = 0, output_padding = 0, bias = False),
-            nn.GroupNorm(1, 1),
-            nn.Tanh(),
+#           nn.GroupNorm(1, 1),
 #           nn.LeakyReLU(inplace = True),
+            ISTFTLayer(),
+            nn.Tanh(),
         )
 
     def reset_parameters(self) -> None:
@@ -293,20 +359,7 @@ class ACD(nn.Module):
         x = self.layer2(x)
         x = self.layer1(x)
         x = self.layer0(x)
-        db  = x * 60.0
-        mag = torch.pow(10, db / 20.0) - 1e-8
-        mag = torch.clamp(mag, min = 0.0)
-        mag = mag.squeeze(1).transpose(1, 2)
-        pha = torch.zeros_like(mag)
-        wav = torch.istft(
-            torch.polar(mag, pha),
-            n_fft      = self.n_fft,
-            hop_length = self.hop_length,
-            win_length = self.win_length,
-            window     = self.window,
-            length     = self.length,
-        )
-        return torch.tanh(wav).unsqueeze(1)
+        return x
 
 class VCE(nn.Module):
     def __init__(self) -> None:
@@ -371,8 +424,7 @@ class VCD(nn.Module):
         self.layer1 = BasicBlock2d( 64,  64,         upsample = True)
         self.layer0 = nn.Sequential(
             nn.ConvTranspose2d(64, 3, kernel_size = (2, 2), stride = (2, 2), padding = 0, output_padding = 0, bias = False),
-            nn.GroupNorm(1, 3),
-            nn.LeakyReLU(inplace = True),
+            nn.Tanh(),
         )
 
     def reset_parameters(self) -> None:
@@ -393,7 +445,7 @@ class VCD(nn.Module):
         x = self.layer2(x)
         x = self.layer1(x)
         x = self.layer0(x)
-        return torch.tanh(x)
+        return x
 
 class MemoryLayer(nn.Module):
     def __init__(
@@ -591,6 +643,10 @@ def initialize_weights(module: nn.Module) -> None:
         elif isinstance(layer, VCE):
             initialize_weights(layer)
         elif isinstance(layer, VCD):
+            initialize_weights(layer)
+        elif isinstance(layer, STFTLayer):
+            initialize_weights(layer)
+        elif isinstance(layer, ISTFTLayer):
             initialize_weights(layer)
         elif isinstance(layer, Memory):
             initialize_weights(layer)
